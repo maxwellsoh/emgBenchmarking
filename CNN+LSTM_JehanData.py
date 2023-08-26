@@ -19,7 +19,6 @@ import h5py
 from random import gauss
 import math
 import multiprocessing
-import time
 import gc
 from itertools import chain
 
