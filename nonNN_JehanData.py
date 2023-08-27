@@ -15,9 +15,9 @@ import matplotlib.pyplot as plt
 import h5py
 import multiprocessing
 
-leaveOut = 0
+leaveOut = 13
 # SVM or RF (random forest)
-classifier = "SVM"
+classifier = "RF"
 
 wLen = 250 #ms
 stepLen = 50 #ms
@@ -131,10 +131,11 @@ print(Y_test.size())
 
 if (classifier.upper() == "RF"):
     # 95.02% baseline accuracy
-    model = RandomForestClassifier(n_estimators=350)
+    #model = RandomForestClassifier(n_estimators=25)
+    model = RandomForestClassifier(n_estimators=25)
 elif (classifier.upper() == "SVM"):
     # fix this; has low baseline accuracy right now (47.59%)
-    model = SVC(C=0.5, kernel='poly', degree=7)
+    model = SVC(C=100)
     temp_train = [torch.argmax(pos).item() for pos in Y_train]
     temp_test = [torch.argmax(pos).item() for pos in Y_test]
     Y_train = torch.from_numpy(np.array(temp_train))

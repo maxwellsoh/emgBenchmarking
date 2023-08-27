@@ -24,10 +24,11 @@ from itertools import chain
 
 # %%
 # 0 for no LOSO; participants here are 1-13
-leaveOut = 1
+leaveOut = 13
 
 # root mean square instances per channel per image
 #numRMS = 500 # must be a factor of 1000
+#numRMS = 250
 numRMS = 250
 
 # image width - must be multiple of 64
@@ -347,48 +348,34 @@ for name, param in model.named_parameters():
 model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
 model.add_module('flatten', nn.Flatten())
 
+'''
 class Unsqueeze (nn.Module):
     def forward(self, x):
         return torch.unsqueeze(x, 1)
-
-class GetLast (nn.Module):
-    def forward(self, x):
-        #print("before: " + str(x[0].size()))
-        x = x[0]
-        #print(x.size())
-        #print("after: " + str(x.size()))
-        return x
-
 class Fix (nn.Module):
     def forward(self, x):
         return x.permute(1, 0, 2)[0]
+'''
+class DiscardStates (nn.Module):
+    def forward(self, x):
+        x = x[0]
+        return x
+
 
 class Attention(nn.Module):
-    def __init__(self, hidden_size, batch_first):
+    def __init__(self, hidden_size):
         super(Attention, self).__init__()
         self.hidden_size = hidden_size
         
-        # Define the multi-head attention mechanism
-        self.multihead_attn = nn.MultiheadAttention(embed_dim=hidden_size, batch_first=batch_first, num_heads=64)
+        self.multihead_attn = nn.MultiheadAttention(embed_dim=hidden_size, num_heads=16)
 
     def forward(self, lstm_output):
-        # lstm_output shape: (sequence_length, batch_size, hidden_size)
-
-        # Permute to (batch_size, sequence_length, hidden_size)
-        #q = lstm_output[0].permute(1, 0, 2)
-        #q = torch.unsqueeze(lstm_output.permute(1, 0), 1)
-        #print(q.size())
-        #print("lstm_output: " + str(lstm_output.size()))
         q = lstm_output
 
-        # Calculate attention
         attn_output = self.multihead_attn(query=q, key=q, value=q, need_weights=False)
         
-        # Permute back to (sequence_length, batch_size, hidden_size)
-        #print("attn_output: " + str(attn_output[0].size()))
-        attn_output = attn_output[0].permute(1, 0, 2)[0]
-        #print(attn_output.size())
-        #print(attn_output.size())
+        #attn_output = attn_output[0].permute(1, 0, 2)[0]
+        attn_output = attn_output[0]
 
         return attn_output
 
@@ -396,9 +383,9 @@ class Attention(nn.Module):
 #num_lstm_units = 128
 num_lstm_units = 64
 
-model.add_module('unsqueeze1', Unsqueeze())
-model.add_module('lstm1', nn.LSTM(input_size=num_features, hidden_size=num_lstm_units, batch_first=True, bidirectional=True))
-model.add_module('getLast1', GetLast())
+#model.add_module('unsqueeze1', Unsqueeze())
+model.add_module('lstm1', nn.LSTM(input_size=num_features, hidden_size=num_lstm_units, bidirectional=True))
+model.add_module('getLast1', DiscardStates())
 model.add_module('dropout1', nn.Dropout(dropout))
 
 #model.add_module('lstm2', nn.LSTM(input_size=num_lstm_units, hidden_size=num_lstm_units, batch_first=True, bidirectional=False))
@@ -409,8 +396,9 @@ model.add_module('dropout1', nn.Dropout(dropout))
 #model.add_module('getLast3', GetLast())
 #model.add_module('dropout3', nn.Dropout(dropout))
 
-model.add_module('attention', Attention(num_lstm_units*2, batch_first=True))
-model.add_module('dropout4', nn.Dropout(dropout))
+#model.add_module('attention', Attention(num_lstm_units*2))
+#model.add_module('dropout4', nn.Dropout(dropout))
+
 #model.add_module('temp', Fix())
 
 #model.add_module('fc1', nn.Linear(num_lstm_units*2, 256))
