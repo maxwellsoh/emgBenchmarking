@@ -4,6 +4,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as transforms
 from torchvision.models import resnet50, ResNet50_Weights
+from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing, model_selection
@@ -33,7 +34,6 @@ numRMS = 250
 
 # image width - must be multiple of 64
 width = 64
-#width = 192
 
 # gaussian Noise signal-to-noise ratio
 SNR = 15
@@ -443,7 +443,7 @@ if leaveOut != 0:
     del emg_in
     
     X_validation = torch.tensor(np.array(getImages_noAugment(emg_out))).to(torch.float16)
-    Y_validation = torch.from_numpy(np.array((labels.pop(leaveOut-1)))).to(torch.float16)
+    Y_validation = torch.from_numpy(np.array(labels.pop(leaveOut-1))).to(torch.float16)
     del participants[leaveOut-1]
     del emg_out
 
@@ -456,8 +456,10 @@ if leaveOut != 0:
         data += [getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))]
         #data += [getImages_noAugment(torch.from_numpy(s.transform(np.array(emg[i]))))]
     '''
-    X_train = torch.from_numpy(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16)).to(torch.float16)
-    Y_train = torch.from_numpy(np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16)).to(torch.float16)
+    X_train = torch.from_numpy(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 
+                64*numRMS)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16)).to(torch.float16)
+    Y_train = torch.from_numpy(np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, 
+                dtype=np.float16)).to(torch.float16)
 
     '''
     X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16),
@@ -488,14 +490,41 @@ print(Y_validation.size())
 
 
 
-# %%
-model = resnet50(weights=ResNet50_Weights.DEFAULT)
-model = nn.Sequential(*list(model.children())[:-4])
-#model = nn.Sequential(*list(model.children())[:-3])
-num_features = model[-1][-1].conv3.out_channels
-#num_features = model.fc.in_features
-dropout = 0.5
+# %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
+class LayerNorm2d(nn.LayerNorm):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.permute(0, 2, 3, 1)
+        x = torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+        x = x.permute(0, 3, 1, 2)
+        return x
 
+#model = resnet50(weights=ResNet50_Weights.DEFAULT)
+model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
+#model = nn.Sequential(*list(model.children())[:-4])
+#model = nn.Sequential(*list(model.children())[:-3])
+#num_features = model[-1][-1].conv3.out_channels
+#num_features = model.fc.in_features
+dropout = 0.1 # was 0.5
+
+n_inputs = 768
+hidden_size = 512 # default is 2048
+n_outputs = 10
+
+sequential_layers = nn.Sequential(
+    LayerNorm2d((n_inputs,), eps=1e-06, elementwise_affine=True),
+    nn.Flatten(start_dim=1, end_dim=-1),
+    nn.Linear(n_inputs, hidden_size, bias=True),
+    nn.BatchNorm1d(hidden_size),
+    nn.GELU(),
+    nn.Dropout(dropout),
+    nn.Linear(hidden_size, hidden_size),
+    nn.BatchNorm1d(hidden_size),
+    nn.GELU(),
+    nn.Linear(hidden_size, n_outputs),
+    nn.LogSoftmax(dim=1)
+)
+model.classifier = sequential_layers
+'''
 num = 0
 for name, param in model.named_parameters():
     num += 1
@@ -511,75 +540,10 @@ for name, param in model.named_parameters():
 model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
 model.add_module('flatten', nn.Flatten())
 
-class Unsqueeze (nn.Module):
-    def forward(self, x):
-        return torch.unsqueeze(x, 1)
-
-class GetLast (nn.Module):
-    def forward(self, x):
-        #print("before: " + str(x[0].size()))
-        x = x[0]
-        #print(x.size())
-        #print("after: " + str(x.size()))
-        return x
-
-class Fix (nn.Module):
-    def forward(self, x):
-        return x.permute(1, 0, 2)[0]
-
-class Attention(nn.Module):
-    def __init__(self, hidden_size, batch_first):
-        super(Attention, self).__init__()
-        self.hidden_size = hidden_size
-        
-        # Define the multi-head attention mechanism
-        self.multihead_attn = nn.MultiheadAttention(embed_dim=hidden_size, batch_first=batch_first, num_heads=64)
-
-    def forward(self, lstm_output):
-        # lstm_output shape: (sequence_length, batch_size, hidden_size)
-
-        # Permute to (batch_size, sequence_length, hidden_size)
-        #q = lstm_output[0].permute(1, 0, 2)
-        #q = torch.unsqueeze(lstm_output.permute(1, 0), 1)
-        #print(q.size())
-        #print("lstm_output: " + str(lstm_output.size()))
-        q = lstm_output
-
-        # Calculate attention
-        attn_output = self.multihead_attn(query=q, key=q, value=q, need_weights=False)
-        
-        # Permute back to (sequence_length, batch_size, hidden_size)
-        #print("attn_output: " + str(attn_output[0].size()))
-        attn_output = attn_output[0].permute(1, 0, 2)[0]
-        #print(attn_output.size())
-        #print(attn_output.size())
-
-        return attn_output
-
-
-#num_lstm_units = 128
-num_lstm_units = 64
-
-model.add_module('unsqueeze1', Unsqueeze())
-model.add_module('lstm1', nn.LSTM(input_size=num_features, hidden_size=num_lstm_units, batch_first=True, bidirectional=True))
-model.add_module('getLast1', GetLast())
-model.add_module('dropout1', nn.Dropout(dropout))
-
-#model.add_module('lstm2', nn.LSTM(input_size=num_lstm_units, hidden_size=num_lstm_units, batch_first=True, bidirectional=False))
-#model.add_module('getLast2', GetLast())
-#model.add_module('dropout2', nn.Dropout(dropout))
-
-#model.add_module('lstm3', nn.LSTM(input_size=num_lstm_units, hidden_size=num_lstm_units, batch_first=True, bidirectional=False))
-#model.add_module('getLast3', GetLast())
-#model.add_module('dropout3', nn.Dropout(dropout))
-
-model.add_module('attention', Attention(num_lstm_units*2, batch_first=True))
-model.add_module('dropout4', nn.Dropout(dropout))
-#model.add_module('temp', Fix())
 
 #model.add_module('fc1', nn.Linear(num_lstm_units*2, 256))
-model.add_module('fc1', nn.Linear(num_lstm_units*2, 256))
-model.add_module('relu', nn.ReLU())
+model.add_module('fc1', nn.Linear(128, 256))
+model.add_module('gelu', nn.GELU())
 model.add_module('dropout5', nn.Dropout(dropout))
 #model.add_module('fc2', nn.Linear(512, 512))
 #model.add_module('relu2', nn.ReLU())
@@ -587,7 +551,7 @@ model.add_module('dropout5', nn.Dropout(dropout))
 model.add_module('fc2', nn.Linear(256, 10))
 #model.add_module('fc1', nn.Linear(num_features, 10))
 model.add_module('softmax', nn.Softmax(dim=1))
-
+'''
 '''
 layers = [(name, param.requires_grad) for name, param in model.named_parameters()]
 for i in range(len(layers)):
@@ -605,15 +569,17 @@ class Data(Dataset):
         return len(self.data)
 
 batch_size = 64
-train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size)
+train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=2, pin_memory=True)
 if (leaveOut == 0):
-    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size)
+    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=2, pin_memory=True)
+
+print("number of batches: ", len(train_loader))
 
 # loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-learn = 0.0001
-optimizer = torch.optim.Adam(model.parameters(), lr=learn)
+learn = 1e-4
+optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
 
 # %%
 # Training loop
@@ -649,6 +615,9 @@ for epoch in range(num_epochs):
         loss.backward()
         optimizer.step()
 
+        del X_batch, Y_batch
+        torch.cuda.empty_cache()
+
     # Validation
     model.eval()
     val_loss = 0.0
@@ -662,6 +631,9 @@ for epoch in range(num_epochs):
             val_loss += criterion(output, Y_batch).item()
 
             val_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+
+            del X_batch, Y_batch
+            torch.cuda.empty_cache()
 
     train_loss /= len(train_loader)
     train_acc /= len(train_loader)
@@ -679,6 +651,7 @@ for epoch in range(num_epochs):
         "Valid Loss": val_loss,
         "Valid Acc": val_acc})
     '''
+    
 #run.finish()
 
 if (leaveOut == 0):

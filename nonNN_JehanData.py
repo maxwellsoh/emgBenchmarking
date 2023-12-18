@@ -15,9 +15,9 @@ import matplotlib.pyplot as plt
 import h5py
 import multiprocessing
 
-leaveOut = 13
+leaveOut = 0
 # SVM or RF (random forest)
-classifier = "RF"
+classifier = "SVM"
 
 wLen = 250 #ms
 stepLen = 50 #ms

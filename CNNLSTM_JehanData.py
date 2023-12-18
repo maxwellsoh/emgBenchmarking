@@ -24,12 +24,11 @@ from itertools import chain
 
 # %%
 # 0 for no LOSO; participants here are 1-13
-leaveOut = 13
+leaveOut = 0
 
 # root mean square instances per channel per image
 #numRMS = 500 # must be a factor of 1000
-#numRMS = 250
-numRMS = 250
+numRMS = 100
 
 # image width - must be multiple of 64
 width = 64
@@ -42,6 +41,7 @@ SNR = 15
 std = 0.05
 
 wLen = 250 #ms
+# was 25ms with 71 samples per window
 stepLen = 50 #ms
 freq = 4000 #Hz
 
@@ -174,7 +174,7 @@ def oneWindowImages(emg):
         #combinedImages.append(dataToImage(addNoise(emg)))
         #combinedImages.append(dataToImage(magWarp(emg)))
 
-    return combinedImages
+    return combinedImages[0]
 
 curr = 0
 def getImages (emg):
@@ -186,7 +186,7 @@ def getImages (emg):
     with multiprocessing.Pool() as pool:
     #pool = 
         allImages_async = pool.map_async(oneWindowImages, [(emg[i]) for i in range(len(emg))])
-        allImages = list(chain.from_iterable(allImages_async.get()))
+        allImages = np.array(list(chain.from_iterable(allImages_async.get()))).astype(np.float16).reshape((-1, windowsPerSample, 3, width, numRMS))
 
     '''
     if i % 1000 == 0:
@@ -206,7 +206,7 @@ def getImages_noAugment (emg):
     allImages = []
     with multiprocessing.Pool() as pool:
         allImages_async = pool.map_async(dataToImage, [(emg[i]) for i in range(len(emg))])
-        allImages = allImages_async.get()
+        allImages = np.array(allImages_async.get()).reshape(-1, windowsPerSample, 3, width, numRMS)
         '''
         allImages_async = pool.map_async(oneWindowImages, [(emg[i]) for i in range(len(emg))])
         allImages = list(chain.from_iterable(allImages_async.get()))
@@ -248,7 +248,7 @@ with multiprocessing.Pool(processes=13) as pool:
 # generating labels
 
 labels = []
-windowsPerSample = 36 # change this if wLen or stepLen is changed
+windowsPerSample = 36# change this if wLen or stepLen is changed
 
 for nums in numGestures:
     sub_labels = torch.tensor(()).new_zeros(size=(sum(nums)*windowsPerSample, 10))
@@ -268,7 +268,6 @@ labels = list(labels)
 print("labels generated")
 
 
-
 # LOSO-CV data processing
 
 if leaveOut != 0:
@@ -279,8 +278,8 @@ if leaveOut != 0:
     emg_out = torch.from_numpy(s.transform(np.array(emg_out.view(len(emg_out), 64*numRMS))))
     del emg_in
     
-    X_validation = torch.tensor(np.array(getImages_noAugment(emg_out))).to(torch.float16)
-    Y_validation = torch.from_numpy(np.array((labels.pop(leaveOut-1)))).to(torch.float16)
+    X_validation = torch.tensor(getImages_noAugment(emg_out)).to(torch.float16)
+    Y_validation = torch.from_numpy(np.array((labels.pop(leaveOut-1))).reshape(-1, windowsPerSample, 10)).to(torch.float16)
     del participants[leaveOut-1]
     del emg_out
 
@@ -293,8 +292,8 @@ if leaveOut != 0:
         data += [getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))]
         #data += [getImages_noAugment(torch.from_numpy(s.transform(np.array(emg[i]))))]
     '''
-    X_train = torch.from_numpy(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16)).to(torch.float16)
-    Y_train = torch.from_numpy(np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16)).to(torch.float16)
+    X_train = torch.from_numpy(np.concatenate([getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16)).to(torch.float16)
+    Y_train = torch.from_numpy(np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16).reshape(-1, windowsPerSample, 10)).to(torch.float16)
 
     '''
     X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16),
@@ -304,12 +303,16 @@ if leaveOut != 0:
 # non-LOSO data processing (not updated)
 
 else:
+    emg_in = np.concatenate([np.array(i.view(len(i), 64*numRMS)) for i in emg], axis=0, dtype=np.float16)
+    s = preprocessing.StandardScaler().fit(emg_in)
+
+
     data = []
     for i in range(len(emg)):
-        data += [getImages(emg[i])]
+        data += [getImages(torch.from_numpy(np.array(s.transform(emg[i].view(len(emg[i]), 64*numRMS)))))]
 
     X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16),
-                                                                                    np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16), test_size=0.2)
+                                                                                    np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16).reshape(-1, windowsPerSample, 10), test_size=0.2)
     X_validation, X_test, Y_validation, Y_test = model_selection.train_test_split(X_validation, Y_validation, test_size=0.5)
     X_train = torch.from_numpy(X_train).to(torch.float16)
     Y_train = torch.from_numpy(Y_train).to(torch.float16)
@@ -384,12 +387,13 @@ class Attention(nn.Module):
 num_lstm_units = 64
 
 #model.add_module('unsqueeze1', Unsqueeze())
+'''
 model.add_module('lstm1', nn.LSTM(input_size=num_features, hidden_size=num_lstm_units, bidirectional=True))
 model.add_module('getLast1', DiscardStates())
 model.add_module('dropout1', nn.Dropout(dropout))
-
-#model.add_module('lstm2', nn.LSTM(input_size=num_lstm_units, hidden_size=num_lstm_units, batch_first=True, bidirectional=False))
-#model.add_module('getLast2', GetLast())
+'''
+#model.add_module('lstm2', nn.LSTM(input_size=num_lstm_units*2, hidden_size=num_lstm_units, bidirectional=True))
+#model.add_module('getLast2', DiscardStates())
 #model.add_module('dropout2', nn.Dropout(dropout))
 
 #model.add_module('lstm3', nn.LSTM(input_size=num_lstm_units, hidden_size=num_lstm_units, batch_first=True, bidirectional=False))
@@ -402,13 +406,17 @@ model.add_module('dropout1', nn.Dropout(dropout))
 #model.add_module('temp', Fix())
 
 #model.add_module('fc1', nn.Linear(num_lstm_units*2, 256))
-model.add_module('fc1', nn.Linear(num_lstm_units*2, 256))
+model.add_module('fc1', nn.Linear(512, 512))
+model.add_module('relu', nn.ReLU())
+model.add_module('dropout5', nn.Dropout(dropout))
+#model.add_module('fc1', nn.Linear(num_lstm_units*2, 64))
+model.add_module('fc1', nn.Linear(512, 512))
 model.add_module('relu', nn.ReLU())
 model.add_module('dropout5', nn.Dropout(dropout))
 #model.add_module('fc2', nn.Linear(512, 512))
 #model.add_module('relu2', nn.ReLU())
 #model.add_module('dropout2', nn.Dropout(dropout))
-model.add_module('fc2', nn.Linear(256, 10))
+model.add_module('fc2', nn.Linear(512, 10))
 #model.add_module('fc1', nn.Linear(num_features, 10))
 model.add_module('softmax', nn.Softmax(dim=1))
 
@@ -428,7 +436,7 @@ class Data(Dataset):
     def __len__(self):
         return len(self.data)
 
-batch_size = 64
+batch_size = None
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size)
 if (leaveOut == 0):
@@ -447,7 +455,7 @@ torch.cuda.empty_cache()
 #run = wandb.init(name='CNN', project='emg_benchmarking', entity='msoh')
 #wandb.config.lr = learn
 
-num_epochs = 50
+num_epochs = 30
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 model.to(device)
