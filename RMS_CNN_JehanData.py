@@ -507,7 +507,7 @@ model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
 dropout = 0.1 # was 0.5
 
 n_inputs = 768
-hidden_size = 512 # default is 2048
+hidden_size = 128 # default is 2048
 n_outputs = 10
 
 sequential_layers = nn.Sequential(
