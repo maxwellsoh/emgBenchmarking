@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from sklearn import preprocessing, model_selection
 from scipy.signal import butter,filtfilt
-#import wandb
+import wandb
 from sklearn.metrics import confusion_matrix
 import seaborn as sn
 import pandas as pd
@@ -17,16 +17,33 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import scipy
 import h5py
+import random
 from random import gauss
 import math
 import multiprocessing
 import time
 import gc
 from itertools import chain
+import argparse
+from tqdm import tqdm
+
+## Argument parser with optional argumenets
+
+# Create the parser
+parser = argparse.ArgumentParser(description="Include arguments for running different trials")
+
+# Add an optional argument
+parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
+
+# Parse the arguments
+args = parser.parse_args()
+
+# Use the arguments
+print(f"The value of --leftout_subject is {args.leftout_subject}")
 
 # %%
 # 0 for no LOSO; participants here are 1-13
-leaveOut = 1
+leaveOut = int(args.leftout_subject)
 
 # root mean square instances per channel per image
 #numRMS = 500 # must be a factor of 1000
@@ -45,8 +62,22 @@ wLen = 250 #ms
 stepLen = 50 #ms
 freq = 4000 #Hz
 
+# Set seeds for reproducibility
+random.seed(0)
+np.random.seed(0)
+torch.manual_seed(0)
+torch.cuda.manual_seed(0)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(0)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
-# Data Extraction
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+### Data Extraction
 
 def filter (emg):
     b, a = butter(N=1, Wn=120.0, btype='highpass', analog=False, fs=freq)
@@ -54,17 +85,18 @@ def filter (emg):
     return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=-1).copy())
 
 # returns array with dimensions (# of samples)x64x10x100
-def getData(n, gesture):    
+def getData(n, gesture):
     if (n<10):
         file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
     else:
         file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
-    data = filter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=int(wLen/1000*freq), step=int(stepLen/1000*freq))).unfold(dimension=-1, 
+    data = filter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=int(wLen/1000*freq), step=int(stepLen/1000*freq))).unfold(dimension=-1,
                     size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq))
-    
+
     return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2, 3])
 
 gestures = ['abduct_p1', 'adduct_p1', 'extend_p1', 'grip_p1', 'pronate_p1', 'rest_p1', 'supinate_p1', 'tripod_p1', 'wextend_p1', 'wflex_p1']
+
 def getEMG(n):
     return torch.cat([torch.sqrt(torch.mean(getData(n, name) ** 2, dim=3)) for name in gestures], axis=0)
 
@@ -73,17 +105,15 @@ def getGestures(n):
         file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
     else:
         file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
-    
+
     numGestures = []
     for gesture in gestures:
-        data = filter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=int(wLen/1000*freq), step=int(stepLen/1000*freq))).unfold(dimension=-1, 
+        data = filter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=int(wLen/1000*freq), step=int(stepLen/1000*freq))).unfold(dimension=-1,
         size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq))
         numGestures += [len(data)]
     return numGestures
 
-
-
-# Data Augmentation
+### Data Augmentation
 
 # gaussian noise
 def addNoise (emg):
@@ -150,7 +180,7 @@ def dataToImage (emg):
         frames_sec += [np.transpose(np.array(list(map(lambda x : cmap(x[i]), data[len(data)//4:len(data)//2].numpy()))), axes=[1,0])[:3]]
         frames_third += [np.transpose(np.array(list(map(lambda x : cmap(x[i]), data[len(data)//2:int(len(data)/4*3)].numpy()))), axes=[1,0])[:3]]
         frames_bottom += [np.transpose(np.array(list(map(lambda x : cmap(x[i]), data[int(len(data)/4*3):].numpy()))), axes=[1,0])[:3]]
-    
+
     image_top_1 = torch.from_numpy(np.transpose(np.stack(frames_top[:len(frames_top)//4]), axes=[1, 2, 0]))
     image_top_2 = torch.from_numpy(np.transpose(np.stack(frames_top[len(frames_top)//4:len(frames_top)//2]), axes=[1, 2, 0]))
     image_sec_1 = torch.from_numpy(np.transpose(np.stack(frames_sec[:len(frames_sec)//4]), axes=[1, 2, 0]))
@@ -220,7 +250,7 @@ def dataToImage (emg):
     #print(image_third.size())
     #print(image_bottom.size())
 
-    return np.concatenate([np.array(image_top), np.array(image_sec), np.array(image_third), 
+    return np.concatenate([np.array(image_top), np.array(image_sec), np.array(image_third),
     np.array(image_bottom)], axis=1).astype(np.float32)
     '''
 
@@ -231,7 +261,7 @@ def dataToImage (emg):
     print("penult")
 
     image = torch.cat([image_1, image_2], dim=1)
-    
+
     print("final: ")
     print(image.size())
 
@@ -241,7 +271,7 @@ def dataToImage (emg):
     frames = []
     for i in range(numRMS):
         frames += [np.transpose(np.array(list(map(lambda x: cmap(x[i]), data.numpy()))), axes=[1, 0])[:3]]
-    
+
     image_1 = torch.from_numpy(np.transpose(np.stack(frames[:(int(len(frames)/10))]), axes=[1, 2, 0]))
     image_2 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10)):int(len(frames)/10*2)]), axes=[1, 2, 0]))
     image_3 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10*2)):int(len(frames)/10*3)]), axes=[1, 2, 0]))
@@ -281,7 +311,7 @@ def dataToImage (emg):
     frames = []
     for i in range(numRMS):
         frames += [np.transpose(np.array(list(map(lambda x: cmap(x[i]), data.numpy()))), axes=[1, 0])[:3]]
-    
+
     image_1 = torch.from_numpy(np.transpose(np.stack(frames[:(int(len(frames)/5))]), axes=[1, 2, 0]))
     image_2 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/5)):int(len(frames)/5*2)]), axes=[1, 2, 0]))
     image_3 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/5*2)):int(len(frames)/5*3)]), axes=[1, 2, 0]))
@@ -302,7 +332,7 @@ def dataToImage (emg):
 
     return (torch.cat([image_1, image_2, image_3, image_4, image_5], dim=2)).numpy().astype(np.float32)
     '''
-    
+
     frames = []
     for i in range(numRMS):
         frames += [np.transpose(np.array(list(map(lambda x: cmap(x[i]), data.numpy()))), axes=[1, 0])[:3]]
@@ -311,12 +341,12 @@ def dataToImage (emg):
     image_2 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/2)):]), axes=[1, 2, 0]))
     image_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_1)
     image_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_2)
-    image_1 = transforms.Resize(size=[width, int(numRMS/2)], interpolation=transforms.InterpolationMode.BICUBIC, 
+    image_1 = transforms.Resize(size=[width, int(numRMS/2)], interpolation=transforms.InterpolationMode.BICUBIC,
                                 antialias=True)(image_1)
-    image_2 = transforms.Resize(size=[width, int(numRMS/2)], interpolation=transforms.InterpolationMode.BICUBIC, 
+    image_2 = transforms.Resize(size=[width, int(numRMS/2)], interpolation=transforms.InterpolationMode.BICUBIC,
                                 antialias=True)(image_2)
     return torch.cat([image_1, image_2], dim=2).numpy().astype(np.float32)
-    
+
     '''
     image = torch.from_numpy(np.transpose(np.stack(frames), axes=[1, 2, 0]))
     return transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image).numpy().astype(np.float32)
@@ -343,11 +373,11 @@ curr = 0
 def getImages (emg):
     global curr
     curr += 1
-    print(curr)
+    print("Current Image: " + str(curr))
 
     allImages = []
     with multiprocessing.Pool() as pool:
-    #pool = 
+    #pool =
         allImages_async = pool.map_async(oneWindowImages, [(emg[i]) for i in range(len(emg))])
         allImages = list(chain.from_iterable(allImages_async.get()))
 
@@ -358,7 +388,7 @@ def getImages (emg):
         plt.imshow(allImages[i*dataCopies].T, origin='lower')
         plt.axis('off')
         plt.show()
-    ''' 
+    '''
     return allImages
 
 
@@ -413,7 +443,7 @@ with multiprocessing.Pool(processes=13) as pool:
 labels = []
 windowsPerSample = 36 # change this if wLen or stepLen is changed
 
-for nums in numGestures:
+for nums in tqdm(numGestures, desc="Label Generation"):
     sub_labels = torch.tensor(()).new_zeros(size=(sum(nums)*windowsPerSample, 10))
     subGestures = [(i * windowsPerSample) for i in nums]
     index = 0
@@ -425,7 +455,7 @@ for nums in numGestures:
         if (count >= subGestures[index]):
             index += 1
             count = 0
-    
+
     labels += [sub_labels]
 labels = list(labels)
 print("labels generated")
@@ -437,11 +467,11 @@ print("labels generated")
 if leaveOut != 0:
     emg_out = emg.pop(leaveOut-1)
     emg_in = np.concatenate([np.array(i.view(len(i), 64*numRMS)) for i in emg], axis=0, dtype=np.float16)
-    
+
     s = preprocessing.StandardScaler().fit(emg_in)
     emg_out = torch.from_numpy(s.transform(np.array(emg_out.view(len(emg_out), 64*numRMS))))
     del emg_in
-    
+
     X_validation = torch.tensor(np.array(getImages_noAugment(emg_out))).to(torch.float16)
     Y_validation = torch.from_numpy(np.array(labels.pop(leaveOut-1))).to(torch.float16)
     del participants[leaveOut-1]
@@ -456,9 +486,9 @@ if leaveOut != 0:
         data += [getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))]
         #data += [getImages_noAugment(torch.from_numpy(s.transform(np.array(emg[i]))))]
     '''
-    X_train = torch.from_numpy(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 
+    X_train = torch.from_numpy(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]),
                 64*numRMS)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16)).to(torch.float16)
-    Y_train = torch.from_numpy(np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, 
+    Y_train = torch.from_numpy(np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0,
                 dtype=np.float16)).to(torch.float16)
 
     '''
@@ -487,7 +517,6 @@ print(X_train.size())
 print(Y_train.size())
 print(X_validation.size())
 print(Y_validation.size())
-
 
 
 # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
@@ -569,10 +598,10 @@ class Data(Dataset):
         return len(self.data)
 
 batch_size = 64
-train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
-val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=2, pin_memory=True)
+train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, worker_init_fn=seed_worker)
+val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=2, pin_memory=True, worker_init_fn=seed_worker)
 if (leaveOut == 0):
-    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=2, pin_memory=True)
+    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=2, pin_memory=True, worker_init_fn=seed_worker)
 
 print("number of batches: ", len(train_loader))
 
@@ -586,17 +615,17 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
 gc.collect()
 torch.cuda.empty_cache()
 
-#run = wandb.init(name='CNN', project='emg_benchmarking', entity='msoh')
-#wandb.config.lr = learn
+run = wandb.init(name='CNN', project='emg_benchmarking_LOSO' + str(args.leftout_subject), entity='jehanyang')
+wandb.config.lr = learn
 
 num_epochs = 50
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 model.to(device)
 
-#wandb.watch(model)
+wandb.watch(model)
 
-for epoch in range(num_epochs):
+for epoch in tqdm(range(num_epochs), desc="Epoch"):
     model.train()
     train_acc = 0.0
     train_loss = 0.0
@@ -609,7 +638,7 @@ for epoch in range(num_epochs):
         loss = criterion(output, Y_batch)
         train_loss += loss.item()
 
-        train_acc += np.mean(np.argmax(output.cpu().detach().numpy(), 
+        train_acc += np.mean(np.argmax(output.cpu().detach().numpy(),
                                        axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
         loss.backward()
@@ -640,18 +669,16 @@ for epoch in range(num_epochs):
     val_loss /= len(val_loader)
     val_acc /= len(val_loader)
 
-    #print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
-    #print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
-    print(f"{val_acc:.4f}")
-    '''
+    print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+    print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+    #print(f"{val_acc:.4f}")
     wandb.log({
         "Epoch": epoch,
         "Train Loss": train_loss,
         "Train Acc": train_acc,
         "Valid Loss": val_loss,
         "Valid Acc": val_acc})
-    '''
-    
+
 #run.finish()
 
 if (leaveOut == 0):
