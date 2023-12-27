@@ -617,7 +617,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
 gc.collect()
 torch.cuda.empty_cache()
 
-run = wandb.init(name='CNN', project='emg_benchmarking_LOSO' + str(args.leftout_subject), entity='jehanyang')
+run = wandb.init(name='CNN_seed-' + str(args.seed), project='emg_benchmarking_LOSO' + str(args.leftout_subject), entity='jehanyang')
 wandb.config.lr = learn
 
 num_epochs = 50
