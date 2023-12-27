@@ -34,12 +34,14 @@ parser = argparse.ArgumentParser(description="Include arguments for running diff
 
 # Add an optional argument
 parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
+parser.add_argument('--seed', type=int, help='number of seed that is used for randomization. Set to 0 by default.', default=0)
 
 # Parse the arguments
 args = parser.parse_args()
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
+print(f"The value of --seed is {args.seed}")
 
 # %%
 # 0 for no LOSO; participants here are 1-13
@@ -63,12 +65,12 @@ stepLen = 50 #ms
 freq = 4000 #Hz
 
 # Set seeds for reproducibility
-random.seed(0)
-np.random.seed(0)
-torch.manual_seed(0)
-torch.cuda.manual_seed(0)
+random.seed(args.seed)
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+torch.cuda.manual_seed(args.seed)
 if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(0)
+    torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
