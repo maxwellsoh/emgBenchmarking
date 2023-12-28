@@ -34,6 +34,7 @@ args = parser.parse_args()
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
+print(f"The value of --seed is {args.seed}")
 
 # %%
 # 0 for no LOSO; participants here are 1-13
@@ -163,7 +164,7 @@ def getImages (emg):
 data = []
 
 # add tqdm to show progress bar
-for x in tqdm(range(len(emg))):
+for x in tqdm(range(len(emg)), desc="Subject"):
     data += [getImages(emg[x])]
 
 
@@ -259,7 +260,7 @@ import gc
 gc.collect()
 torch.cuda.empty_cache()
 
-run = wandb.init(name='CNN_seed-'+str(args.seed), project='emg_benchmarking_ninapro-db5', entity='jehanyang')
+run = wandb.init(name='CNN_seed-'+str(args.seed), project='emg_benchmarking_ninapro-db5_LOSO-' + str(args.leftout_subject), entity='jehanyang')
 wandb.config.lr = learn
 
 num_epochs = 25
