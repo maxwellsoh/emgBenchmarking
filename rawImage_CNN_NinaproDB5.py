@@ -8,18 +8,55 @@ import pandas as pd
 from sklearn import preprocessing, model_selection
 from scipy.signal import butter,filtfilt,iirnotch
 #from PyEMD import EMD
-#import wandb
+import wandb
 from sklearn.metrics import confusion_matrix
 import seaborn as sn
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import multiprocessing
+from tqdm import tqdm
+import argparse
+import random 
 
-leaveOut = 1
+## Argument parser with optional argumenets
+
+# Create the parser
+parser = argparse.ArgumentParser(description="Include arguments for running different trials")
+
+# Add an optional argument
+parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
+# Add parser for seed
+parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0 by default.', default=0)
+
+# Parse the arguments
+args = parser.parse_args()
+
+# Use the arguments
+print(f"The value of --leftout_subject is {args.leftout_subject}")
+
+# %%
+# 0 for no LOSO; participants here are 1-13
+leaveOut = int(args.leftout_subject)
 
 wLen = 250 #ms
 stepLen = 10 #50 ms
+
+# Set seeds for reproducibility
+random.seed(args.seed)
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+torch.cuda.manual_seed(args.seed)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(args.seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
 
 def balance (restimulus):
     numZero = 0
@@ -124,8 +161,10 @@ def getImages (emg):
     return images
 
 data = []
-for x in emg:
-    data += [getImages(x)]
+
+# add tqdm to show progress bar
+for x in tqdm(range(len(emg))):
+    data += [getImages(emg[x])]
 
 
 if leaveOut == 0:
@@ -220,17 +259,17 @@ import gc
 gc.collect()
 torch.cuda.empty_cache()
 
-#run = wandb.init(name='CNN', project='emg_benchmarking', entity='msoh')
-#wandb.config.lr = learn
+run = wandb.init(name='CNN_seed-'+str(args.seed), project='emg_benchmarking_ninapro-db5', entity='jehanyang')
+wandb.config.lr = learn
 
 num_epochs = 25
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 model.to(device)
 
-#wandb.watch(model)
+wandb.watch(model)
 
-for epoch in range(num_epochs):
+for epoch in tqdm(range(num_epochs), desc="Epoch"):
     model.train()
     train_acc = 0.0
     train_loss = 0.0
@@ -271,7 +310,6 @@ for epoch in range(num_epochs):
     print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
     print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
 
-    '''
     wandb.log({
         "Epoch": epoch,
         "Train Loss": train_loss,
@@ -315,3 +353,4 @@ if (leaveOut == 0):
     plt.figure(figsize = (12,7))
     sn.heatmap(df_cm, annot=True, fmt=".3f")
     plt.savefig('output.png')
+'''
