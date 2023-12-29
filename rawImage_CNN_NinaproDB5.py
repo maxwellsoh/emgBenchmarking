@@ -25,12 +25,16 @@ import utils_NinaproDB5 as ut_NDB5
 # Create the parser
 parser = argparse.ArgumentParser(description="Include arguments for running different trials")
 
-# Add an optional argument
+# Add argument for leftout subject
 parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
 # Add parser for seed
 parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0 by default.', default=0)
 # Add number of epochs to train for
 parser.add_argument('--epochs', type=int, help='number of epochs to train for. Set to 25 by default.', default=25)
+# Add whether or not to use k folds (leftout_subject must be 0)
+parser.add_argument('--turn_on_kfold', type=bool, help='whether or not to use k folds cross validation. Set to False by default.', default=False)
+# Add argument for stratified k folds cross validation
+parser.add_argument('--kfold', type=int, help='number of folds for stratified k-folds cross-validation. Set to 5 by default.', default=5)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -39,6 +43,14 @@ args = parser.parse_args()
 print(f"The value of --leftout_subject is {args.leftout_subject}")
 print(f"The value of --seed is {args.seed}")
 print(f"The value of --epochs is {args.epochs}")
+if args.turn_on_kfold:
+    if args.leftout_subject == 0:
+        print(f"The value of --turn_on_kfold is {args.turn_on_kfold}")
+    else: 
+        print("Cannot turn on kfold if leftout_subject is not 0")
+        exit()
+    print(f"The value of --kfold is {args.kfold}")
+
 
 # %%
 # 0 for no LOSO; participants here are 1-13
@@ -67,9 +79,20 @@ print("Number of Electrode Channels: ", length)
 print("Number of Timesteps per Trial:", width)
 
 if (leaveOut == 0):
-    emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg], axis=0, dtype=np.float16)
-    s = preprocessing.StandardScaler().fit(emg_in)
+    # Reshape and concatenate EMG data
+    # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
+    # Then concatenate along the subject dimension (axis=0)
+    emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float16)
+    labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+    indices = np.arange(emg_in.shape[0])
+    train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
+    train_emg_in = emg_in[train_indices]  # Select only the train indices
+    s = preprocessing.StandardScaler().fit(train_emg_in)
     del emg_in
+    del train_emg_in
+    del labels_in
+    del indices
+    
 else:
     emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float16)
     s = preprocessing.StandardScaler().fit(emg_in)
@@ -87,7 +110,10 @@ print("-------------------------------------------------------------------------
 if leaveOut == 0:
     combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
     combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
-    X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(combined_images, combined_labels, test_size=0.2, stratify=combined_labels)
+    X_train = combined_images[train_indices]
+    Y_train = combined_labels[train_indices]
+    X_validation = combined_images[validation_indices]
+    Y_validation = combined_labels[validation_indices]
     X_validation, X_test, Y_validation, Y_test = model_selection.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation)
     del combined_images
     del combined_labels
@@ -119,7 +145,6 @@ else:
     print("Size of Y_train:", Y_train.size()) # (SAMPLE, GESTURE)
     print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
     print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
-
 
 model = resnet50(weights=ResNet50_Weights.DEFAULT)
 model = nn.Sequential(*list(model.children())[:-4])
@@ -168,10 +193,10 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learn)
 # Define the cyclical learning rate scheduler
 step_size = len(train_loader) * 2  # Number of iterations in half a cycle
 base_lr = 0.0001  # Minimum learning rate
-max_lr = 0.01  # Maximum learning rate
-# number_annealing_cycles = 5
+max_lr = 0.001  # Maximum learning rate
+# number_cycles = 5
 # annealing_multiplier = 2
-# cawr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=num_epochs/(pow(annealing_multiplier,number_annealing_cycles)-1), 
+# cawr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=ut_NDB5.periodLengthForAnnealing(num_epochs, annealing_multiplier, number_cycles)
 #                                                                       T_mult=annealing_multiplier, eta_min=0.01, last_epoch=-1)
 scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
 
@@ -241,7 +266,6 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
         "Train Acc": train_acc,
         "Valid Loss": val_loss,
         "Valid Acc": val_acc})
-    
 
 # Testing
 if (leaveOut == 0):
@@ -291,7 +315,7 @@ if (leaveOut == 0):
     plt.savefig(confusionMatrix_filename)
 
     # Save confusion matrix in Wandb
-    wandb.log({"Confusion Matrix": wandb.Image(confusionMatrix_filename)})
+    wandb.log({"Testing Confusion Matrix": wandb.Image(confusionMatrix_filename)})
     
 
 run.finish()

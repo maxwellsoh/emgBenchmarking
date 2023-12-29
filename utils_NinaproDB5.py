@@ -7,6 +7,7 @@ import torchvision.transforms as transforms
 import multiprocessing
 from torch.utils.data import DataLoader, Dataset
 import matplotlib as mpl
+from math import ceil
 
 numGestures = 18
 wLen = 250 #ms
@@ -17,7 +18,6 @@ def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-
 
 def balance (restimulus):
     numZero = 0
@@ -92,6 +92,14 @@ def getImages(emg, standardScaler, length, width):
         images = images_async.get()
     
     return images
+
+def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):
+    periodLength = 0
+    for i in range(cycles):
+        periodLength += annealing_multiplier ** i
+    periodLength = num_epochs / periodLength
+    
+    return ceil(periodLength)
 
 class Data(Dataset):
     def __init__(self, data):
