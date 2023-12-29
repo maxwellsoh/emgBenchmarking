@@ -13,8 +13,6 @@ import wandb
 from sklearn.metrics import confusion_matrix
 import seaborn as sn
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib as mpl
 import scipy
 import h5py
 import random
@@ -26,6 +24,12 @@ import gc
 from itertools import chain
 import argparse
 from tqdm import tqdm
+import matplotlib as mpl
+from tqdm import tqdm
+mpl.use('Agg')  # Use a non-interactive backend like 'Agg'
+import matplotlib.pyplot as plt
+import zarr
+import os
 
 ## Argument parser with optional argumenets
 
@@ -42,6 +46,7 @@ args = parser.parse_args()
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
 print(f"The value of --seed is {args.seed}")
+print("\n")
 
 # %%
 # 0 for no LOSO; participants here are 1-13
@@ -80,365 +85,240 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 ### Data Extraction
+class DataExtract:
+    gestures = ['abduct_p1', 'adduct_p1', 'extend_p1', 'grip_p1', 'pronate_p1', 'rest_p1', 'supinate_p1', 'tripod_p1', 'wextend_p1', 'wflex_p1']
 
-def filter (emg):
-    b, a = butter(N=1, Wn=120.0, btype='highpass', analog=False, fs=freq)
-    # what axis should the filter apply to? other datasets have axis=0
-    return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=-1).copy())
+    def highpassFilter (self, emg):
+        b, a = butter(N=1, Wn=120.0, btype='highpass', analog=False, fs=freq)
+        # what axis should the filter apply to? other datasets have axis=0
+        return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=-1).copy())
 
-# returns array with dimensions (# of samples)x64x10x100
-def getData(n, gesture):
-    if (n<10):
-        file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
-    else:
-        file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
-    data = filter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=int(wLen/1000*freq), step=int(stepLen/1000*freq))).unfold(dimension=-1,
-                    size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq))
+    # returns array with dimensions (# of samples)x64x10x100
+    def getData(self, n, gesture):
+        if (n<10):
+            file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
+        else:
+            file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
+        data = self.highpassFilter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=int(wLen/1000*freq), step=int(stepLen/1000*freq))).unfold(dimension=-1,
+                        size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq))
 
-    return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2, 3])
+        return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2, 3])
 
-gestures = ['abduct_p1', 'adduct_p1', 'extend_p1', 'grip_p1', 'pronate_p1', 'rest_p1', 'supinate_p1', 'tripod_p1', 'wextend_p1', 'wflex_p1']
 
-def getEMG(n):
-    return torch.cat([torch.sqrt(torch.mean(getData(n, name) ** 2, dim=3)) for name in gestures], axis=0)
+    def getEMG(self, n):
+        return torch.cat([torch.sqrt(torch.mean(self.getData(n, name) ** 2, dim=3)) for name in self.gestures], axis=0)
 
-def getGestures(n):
-    if (n<10):
-        file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
-    else:
-        file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
+    def getGestures(self, n):
+        if (n<10):
+            file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
+        else:
+            file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
 
-    numGestures = []
-    for gesture in gestures:
-        data = filter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=int(wLen/1000*freq), step=int(stepLen/1000*freq))).unfold(dimension=-1,
-        size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq))
-        numGestures += [len(data)]
-    return numGestures
+        numGestures = []
+        for gesture in self.gestures: 
+            data = self.highpassFilter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=int(wLen/1000*freq), step=int(stepLen/1000*freq))).unfold(dimension=-1,
+            size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq))
+            numGestures += [len(data)]
+        return numGestures
 
 ### Data Augmentation
+class DataAugment:
 
-# gaussian noise
-def addNoise (emg):
-    for i in range(len(emg)):
-        emg[i] += gauss(0.0, math.sqrt((emg[i] ** 2) / SNR))
-    return emg
+    # gaussian noise
+    def addNoise (emg):
+        for i in range(len(emg)):
+            emg[i] += gauss(0.0, math.sqrt((emg[i] ** 2) / SNR))
+        return emg
 
-# magnitude warping
-def magWarp (emg):
-    '''
-    if (len(data_noRMS) == 0):
-        data_noRMS = torch.cat([getData(currParticipant, name) for name in gestures], axis=0)
-    emg = data_noRMS[n].view(64, wLen*4)
-    '''
-
-    cs = scipy.interpolate.CubicSpline([i*25 for i in range(numRMS//25+1)], [gauss(1.0, std) for i in range(numRMS//25+1)])
-    scaleFact = cs([i for i in range(numRMS)])
-    for i in range(numRMS):
-        for j in range(64):
-            emg[i*64 + j] = emg[i*64 + j] * scaleFact[i]
-            #emg[i + j*numRMS] = emg[i + j*numRMS] * scaleFact[i]
-    '''
-    for i in range(len(scaleFact)):
-        emg[:, i] = emg[:, i] * scaleFact[i]
-    '''
-    return emg
-    #return torch.sqrt(torch.mean(emg.unfold(dimension=-1, size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq)) ** 2, dim=2)).view([64*numRMS])
-
-# electrode offseting
-def shift_up (batch):
-    batch_up = batch.view(4, 16, numRMS).clone()
-    for k in range(len(batch_up)):
-        for j in range(len(batch_up[k])-1):
-            batch_up[k][j] = batch_up[k][j+1]
-    return batch_up
-
-def shift_down (batch):
-    batch_down = batch.view(4, 16, numRMS).clone()
-    for k in range(len(batch_down)):
-        for j in range(len(batch_down[k])-1):
-            batch_down[k][len(batch_down[k])-j-1] = batch_down[k][len(batch_down[k])-j-2]
-    return batch_down
-
-
-
-# raw emg data -> 64x(numRMS) image
-
-cmap = mpl.colormaps['viridis']
-order = list(chain.from_iterable([[[k for k in range(64)][(i+j*16+32) % 64] for j in range(4)] for i in range(16)]))
-def dataToImage (emg):
-    rectified = emg - min(emg)
-    rectified = rectified / max(rectified)
-
-    data = rectified.view(64, numRMS).clone()
-    data = torch.stack([data[i] for i in order])
-    '''
-    frames_top = []
-    frames_sec = []
-    frames_third = []
-    frames_bottom = []
-    for i in range(numRMS):
-        #frames += [np.transpose(np.array(list(map(lambda x: cmap(x[i]), data.numpy()))), axes=[1, 0])[:3]]
-        frames_top += [np.transpose(np.array(list(map(lambda x : cmap(x[i]), data[:len(data)//4].numpy()))), axes=[1,0])[:3]]
-        frames_sec += [np.transpose(np.array(list(map(lambda x : cmap(x[i]), data[len(data)//4:len(data)//2].numpy()))), axes=[1,0])[:3]]
-        frames_third += [np.transpose(np.array(list(map(lambda x : cmap(x[i]), data[len(data)//2:int(len(data)/4*3)].numpy()))), axes=[1,0])[:3]]
-        frames_bottom += [np.transpose(np.array(list(map(lambda x : cmap(x[i]), data[int(len(data)/4*3):].numpy()))), axes=[1,0])[:3]]
-
-    image_top_1 = torch.from_numpy(np.transpose(np.stack(frames_top[:len(frames_top)//4]), axes=[1, 2, 0]))
-    image_top_2 = torch.from_numpy(np.transpose(np.stack(frames_top[len(frames_top)//4:len(frames_top)//2]), axes=[1, 2, 0]))
-    image_sec_1 = torch.from_numpy(np.transpose(np.stack(frames_sec[:len(frames_sec)//4]), axes=[1, 2, 0]))
-    image_sec_2 = torch.from_numpy(np.transpose(np.stack(frames_sec[len(frames_sec)//4:len(frames_sec)//2]), axes=[1, 2, 0]))
-    image_third_1 = torch.from_numpy(np.transpose(np.stack(frames_third[:len(frames_third)//4]), axes=[1, 2, 0]))
-    image_third_2 = torch.from_numpy(np.transpose(np.stack(frames_third[len(frames_third)//4:len(frames_third)//2]), axes=[1, 2, 0]))
-    image_bottom_1 = torch.from_numpy(np.transpose(np.stack(frames_bottom[:len(frames_bottom)//4]), axes=[1, 2, 0]))
-    image_bottom_2 = torch.from_numpy(np.transpose(np.stack(frames_bottom[len(frames_bottom)//4:len(frames_bottom)//2]), axes=[1, 2, 0]))
-    image_top_3 = torch.from_numpy(np.transpose(np.stack(frames_top[len(frames_top)//2:int(len(frames_top)/4*3)]), axes=[1, 2, 0]))
-    image_top_4 = torch.from_numpy(np.transpose(np.stack(frames_top[int(len(frames_top)/4*3):]), axes=[1, 2, 0]))
-    image_sec_3 = torch.from_numpy(np.transpose(np.stack(frames_sec[len(frames_sec)//2:int(len(frames_sec)/4*3)]), axes=[1, 2, 0]))
-    image_sec_4 = torch.from_numpy(np.transpose(np.stack(frames_sec[int(len(frames_sec)/4*3):]), axes=[1, 2, 0]))
-    image_third_3 = torch.from_numpy(np.transpose(np.stack(frames_third[len(frames_third)//2:int(len(frames_third)/4*3)]), axes=[1, 2, 0]))
-    image_third_4 = torch.from_numpy(np.transpose(np.stack(frames_third[int(len(frames_third)/4*3):]), axes=[1, 2, 0]))
-    image_bottom_3 = torch.from_numpy(np.transpose(np.stack(frames_bottom[len(frames_bottom)//2:int(len(frames_bottom)/4*3)]), axes=[1, 2, 0]))
-    image_bottom_4 = torch.from_numpy(np.transpose(np.stack(frames_bottom[int(len(frames_bottom)/4*3):]), axes=[1, 2, 0]))
-
-    #print(image_top_1.size())
-    #print(image_top_2.size())
-    #print(image_bottom_1.size())
-    #print(image_bottom_2.size())
-    image_top_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_top_1)
-    image_top_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_top_2)
-    image_sec_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_sec_1)
-    image_sec_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_sec_2)
-    image_third_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_third_1)
-    image_third_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_third_2)
-    image_bottom_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_bottom_1)
-    image_bottom_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_bottom_2)
-    image_top_3 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_top_3)
-    image_top_4 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_top_4)
-    image_sec_3 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_sec_3)
-    image_sec_4 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_sec_4)
-    image_third_3 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_third_3)
-    image_third_4 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_third_4)
-    image_bottom_3 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_bottom_3)
-    image_bottom_4 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_bottom_4)
-
-    #print(image_top_1.size())
-
-    image_top_1 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_top_1)
-    image_top_2 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_top_2)
-    image_sec_1 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_sec_1)
-    image_sec_2 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_sec_2)
-    image_third_1 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_third_1)
-    image_third_2 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_third_2)
-    image_bottom_1 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_bottom_1)
-    image_bottom_2 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_bottom_2)
-    image_top_3 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_top_3)
-    image_top_4 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_top_4)
-    image_sec_3 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_sec_3)
-    image_sec_4 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_sec_4)
-    image_third_3 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_third_3)
-    image_third_4 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_third_4)
-    image_bottom_3 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_bottom_3)
-    image_bottom_4 = transforms.Resize(size=[width//4, numRMS//4], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_bottom_4)
-
-    #print("end")
-
-    image_top = torch.cat([image_top_1, image_top_2, image_top_3, image_top_4], dim=2)
-    image_sec = torch.cat([image_sec_1, image_sec_2, image_sec_3, image_sec_4], dim=2)
-    image_third = torch.cat([image_third_1, image_third_2, image_third_3, image_third_4], dim=2)
-    image_bottom = torch.cat([image_bottom_1, image_bottom_2, image_bottom_3, image_bottom_4], dim=2)
-
-    #print(image_top.size())
-    #print(image_sec.size())
-    #print(image_third.size())
-    #print(image_bottom.size())
-
-    return np.concatenate([np.array(image_top), np.array(image_sec), np.array(image_third),
-    np.array(image_bottom)], axis=1).astype(np.float32)
-    '''
-
-    '''
-    image_1 = np.concatenate([np.array(image_top), np.array(image_sec)], axis=1)
-    image_2 = np.concatenate([np.array(image_third), np.array(image_bottom)], axis=1)
-
-    print("penult")
-
-    image = torch.cat([image_1, image_2], dim=1)
-
-    print("final: ")
-    print(image.size())
-
-    return image.numpy().astype(np.float32)
-    '''
-    '''
-    frames = []
-    for i in range(numRMS):
-        frames += [np.transpose(np.array(list(map(lambda x: cmap(x[i]), data.numpy()))), axes=[1, 0])[:3]]
-
-    image_1 = torch.from_numpy(np.transpose(np.stack(frames[:(int(len(frames)/10))]), axes=[1, 2, 0]))
-    image_2 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10)):int(len(frames)/10*2)]), axes=[1, 2, 0]))
-    image_3 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10*2)):int(len(frames)/10*3)]), axes=[1, 2, 0]))
-    image_4 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10*3)):int(len(frames)/10*4)]), axes=[1, 2, 0]))
-    image_5 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10*4)):(int(len(frames)/10*5))]), axes=[1, 2, 0]))
-    image_6 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10*5)):(int(len(frames)/10*6))]), axes=[1, 2, 0]))
-    image_7 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10*6)):int(len(frames)/10*7)]), axes=[1, 2, 0]))
-    image_8 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10*7)):int(len(frames)/10*8)]), axes=[1, 2, 0]))
-    image_9 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10*8)):int(len(frames)/10*9)]), axes=[1, 2, 0]))
-    image_10 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/10*9)):]), axes=[1, 2, 0]))
-
-    image_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_1)
-    image_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_2)
-    image_3 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_3)
-    image_4 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_4)
-    image_5 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_5)
-    image_6 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_6)
-    image_7 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_7)
-    image_8 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_8)
-    image_9 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_9)
-    image_10 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_10)
-
-    image_1 = transforms.Resize(size=[width, int(numRMS/10)], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_1)
-    image_2 = transforms.Resize(size=[width, int(numRMS/10)], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_2)
-    image_3 = transforms.Resize(size=[width, int(numRMS/10)], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_3)
-    image_4 = transforms.Resize(size=[width, int(numRMS/10)], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_4)
-    image_5 = transforms.Resize(size=[width, int(numRMS/10)], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_5)
-    image_6 = transforms.Resize(size=[width, int(numRMS/10)], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_6)
-    image_7 = transforms.Resize(size=[width, int(numRMS/10)], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_7)
-    image_8 = transforms.Resize(size=[width, int(numRMS/10)], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_8)
-    image_9 = transforms.Resize(size=[width, int(numRMS/10)], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_9)
-    image_10 = transforms.Resize(size=[width, int(numRMS/10)], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image_10)
-
-    return (torch.cat([image_1, image_2, image_3, image_4, image_5, image_6, image_7, image_8, image_9, image_10], dim=2)).numpy().astype(np.float32)
-    '''
-    '''
-    frames = []
-    for i in range(numRMS):
-        frames += [np.transpose(np.array(list(map(lambda x: cmap(x[i]), data.numpy()))), axes=[1, 0])[:3]]
-
-    image_1 = torch.from_numpy(np.transpose(np.stack(frames[:(int(len(frames)/5))]), axes=[1, 2, 0]))
-    image_2 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/5)):int(len(frames)/5*2)]), axes=[1, 2, 0]))
-    image_3 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/5*2)):int(len(frames)/5*3)]), axes=[1, 2, 0]))
-    image_4 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/5*3)):int(len(frames)/5*4)]), axes=[1, 2, 0]))
-    image_5 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/5*4)):]), axes=[1, 2, 0]))
-
-    image_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_1)
-    image_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_2)
-    image_3 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_3)
-    image_4 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_4)
-    image_5 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_5)
-
-    image_1 = transforms.Resize(size=[width, int(numRMS/5)], interpolation=transforms.InterpolationMode.NEAREST, antialias=True)(image_1)
-    image_2 = transforms.Resize(size=[width, int(numRMS/5)], interpolation=transforms.InterpolationMode.NEAREST, antialias=True)(image_2)
-    image_3 = transforms.Resize(size=[width, int(numRMS/5)], interpolation=transforms.InterpolationMode.NEAREST, antialias=True)(image_3)
-    image_4 = transforms.Resize(size=[width, int(numRMS/5)], interpolation=transforms.InterpolationMode.NEAREST, antialias=True)(image_4)
-    image_5 = transforms.Resize(size=[width, int(numRMS/5)], interpolation=transforms.InterpolationMode.NEAREST, antialias=True)(image_5)
-
-    return (torch.cat([image_1, image_2, image_3, image_4, image_5], dim=2)).numpy().astype(np.float32)
-    '''
-
-    frames = []
-    for i in range(numRMS):
-        frames += [np.transpose(np.array(list(map(lambda x: cmap(x[i]), data.numpy()))), axes=[1, 0])[:3]]
-
-    image_1 = torch.from_numpy(np.transpose(np.stack(frames[:(int(len(frames)/2))]), axes=[1, 2, 0]))
-    image_2 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/2)):]), axes=[1, 2, 0]))
-    image_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_1)
-    image_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_2)
-    image_1 = transforms.Resize(size=[width, int(numRMS/2)], interpolation=transforms.InterpolationMode.BICUBIC,
-                                antialias=True)(image_1)
-    image_2 = transforms.Resize(size=[width, int(numRMS/2)], interpolation=transforms.InterpolationMode.BICUBIC,
-                                antialias=True)(image_2)
-    return torch.cat([image_1, image_2], dim=2).numpy().astype(np.float32)
-
-    '''
-    image = torch.from_numpy(np.transpose(np.stack(frames), axes=[1, 2, 0]))
-    return transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image).numpy().astype(np.float32)
-    '''
-
-
-
-# image generation with aumgentation
-dataCopies = 1
-
-def oneWindowImages(emg):
-    combinedImages = []
-
-    combinedImages.append(dataToImage(emg))
-    #allImages.append(dataToImage(shift_up(batch)))
-    #allImages.append(dataToImage(shift_down(batch)))
-    #for j in range(3):
-        #combinedImages.append(dataToImage(addNoise(emg)))
-        #combinedImages.append(dataToImage(magWarp(emg)))
-
-    return combinedImages
-
-curr = 0
-def getImages (emg):
-    global curr
-    curr += 1
-    print("Current Image: " + str(curr))
-
-    allImages = []
-    with multiprocessing.Pool() as pool:
-    #pool =
-        allImages_async = pool.map_async(oneWindowImages, [(emg[i]) for i in range(len(emg))])
-        allImages = list(chain.from_iterable(allImages_async.get()))
-
-    '''
-    if i % 1000 == 0:
-        print("progress: " + str(i) + "/" + str(len(emg)))
-        #print(labels[i])
-        plt.imshow(allImages[i*dataCopies].T, origin='lower')
-        plt.axis('off')
-        plt.show()
-    '''
-    return allImages
-
-
-
-# no augmentation image generation
-
-def getImages_noAugment (emg):
-    allImages = []
-    with multiprocessing.Pool() as pool:
-        allImages_async = pool.map_async(dataToImage, [(emg[i]) for i in range(len(emg))])
-        allImages = allImages_async.get()
+    # magnitude warping
+    def magWarp (emg):
         '''
-        allImages_async = pool.map_async(oneWindowImages, [(emg[i]) for i in range(len(emg))])
-        allImages = list(chain.from_iterable(allImages_async.get()))
+        if (len(data_noRMS) == 0):
+            data_noRMS = torch.cat([getData(currParticipant, name) for name in gestures], axis=0)
+        emg = data_noRMS[n].view(64, wLen*4)
+        '''
 
-    plt.imshow(allImages[0].T, origin='lower')
-    plt.axis('off')
-    # plt.show()
-    plt.savefig('noAugment.png')
-    plt.imshow(allImages[1].T, origin='lower')
-    plt.axis('off')
-    #plt.show()
-    plt.savefig('augment_1.png')
-    plt.imshow(allImages[2].T, origin='lower')
-    plt.axis('off')
-    #plt.show()
-    plt.savefig('augment_2.png')
-    plt.imshow(allImages[3].T, origin='lower')
-    plt.axis('off')
-    #plt.show()
-    plt.savefig('augment_3.png')
-    '''
-    return allImages
+        cs = scipy.interpolate.CubicSpline([i*25 for i in range(numRMS//25+1)], [gauss(1.0, std) for i in range(numRMS//25+1)])
+        scaleFact = cs([i for i in range(numRMS)])
+        for i in range(numRMS):
+            for j in range(64):
+                emg[i*64 + j] = emg[i*64 + j] * scaleFact[i]
+                #emg[i + j*numRMS] = emg[i + j*numRMS] * scaleFact[i]
+        '''
+        for i in range(len(scaleFact)):
+            emg[:, i] = emg[:, i] * scaleFact[i]
+        '''
+        return emg
+        #return torch.sqrt(torch.mean(emg.unfold(dimension=-1, size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq)) ** 2, dim=2)).view([64*numRMS])
 
+    # electrode offseting
+    def shift_up (batch):
+        batch_up = batch.view(4, 16, numRMS).clone()
+        for k in range(len(batch_up)):
+            for j in range(len(batch_up[k])-1):
+                batch_up[k][j] = batch_up[k][j+1]
+        return batch_up
 
+    def shift_down (batch):
+        batch_down = batch.view(4, 16, numRMS).clone()
+        for k in range(len(batch_down)):
+            for j in range(len(batch_down[k])-1):
+                batch_down[k][len(batch_down[k])-j-1] = batch_down[k][len(batch_down[k])-j-2]
+        return batch_down
+
+### Data Processing
+class DataProcessing:
+    # raw emg data -> 64x(numRMS) image
+    cmap = mpl.colormaps['viridis']
+    order = list(chain.from_iterable([[[k for k in range(64)][(i+j*16+32) % 64] for j in range(4)] for i in range(16)]))
+    
+    def dataToImage (self, emg):
+        rectified = emg - min(emg)
+        rectified = rectified / max(rectified)
+
+        data = rectified.view(64, numRMS).clone()
+        data = torch.stack([data[i] for i in self.order])
+
+        frames = []
+        for i in range(numRMS):
+            frames += [np.transpose(np.array(list(map(lambda x: self.cmap(x[i]), data.numpy()))), axes=[1, 0])[:3]]
+
+        image_1 = torch.from_numpy(np.transpose(np.stack(frames[:(int(len(frames)/2))]), axes=[1, 2, 0]))
+        image_2 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/2)):]), axes=[1, 2, 0]))
+        image_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_1)
+        image_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_2)
+        image_1 = transforms.Resize(size=[width, int(numRMS/2)], interpolation=transforms.InterpolationMode.BICUBIC,
+                                    antialias=True)(image_1)
+        image_2 = transforms.Resize(size=[width, int(numRMS/2)], interpolation=transforms.InterpolationMode.BICUBIC,
+                                    antialias=True)(image_2)
+        return torch.cat([image_1, image_2], dim=2).numpy().astype(np.float32)
+
+    # image generation with augmentation
+    dataCopies = 1
+
+    def oneWindowImages(self, emg):
+        """ Would usually include a list of augmented images, but for now, only returns the original image """
+        combinedImages = []
+
+        combinedImages.append(self.dataToImage(emg))
+        #allImages.append(dataToImage(shift_up(batch)))
+        #allImages.append(dataToImage(shift_down(batch)))
+        #for j in range(3):
+            #combinedImages.append(dataToImage(addNoise(emg)))
+            #combinedImages.append(dataToImage(magWarp(emg)))
+
+        return combinedImages
+
+    # curr = 0
+    def getImages(self, emg):
+        pbar = tqdm(total=len(emg), desc="Augmented Image Generation")
+        allImages = []
+
+        # Define a callback function to collect results and update the progress bar
+        def collect_result(result):
+            allImages.append(result)
+            pbar.update()
+
+        with multiprocessing.Pool() as pool:
+            for i in range(len(emg)):
+                # Use collect_result as the callback to append results
+                pool.apply_async(self.oneWindowImages, args=(emg[i],), callback=collect_result)
+                    
+            pool.close()  # Close the pool to any more tasks
+            pool.join()   # Wait for all worker processes to exit
+
+        pbar.close()
+
+        '''
+        if i % 1000 == 0:
+            print("progress: " + str(i) + "/" + str(len(emg)))
+            #print(labels[i])
+            plt.imshow(allImages[i*dataCopies].T, origin='lower')
+            plt.axis('off')
+            plt.show()
+        '''
+        return allImages
+
+    # no augmentation image generation
+
+    def getImages_noAugment (self, emg):
+        allImages = []
+        pbar = tqdm(total = len(emg), desc="Non-Augmented Image Generation")
+        
+        # Define a callback function to collect results and update progress bar
+        def collect_result(result):
+            allImages.append(result)
+            pbar.update()
+            
+        with multiprocessing.Pool() as pool:
+            results = []
+            for i in range(len(emg)):
+                # Use collect_result as the callback to append results
+                async_result = pool.apply_async(self.dataToImage, args=(emg[i],), callback=collect_result)
+                results.append(async_result)
+                
+            pool.close()  # Close the pool to any more tasks
+            pool.join()   # Wait for all worker processes to exit
+            '''
+            allImages_async = pool.map_async(oneWindowImages, [(emg[i]) for i in range(len(emg))])
+            allImages = list(chain.from_iterable(allImages_async.get()))
+            
+            
+        pbar.close()
+            
+        plt.imshow(allImages[0].T, origin='lower')
+        plt.axis('off')
+        # plt.show()
+        plt.savefig('noAugment.png')
+        plt.imshow(allImages[1].T, origin='lower')
+        plt.axis('off')
+        #plt.show()
+        plt.savefig('augment_1.png')
+        plt.imshow(allImages[2].T, origin='lower')
+        plt.axis('off')
+        #plt.show()
+        plt.savefig('augment_2.png')
+        plt.imshow(allImages[3].T, origin='lower')
+        plt.axis('off')
+        #plt.show()
+        plt.savefig('augment_3.png')
+        '''
+        return allImages
 
 # extracting raw EMG data
 
-participants = [8,9,11,12,13,15,16,17,18,19,20,21,22]
-with multiprocessing.Pool(processes=13) as pool:
-    emg_async = pool.map_async(getEMG, participants)
-    emg = emg_async.get()
-    print("EMG data extracted")
+participants = [8, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22]  # Example participant IDs
+data_extract = DataExtract()  # Your existing DataExtract object
 
-    numGestures_async = pool.map_async(getGestures, participants)
-    numGestures = numGestures_async.get()
+# Initialize the progress bars
+pbar_emg = tqdm(total=len(participants), desc="EMG data extraction")
+pbar_gestures = tqdm(total=len(participants), desc="Number of gestures data extraction", leave=False)
 
+# Define callback functions to update the progress bars
+def update_pbar_emg(result):
+    pbar_emg.update()
 
+def update_pbar_gestures(result):
+    pbar_gestures.update()
+
+# Start the multiprocessing pool
+with multiprocessing.Pool() as pool:
+    # Asynchronously apply tasks for EMG data extraction and update pbar_emg
+    emg_results = [pool.apply_async(data_extract.getEMG, args=(participant,), callback=update_pbar_emg) for participant in participants]
+    
+    # Asynchronously apply tasks for Gestures data extraction and update pbar_gestures
+    gesture_results = [pool.apply_async(data_extract.getGestures, args=(participant,), callback=update_pbar_gestures) for participant in participants]
+
+    # Wait for all EMG data extraction tasks to complete
+    emg = [result.get() for result in emg_results]
+    pbar_emg.close()
+
+    # Wait for all Gestures data extraction tasks to complete
+    numGestures = [result.get() for result in gesture_results]
+    pbar_gestures.close()
+
+print("\nData extraction complete")
+print("\n")
 
 # generating labels
 
@@ -460,26 +340,54 @@ for nums in tqdm(numGestures, desc="Label Generation"):
 
     labels += [sub_labels]
 labels = list(labels)
-print("labels generated")
-
-
+print("Labels generated")
+print("\n")
 
 # LOSO-CV data processing
 
+data_process = DataProcessing()
+
 if leaveOut != 0:
-    emg_out = emg.pop(leaveOut-1)
-    emg_in = np.concatenate([np.array(i.view(len(i), 64*numRMS)) for i in emg], axis=0, dtype=np.float16)
+    foldername_zarr = 'zarr_LOSO/JehanDataset/LOSO_subject' + str(leaveOut) + '/'
+    
+    emg_subject_leftout = emg[leaveOut-1]
+    emg_leftin = emg.copy()
+    emg_leftin.pop(leaveOut-1)
+    emg_scaling_subjects_leftin = np.concatenate([np.array(i.view(len(i), 64*numRMS)) for i in emg_leftin], axis=0, dtype=np.float16)
+    
+    labels_subject_leftout = labels[leaveOut-1]
 
-    s = preprocessing.StandardScaler().fit(emg_in)
-    emg_out = torch.from_numpy(s.transform(np.array(emg_out.view(len(emg_out), 64*numRMS))))
-    del emg_in
+    standard_scalar = preprocessing.StandardScaler().fit(emg_scaling_subjects_leftin )
+    emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*numRMS))))
+    del emg_scaling_subjects_leftin 
+    del emg_subject_leftout
+    
+    # load zarr images if they exist
+    if (os.path.exists(foldername_zarr + 'val_data_LOSO' + str(leaveOut) + '.zarr')):
+        X_validation_np = zarr.load(foldername_zarr + 'val_data_LOSO' + str(leaveOut) + '.zarr')
+        Y_validation_np = zarr.load(foldername_zarr + 'val_labels_LOSO' + str(leaveOut) + '.zarr')
+        X_validation = torch.from_numpy(X_validation_np).to(torch.float16)
+        Y_validation = torch.from_numpy(Y_validation_np).to(torch.float16)
+        print("Validation images found. Validation images loaded for left out subject " + str(leaveOut))
+    else:
+        print("Generating validation images for left out subject " + str(leaveOut))
+        X_validation = torch.tensor(np.array(data_process.getImages_noAugment(emg_scaled_subject_leftout))).to(torch.float16)
+        Y_validation = torch.from_numpy(np.array(labels_subject_leftout)).to(torch.float16)
+        # Convert the PyTorch tensors to NumPy and ensure the type is compatible withf Zarr
+        X_validation_np = X_validation.numpy().astype(np.float16)
+        Y_validation_np = Y_validation.numpy().astype(np.float16)
 
-    X_validation = torch.tensor(np.array(getImages_noAugment(emg_out))).to(torch.float16)
-    Y_validation = torch.from_numpy(np.array(labels.pop(leaveOut-1))).to(torch.float16)
+        # Save the numpy arrays using Zarr
+        zarr.save(foldername_zarr + 'val_data_LOSO' + str(leaveOut) + '.zarr', X_validation_np)
+        zarr.save(foldername_zarr + 'val_labels_LOSO' + str(leaveOut) + '.zarr', Y_validation_np)
+        print("Validation images generated for left out subject " + str(leaveOut) + " and saved")
+    print("\n")
+    
+    del X_validation_np
+    del Y_validation_np
+
     del participants[leaveOut-1]
-    del emg_out
-
-    print("validation images generated")
+    del emg_scaled_subject_leftout
 
     '''
     data = []
@@ -488,11 +396,50 @@ if leaveOut != 0:
         data += [getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))]
         #data += [getImages_noAugment(torch.from_numpy(s.transform(np.array(emg[i]))))]
     '''
-    X_train = torch.from_numpy(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]),
-                64*numRMS)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16)).to(torch.float16)
-    Y_train = torch.from_numpy(np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0,
-                dtype=np.float16)).to(torch.float16)
+    
+    X_train_all = []
+    Y_train_all = []
+    
+    # load zarr images if they exist
+    for subject in range(len(emg)):
+        if subject + 1 == leaveOut:
+            continue
+        
+        if os.path.exists(foldername_zarr + 'train_data_LOSO_subject' + str(subject+1) + '.zarr'):
+            X_train_np = zarr.load(foldername_zarr + 'train_data_LOSO_subject' + str(subject+1) + '.zarr')
+            Y_train_np = zarr.load(foldername_zarr + 'train_labels_LOSO_subject' + str(subject+1) + '.zarr')
+            print("Training images found. Training images loaded for subject", subject+1)
+        else:
+            print("Generating training images for subject", subject+1)
+            X_train_subject = torch.from_numpy(np.array(data_process.getImages(torch.from_numpy(standard_scalar.transform(np.array(emg[subject].view(len(emg[subject]), 64*numRMS))))))
+                                            .astype(np.float16)).to(torch.float16)
+            Y_train_subject = torch.from_numpy(np.repeat(np.array(labels[subject]), data_process.dataCopies, axis=0)).to(torch.float16)
+            X_train_np = X_train_subject.numpy().astype(np.float16)
+            Y_train_np = Y_train_subject.numpy().astype(np.float16)
+            zarr.save(foldername_zarr + 'train_data_LOSO_subject' + str(subject+1) + '.zarr', X_train_np)
+            zarr.save(foldername_zarr + 'train_labels_LOSO_subject' + str(subject+1) + '.zarr', Y_train_np)
+            print("Training images generated and saved for subject", subject+1)
 
+        # Append the subject's data to the accumulating lists
+        X_train_all.append(X_train_np)
+        Y_train_all.append(Y_train_np)
+        
+    print("\n")
+
+    # Concatenate all the subject data into single arrays
+    X_train = np.concatenate(X_train_all, axis=0).astype(np.float16)
+    Y_train = np.concatenate(Y_train_all, axis=0).astype(np.float16)
+    
+    # Optionally convert back to PyTorch tensors if you will continue processing with PyTorch
+    X_train = torch.from_numpy(X_train).to(torch.float16).squeeze()
+    Y_train = torch.from_numpy(Y_train).to(torch.float16).squeeze()
+
+    del X_train_np
+    del Y_train_np
+    del X_train_all
+    del Y_train_all
+    
+        
     '''
     X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16),
                                                                                     np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16), test_size=0.1)
@@ -503,13 +450,13 @@ if leaveOut != 0:
 else:
     data = []
     for i in range(len(emg)):
-        data += [getImages(emg[i])]
+        data += [data_process.getImages(emg[i])]
 
     X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16),
-                                                                                    np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16), test_size=0.2)
+                                                                                    np.concatenate([np.repeat(np.array(i), data_process.dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16), test_size=0.2)
     X_validation, X_test, Y_validation, Y_test = model_selection.train_test_split(X_validation, Y_validation, test_size=0.5)
-    X_train = torch.from_numpy(X_train).to(torch.float16)
-    Y_train = torch.from_numpy(Y_train).to(torch.float16)
+    X_train = torch.from_numpy(X_train).to(torch.float16).squeeze()
+    Y_train = torch.from_numpy(Y_train).to(torch.float16).squeeze()
     X_validation = torch.from_numpy(X_validation).to(torch.float16)
     Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
     X_test = torch.from_numpy(X_test).to(torch.float16)
@@ -519,7 +466,6 @@ print(X_train.size())
 print(Y_train.size())
 print(X_validation.size())
 print(Y_validation.size())
-
 
 # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
 class LayerNorm2d(nn.LayerNorm):
