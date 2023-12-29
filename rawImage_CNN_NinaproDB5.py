@@ -260,7 +260,10 @@ import gc
 gc.collect()
 torch.cuda.empty_cache()
 
-run = wandb.init(name='CNN_seed-'+str(args.seed), project='emg_benchmarking_ninapro-db5_LOSO-' + str(args.leftout_subject), entity='jehanyang')
+if (leaveOut == 0):
+    run = wandb.init(name='CNN_seed-'+str(args.seed), project='emg_benchmarking_ninapro-db5_heldout', entity='jehanyang')
+else:
+    run = wandb.init(name='CNN_seed-'+str(args.seed), project='emg_benchmarking_ninapro-db5_LOSO-' + str(args.leftout_subject), entity='jehanyang')
 wandb.config.lr = learn
 
 num_epochs = 25

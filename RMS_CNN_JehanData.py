@@ -348,7 +348,7 @@ print("\n")
 data_process = DataProcessing()
 
 if leaveOut != 0:
-    foldername_zarr = 'zarr_LOSO/JehanDataset/LOSO_subject' + str(leaveOut) + '/'
+    foldername_zarr = 'LOSOimages_zarr/JehanDataset/LOSO_subject' + str(leaveOut) + '/'
     
     emg_subject_leftout = emg[leaveOut-1]
     emg_leftin = emg.copy()
