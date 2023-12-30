@@ -232,8 +232,8 @@ if args.turn_on_cosine_annealing:
 elif args.turn_on_cyclical_lr:
     # Define the cyclical learning rate scheduler
     step_size = len(train_loader) * 2  # Number of iterations in half a cycle
-    base_lr = 1e-5  # Minimum learning rate
-    max_lr = 1e-4  # Maximum learning rate
+    base_lr = 1e-4  # Minimum learning rate
+    max_lr = 1e-3  # Maximum learning rate
     scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
 
 # Training loop
