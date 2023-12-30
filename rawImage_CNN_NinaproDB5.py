@@ -20,6 +20,8 @@ import argparse
 import random 
 import utils_NinaproDB5 as ut_NDB5
 from sklearn.model_selection import StratifiedKFold
+import os
+import datetime
 
 ## Argument parser with optional argumenets
 
@@ -66,6 +68,14 @@ if args.turn_on_cosine_annealing:
 if args.turn_on_cyclical_lr and args.turn_on_cosine_annealing:
     print("Cannot turn on both cyclical learning rate and cosine annealing")
     exit()
+    
+# Add date and time to filename
+current_datetime = datetime.datetime.now()
+formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+
+print("------------------------------------------------------------------------------------------------------------------------")
+print("Starting run at", formatted_datetime)
+print("------------------------------------------------------------------------------------------------------------------------")
 
 # %%
 # 0 for no LOSO; participants here are 1-13
@@ -238,6 +248,7 @@ elif args.turn_on_cyclical_lr:
 
 # Training loop
 import gc
+import datetime
 gc.collect()
 torch.cuda.empty_cache()
 
@@ -249,10 +260,16 @@ if args.turn_on_cyclical_lr:
 if args.turn_on_cosine_annealing:
     wandb_runname += '_cosineannealing'
 
+project_name = 'emg_benchmarking_ninapro-db5'
 if (leaveOut == 0):
-    run = wandb.init(name=wandb_runname, project='emg_benchmarking_ninapro-db5_heldout', entity='jehanyang')
+    if args.turn_on_kfold:
+        project_name += '_kfold-'+str(args.kfold)+'_foldindex-'+str(args.fold_index)
+    else:
+        project_name += '_heldout'
 else:
-    run = wandb.init(name=wandb_runname, project='emg_benchmarking_ninapro-db5_LOSO-' + str(args.leftout_subject), entity='jehanyang')
+    project_name += '_LOSO-'+str(args.leftout_subject)
+
+run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
 
 
@@ -316,6 +333,15 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
         "Valid Acc": val_acc, 
         "Learning Rate": optimizer.param_groups[0]['lr']})
 
+# Save the model checkpoint in wandb
+testrun_foldername = f'test/{project_name}/{wandb_runname}/{formatted_datetime}/'
+# Make folder if it doesn't exist
+if not os.path.exists(testrun_foldername):
+    os.makedirs(testrun_foldername)
+model_filename = f'{testrun_foldername}model_{formatted_datetime}.pth'
+torch.save(model.state_dict(), model_filename)
+wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
+
 # Testing
 if (leaveOut == 0):
     pred = []
@@ -364,66 +390,67 @@ if (leaveOut == 0):
     # Plot test confusion matrix square
     sn.set(font_scale=0.8)
     sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
-    confusionMatrix_filename = f'confusionMatrix_heldout_seed{args.seed}.png'
+    confusionMatrix_filename = f'{testrun_foldername}confusionMatrix_test_seed{args.seed}_{formatted_datetime}.png'
     plt.savefig(confusionMatrix_filename)
-    np.save(f'confusionMatrix_test_seed{args.seed}.npy', cf_matrix)
+    df_cm_unnormalized.to_pickle(f'{testrun_foldername}confusionMatrix_test_seed{args.seed}_{formatted_datetime}.pkl')
     wandb.log({"Testing Confusion Matrix": wandb.Image(confusionMatrix_filename),
                "Raw Testing Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
     
-    # Load validation in smaller batches for memory purposes
-    torch.cuda.empty_cache()  # Clear cache if needed
+# Load validation in smaller batches for memory purposes
+torch.cuda.empty_cache()  # Clear cache if needed
 
-    model.eval()
-    with torch.no_grad():
-        validation_predictions = []
-        for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=int(X_validation.shape[0]/10))), desc="Validation Batch Loading"):  # Or some other number that fits in memory
-            batch = batch.to(device)
-            outputs = model(batch)
-            preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-            validation_predictions.extend(preds)
+model.eval()
+with torch.no_grad():
+    validation_predictions = []
+    for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=int(X_validation.shape[0]/10))), desc="Validation Batch Loading"):  # Or some other number that fits in memory
+        batch = batch.to(device)
+        outputs = model(batch)
+        preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+        validation_predictions.extend(preds)
 
-    # Calculate validation confusion matrix
-    cf_matrix = confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions))
-    df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
-    df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
-                        columns=gesture_labels)
-    plt.figure(figsize=(12, 7))
-    
-    # Save validation confusion matrix in wandb
-    sn.set(font_scale=0.8)
-    sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
-    confusionMatrix_filename = f'confusionMatrix_validation_seed{args.seed}.png'
-    plt.savefig(confusionMatrix_filename)
-    np.save(f'confusionMatrix_validation_seed{args.seed}.npy', cf_matrix)
-    wandb.log({"Validation Confusion Matrix": wandb.Image(confusionMatrix_filename), 
-               "Raw Validation Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
-    
-    # Load training in smaller batches for memory purposes
-    torch.cuda.empty_cache()  # Clear cache if needed
+# Calculate validation confusion matrix
+cf_matrix = confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions))
+df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
+df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
+                    columns=gesture_labels)
+plt.figure(figsize=(12, 7))
 
-    model.eval()
-    with torch.no_grad():
-        train_predictions = []
-        for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/20))), desc="Training Batch Loading"):  # Or some other number that fits in memory
-            batch = batch.to(device)
-            outputs = model(batch)
-            preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-            train_predictions.extend(preds)
-    
-    # Calculate training confusion matrix
-    cf_matrix = confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions))
-    df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
-    df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
-                        columns=gesture_labels)
-    plt.figure(figsize=(12, 7))
-    
-    # Save training confusion matrix in wandb
-    sn.set(font_scale=0.8)
-    sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
-    confusionMatrix_filename = f'confusionMatrix_training_seed{args.seed}.png'
-    plt.savefig(confusionMatrix_filename)
-    np.save(f'confusionMatrix_training_seed{args.seed}.npy', cf_matrix)
-    wandb.log({"Training Confusion Matrix": wandb.Image(confusionMatrix_filename),
-               "Raw Training Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
+# Save validation confusion matrix in wandb
+sn.set(font_scale=0.8)
+sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
+confusionMatrix_filename = f'{testrun_foldername}confusionMatrix_validation_seed{args.seed}_{formatted_datetime}.png'
+plt.savefig(confusionMatrix_filename)
+df_cm_unnormalized.to_pickle(f'{testrun_foldername}confusionMatrix_validation_seed{args.seed}_{formatted_datetime}.pkl')
+wandb.log({"Validation Confusion Matrix": wandb.Image(confusionMatrix_filename), 
+            "Raw Validation Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
+
+# Load training in smaller batches for memory purposes
+torch.cuda.empty_cache()  # Clear cache if needed
+
+model.eval()
+with torch.no_grad():
+    train_predictions = []
+    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/20))), desc="Training Batch Loading"):  # Or some other number that fits in memory
+        batch = batch.to(device)
+        outputs = model(batch)
+        preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+        train_predictions.extend(preds)
+
+# Calculate training confusion matrix
+cf_matrix = confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions))
+df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
+df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
+                    columns=gesture_labels)
+plt.figure(figsize=(12, 7))
+
+# Save training confusion matrix in wandb
+sn.set(font_scale=0.8)
+sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
+confusionMatrix_filename = f'{testrun_foldername}confusionMatrix_training_seed{args.seed}_{formatted_datetime}.png'
+plt.savefig(confusionMatrix_filename)
+# Save dataframe as pickle file
+df_cm_unnormalized.to_pickle(f'{testrun_foldername}confusionMatrix_training_seed{args.seed}_{formatted_datetime}.pkl')
+wandb.log({"Training Confusion Matrix": wandb.Image(confusionMatrix_filename),
+            "Raw Training Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
     
 run.finish()
