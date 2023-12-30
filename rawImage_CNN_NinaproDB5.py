@@ -220,7 +220,7 @@ if (leaveOut == 0):
 
 # Define the loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-learn = 0.001
+learn = 1e-4
 optimizer = torch.optim.Adam(model.parameters(), lr=learn)
 
 num_epochs = args.epochs
@@ -228,12 +228,12 @@ if args.turn_on_cosine_annealing:
     number_cycles = 5
     annealing_multiplier = 2
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=ut_NDB5.periodLengthForAnnealing(num_epochs, annealing_multiplier, number_cycles),
-                                                                        T_mult=annealing_multiplier, eta_min=0.0001, last_epoch=-1)
+                                                                        T_mult=annealing_multiplier, eta_min=1e-5, last_epoch=-1)
 elif args.turn_on_cyclical_lr:
     # Define the cyclical learning rate scheduler
     step_size = len(train_loader) * 2  # Number of iterations in half a cycle
-    base_lr = 0.0001  # Minimum learning rate
-    max_lr = 0.001  # Maximum learning rate
+    base_lr = 1e-5  # Minimum learning rate
+    max_lr = 1e-4  # Maximum learning rate
     scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
 
 # Training loop
