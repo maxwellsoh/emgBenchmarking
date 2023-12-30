@@ -8,11 +8,22 @@ import multiprocessing
 from torch.utils.data import DataLoader, Dataset
 import matplotlib as mpl
 from math import ceil
+import argparse
 
 numGestures = 18
 wLen = 250 #ms
 stepLen = 10 #50 ms
 cmap = mpl.colormaps['viridis']
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32

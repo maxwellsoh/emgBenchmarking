@@ -625,7 +625,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
         "Train Loss": train_loss,
         "Train Acc": train_acc,
         "Valid Loss": val_loss,
-        "Valid Acc": val_acc})
+        "Valid Acc": val_acc, })
 
 #run.finish()
 

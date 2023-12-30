@@ -19,6 +19,7 @@ from tqdm import tqdm
 import argparse
 import random 
 import utils_NinaproDB5 as ut_NDB5
+from sklearn.model_selection import StratifiedKFold
 
 ## Argument parser with optional argumenets
 
@@ -32,9 +33,15 @@ parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0
 # Add number of epochs to train for
 parser.add_argument('--epochs', type=int, help='number of epochs to train for. Set to 25 by default.', default=25)
 # Add whether or not to use k folds (leftout_subject must be 0)
-parser.add_argument('--turn_on_kfold', type=bool, help='whether or not to use k folds cross validation. Set to False by default.', default=False)
+parser.add_argument('--turn_on_kfold', type=ut_NDB5.str2bool, help='whether or not to use k folds cross validation. Set to False by default.', default=False)
 # Add argument for stratified k folds cross validation
 parser.add_argument('--kfold', type=int, help='number of folds for stratified k-folds cross-validation. Set to 5 by default.', default=5)
+# Add argument for checking the index of the fold
+parser.add_argument('--fold_index', type=int, help='index of the fold to use for cross validation (should be from 1 to --kfold). Set to 1 by default.', default=1)
+# Add argument for whether or not to use cyclical learning rate
+parser.add_argument('--turn_on_cyclical_lr', type=ut_NDB5.str2bool, help='whether or not to use cyclical learning rate. Set to False by default.', default=False)
+# Add argument for whether or not to use cosine annealing with warm restartfs
+parser.add_argument('--turn_on_cosine_annealing', type=ut_NDB5.str2bool, help='whether or not to use cosine annealing with warm restarts. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -50,7 +57,15 @@ if args.turn_on_kfold:
         print("Cannot turn on kfold if leftout_subject is not 0")
         exit()
     print(f"The value of --kfold is {args.kfold}")
-
+    print(f"The value of --fold_index is {args.fold_index}")
+    
+if args.turn_on_cyclical_lr:
+    print(f"The value of --turn_on_cyclical_lr is {args.turn_on_cyclical_lr}")
+if args.turn_on_cosine_annealing:
+    print(f"The value of --turn_on_cosine_annealing is {args.turn_on_cosine_annealing}")
+if args.turn_on_cyclical_lr and args.turn_on_cosine_annealing:
+    print("Cannot turn on both cyclical learning rate and cosine annealing")
+    exit()
 
 # %%
 # 0 for no LOSO; participants here are 1-13
@@ -79,21 +94,39 @@ print("Number of Electrode Channels: ", length)
 print("Number of Timesteps per Trial:", width)
 
 if (leaveOut == 0):
-    # Reshape and concatenate EMG data
-    # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
-    # Then concatenate along the subject dimension (axis=0)
-    emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float16)
-    labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-    indices = np.arange(emg_in.shape[0])
-    train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
-    train_emg_in = emg_in[train_indices]  # Select only the train indices
-    s = preprocessing.StandardScaler().fit(train_emg_in)
-    del emg_in
-    del train_emg_in
-    del labels_in
-    del indices
-    
-else:
+    if args.turn_on_kfold:
+        skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
+        
+        emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float16)
+        labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+        
+        labels_for_folds = np.argmax(labels_in, axis=1)
+        
+        fold_count = 1
+        for train_index, test_index in skf.split(emg_in, labels_for_folds):
+            if fold_count == args.fold_index:
+                train_indices = train_index
+                validation_indices = test_index
+                break
+            fold_count += 1
+        s = preprocessing.StandardScaler().fit(emg_in[train_indices])
+        del emg_in
+        del labels_in
+    else: 
+        # Reshape and concatenate EMG data
+        # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
+        # Then concatenate along the subject dimension (axis=0)
+        emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float16)
+        labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+        indices = np.arange(emg_in.shape[0])
+        train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
+        train_emg_in = emg_in[train_indices]  # Select only the train indices
+        s = preprocessing.StandardScaler().fit(train_emg_in)
+        del emg_in
+        del train_emg_in
+        del labels_in
+        del indices
+else: # Running LOSO
     emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float16)
     s = preprocessing.StandardScaler().fit(emg_in)
     del emg_in
@@ -187,31 +220,42 @@ if (leaveOut == 0):
 
 # Define the loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-learn = 0.0001
+learn = 0.001
 optimizer = torch.optim.Adam(model.parameters(), lr=learn)
 
-# Define the cyclical learning rate scheduler
-step_size = len(train_loader) * 2  # Number of iterations in half a cycle
-base_lr = 0.0001  # Minimum learning rate
-max_lr = 0.001  # Maximum learning rate
-# number_cycles = 5
-# annealing_multiplier = 2
-# cawr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=ut_NDB5.periodLengthForAnnealing(num_epochs, annealing_multiplier, number_cycles)
-#                                                                       T_mult=annealing_multiplier, eta_min=0.01, last_epoch=-1)
-scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
+num_epochs = args.epochs
+if args.turn_on_cosine_annealing:
+    number_cycles = 5
+    annealing_multiplier = 2
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=ut_NDB5.periodLengthForAnnealing(num_epochs, annealing_multiplier, number_cycles),
+                                                                        T_mult=annealing_multiplier, eta_min=0.0001, last_epoch=-1)
+elif args.turn_on_cyclical_lr:
+    # Define the cyclical learning rate scheduler
+    step_size = len(train_loader) * 2  # Number of iterations in half a cycle
+    base_lr = 0.0001  # Minimum learning rate
+    max_lr = 0.001  # Maximum learning rate
+    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
 
 # Training loop
 import gc
 gc.collect()
 torch.cuda.empty_cache()
 
+wandb_runname = 'CNN_seed-'+str(args.seed)
+if args.turn_on_kfold:
+    wandb_runname += '_kfold-'+str(args.kfold)+'_foldindex-'+str(args.fold_index)
+if args.turn_on_cyclical_lr:
+    wandb_runname += '_cyclicallr'
+if args.turn_on_cosine_annealing:
+    wandb_runname += '_cosineannealing'
+
 if (leaveOut == 0):
-    run = wandb.init(name='CNN_seed-'+str(args.seed)+"_cyclical-learningrate", project='emg_benchmarking_ninapro-db5_heldout', entity='jehanyang')
+    run = wandb.init(name=wandb_runname, project='emg_benchmarking_ninapro-db5_heldout', entity='jehanyang')
 else:
-    run = wandb.init(name='CNN_seed-'+str(args.seed)+"_cyclical-learningrate", project='emg_benchmarking_ninapro-db5_LOSO-' + str(args.leftout_subject), entity='jehanyang')
+    run = wandb.init(name=wandb_runname, project='emg_benchmarking_ninapro-db5_LOSO-' + str(args.leftout_subject), entity='jehanyang')
 wandb.config.lr = learn
 
-num_epochs = args.epochs
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
 model.to(device)
@@ -236,6 +280,10 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
 
         loss.backward()
         optimizer.step()
+        if args.turn_on_cyclical_lr:
+            scheduler.step()
+            
+    if args.turn_on_cosine_annealing:
         scheduler.step()
 
     # Validation
@@ -259,13 +307,14 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
 
     print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
     print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
-
+    
     wandb.log({
         "Epoch": epoch,
         "Train Loss": train_loss,
         "Train Acc": train_acc,
         "Valid Loss": val_loss,
-        "Valid Acc": val_acc})
+        "Valid Acc": val_acc, 
+        "Learning Rate": optimizer.param_groups[0]['lr']})
 
 # Testing
 if (leaveOut == 0):
