@@ -213,10 +213,10 @@ for name, param in model.named_parameters():
         param.requires_grad = False
 
 batch_size = 64
-train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size)
+train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=ut_NDB5.seed_worker)
+val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker)
 if (leaveOut == 0):
-    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size)
+    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker)
 
 # Define the loss function and optimizer
 criterion = nn.CrossEntropyLoss()
@@ -231,7 +231,7 @@ if args.turn_on_cosine_annealing:
                                                                         T_mult=annealing_multiplier, eta_min=1e-5, last_epoch=-1)
 elif args.turn_on_cyclical_lr:
     # Define the cyclical learning rate scheduler
-    step_size = len(train_loader) * 4  # Number of iterations in half a cycle
+    step_size = len(train_loader) * 8  # Number of iterations in half a cycle
     base_lr = 1e-4  # Minimum learning rate
     max_lr = 1e-3  # Maximum learning rate
     scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
