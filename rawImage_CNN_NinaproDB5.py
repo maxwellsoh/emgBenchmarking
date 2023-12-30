@@ -356,6 +356,7 @@ if (leaveOut == 0):
     
     # Calculate test confusion matrix
     cf_matrix = confusion_matrix(true, pred)
+    df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
                         columns=gesture_labels)
     plt.figure(figsize=(12, 7))
@@ -367,7 +368,7 @@ if (leaveOut == 0):
     plt.savefig(confusionMatrix_filename)
     np.save(f'confusionMatrix_test_seed{args.seed}.npy', cf_matrix)
     wandb.log({"Testing Confusion Matrix": wandb.Image(confusionMatrix_filename),
-               "Raw Testing Confusion Matrix": f'confusionMatrix_test_seed{args.seed}.npy'})
+               "Raw Testing Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
     
     # Load validation in smaller batches for memory purposes
     torch.cuda.empty_cache()  # Clear cache if needed
@@ -383,6 +384,7 @@ if (leaveOut == 0):
 
     # Calculate validation confusion matrix
     cf_matrix = confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions))
+    df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
                         columns=gesture_labels)
     plt.figure(figsize=(12, 7))
@@ -394,7 +396,7 @@ if (leaveOut == 0):
     plt.savefig(confusionMatrix_filename)
     np.save(f'confusionMatrix_validation_seed{args.seed}.npy', cf_matrix)
     wandb.log({"Validation Confusion Matrix": wandb.Image(confusionMatrix_filename), 
-               "Raw Validation Confusion Matrix": f'confusionMatrix_validation_seed{args.seed}.npy'})
+               "Raw Validation Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
     
     # Load training in smaller batches for memory purposes
     torch.cuda.empty_cache()  # Clear cache if needed
@@ -409,7 +411,8 @@ if (leaveOut == 0):
             train_predictions.extend(preds)
     
     # Calculate training confusion matrix
-    cf_matrix = confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(test_predictions))
+    cf_matrix = confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions))
+    df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
                         columns=gesture_labels)
     plt.figure(figsize=(12, 7))
@@ -421,6 +424,6 @@ if (leaveOut == 0):
     plt.savefig(confusionMatrix_filename)
     np.save(f'confusionMatrix_training_seed{args.seed}.npy', cf_matrix)
     wandb.log({"Training Confusion Matrix": wandb.Image(confusionMatrix_filename),
-               "Raw Training Confusion Matrix": f'confusionMatrix_training_seed{args.seed}.npy'})
+               "Raw Training Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
     
 run.finish()
