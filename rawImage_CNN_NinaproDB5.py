@@ -351,20 +351,52 @@ if (leaveOut == 0):
     gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction', 
                       'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 
                       'Ulnar Deviation', 'Wrist Extension Fist']
-
+    
+    # %% Confusion Matrix
+    
+    # Calculate test confusion matrix
     cf_matrix = confusion_matrix(true, pred)
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
                         columns=gesture_labels)
     plt.figure(figsize=(12, 7))
     
-    # Plot confusion matrix square
+    # Plot test confusion matrix square
     sn.set(font_scale=0.8)
     sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
     confusionMatrix_filename = f'confusionMatrix_heldout_seed{args.seed}.png'
     plt.savefig(confusionMatrix_filename)
-
-    # Save confusion matrix in Wandb
-    wandb.log({"Testing Confusion Matrix": wandb.Image(confusionMatrix_filename)})
+    np.save(f'confusionMatrix_test_seed{args.seed}.npy', cf_matrix)
+    wandb.log({"Testing Confusion Matrix": wandb.Image(confusionMatrix_filename),
+               "Raw Testing Confusion Matrix": f'confusionMatrix_test_seed{args.seed}.npy'})
     
-
+    # Calculate validation confusion matrix
+    cf_matrix = confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.argmax(model(X_validation.to(device)).cpu().detach().numpy(), axis=1))
+    df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
+                        columns=gesture_labels)
+    plt.figure(figsize=(12, 7))
+    
+    # Save validation confusion matrix in wandb
+    sn.set(font_scale=0.8)
+    sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
+    confusionMatrix_filename = f'confusionMatrix_validation_seed{args.seed}.png'
+    plt.savefig(confusionMatrix_filename)
+    np.save(f'confusionMatrix_validation_seed{args.seed}.npy', cf_matrix)
+    wandb.log({"Validation Confusion Matrix": wandb.Image(confusionMatrix_filename), 
+               "Raw Validation Confusion Matrix": f'confusionMatrix_validation_seed{args.seed}.npy'})
+    
+    # Calculate training confusion matrix
+    cf_matrix = confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.argmax(model(X_train.to(device)).cpu().detach().numpy(), axis=1))
+    df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
+                        columns=gesture_labels)
+    plt.figure(figsize=(12, 7))
+    
+    # Save training confusion matrix in wandb
+    sn.set(font_scale=0.8)
+    sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
+    confusionMatrix_filename = f'confusionMatrix_training_seed{args.seed}.png'
+    plt.savefig(confusionMatrix_filename)
+    np.save(f'confusionMatrix_training_seed{args.seed}.npy', cf_matrix)
+    wandb.log({"Training Confusion Matrix": wandb.Image(confusionMatrix_filename),
+               "Raw Training Confusion Matrix": f'confusionMatrix_training_seed{args.seed}.npy'})
+    
 run.finish()
