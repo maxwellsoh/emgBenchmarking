@@ -263,7 +263,7 @@ if args.turn_on_cosine_annealing:
 project_name = 'emg_benchmarking_ninapro-db5'
 if (leaveOut == 0):
     if args.turn_on_kfold:
-        project_name += '_kfold-'+str(args.kfold)+'_foldindex-'+str(args.fold_index)
+        project_name += '_kfold-'+str(args.kfold)
     else:
         project_name += '_heldout'
 else:
