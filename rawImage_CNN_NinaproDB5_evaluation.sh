@@ -10,6 +10,7 @@ print_usage() {
     printf " -e  Set the number of epochs to train for. Default is 25.\n"
     printf " -c  Specify whether to use cyclical learning rate (True or False). Default is False.\n"
     printf " -a  Specify whether to use cosine annealing with warm restarts (True or False). Default is False.\n"
+    printf " -i  Specify what index fold to start at. Default is 1.\n"
     printf " -h  Show usage information.\n"
 }
 
@@ -19,20 +20,21 @@ K_FOLDS_ON="False"
 K_FOLDS=5
 SEED=0
 EPOCHS=25
-FOLD_INDEX=0
+FOLD_INDEX_START=1
 CYCLICAL_LR_ON="False"
 COSINE_ANNEALING_ON="False"
 
 # Parse command line arguments
-while getopts 'l:v:k:s:e:c:a:h' flag; do  # Changed flags to single letters
+while getopts 'l:v:k:s:e:c:a:i:h' flag; do  # Changed flags to single letters
     case "${flag}" in
         l) LOSO_CV="${OPTARG}" ;;
         v) K_FOLDS_ON="${OPTARG}" ;;
-        k) K_FOLDS="${OPTARG}" ;;  
+        k) K_FOLDS="${OPTARG}" ;;
         s) SEED="${OPTARG}" ;;
         e) EPOCHS="${OPTARG}" ;;
         c) CYCLICAL_LR_ON="${OPTARG}" ;;  # -clr changed to -c
         a) COSINE_ANNEALING_ON="${OPTARG}" ;;  # -ca changed to -a
+        i) FOLD_INDEX_START="${OPTARG}" ;;
         h) print_usage
            exit 0 ;;
         *) print_usage
@@ -60,7 +62,7 @@ if [ "$LOSO_CV" = "True" ]; then
     done
 elif [ "$K_FOLDS_ON" = "True" ]; then
     echo "Running stratified k-folds cross validation..."
-    for FOLD_INDEX in $(seq 1 $K_FOLDS)
+    for FOLD_INDEX in $(seq $FOLD_INDEX_START $K_FOLDS)
     do
         python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=0 --turn_on_kfold=True --kfold=$K_FOLDS --fold_index=$FOLD_INDEX --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON
     done
