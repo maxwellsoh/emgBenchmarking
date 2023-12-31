@@ -238,12 +238,13 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     average_images = np.array(average_images)
 
     # Plot average image of each gesture
-    fig, axs = plt.subplots(2, 9, figsize=(20, 5))
+    fig, axs = plt.subplots(2, 9, figsize=(3, 5))
     for i in range(numGestures):
         axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])
         axs[i//9, i%9].axis('off')
     fig.suptitle('Average Image of Each Gesture')
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     
     # Log in wandb
     averageImages_filename = f'{testrun_foldername}averageImages_seed{args.seed}_{partition_name}_{formatted_datetime}.png'

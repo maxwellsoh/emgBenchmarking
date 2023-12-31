@@ -119,7 +119,7 @@ print("Number of Timesteps per Trial:", width)
 if args.turn_on_rms:
     sigma_coefficient = 0.1
 else:
-    sigma_coefficient = 2
+    sigma_coefficient = 0.5
 
 if (leaveOut == 0):
     if args.turn_on_kfold:

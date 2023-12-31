@@ -27,6 +27,7 @@ FOLD_INDEX_START=1
 CYCLICAL_LR_ON="False"
 COSINE_ANNEALING_ON="False"
 RMS_ON="False"
+RMS_WINDOWS=10
 MAGNITUDE_ON="False"
 
 # Parse command line arguments
