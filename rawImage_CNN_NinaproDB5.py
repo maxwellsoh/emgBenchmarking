@@ -24,6 +24,7 @@ import matplotlib as mpl
 import logging
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
+import timm
 
 ## Argument parser with optional argumenets
 
@@ -52,6 +53,8 @@ parser.add_argument('--turn_on_rms', type=ut_NDB5.str2bool, help='whether or not
 parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows to use. Set to 10 by default.', default=10)
 # Add argument for whether or not to concatenate magnitude image
 parser.add_argument('--turn_on_magnitude', type=ut_NDB5.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
+# Add argument for model to use
+parser.add_argument('--model', type=str, help='model to use (\'david_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -60,6 +63,7 @@ args = parser.parse_args()
 print(f"The value of --leftout_subject is {args.leftout_subject}")
 print(f"The value of --seed is {args.seed}")
 print(f"The value of --epochs is {args.epochs}")
+print(f"The model to use is {args.model}")
 if args.turn_on_kfold:
     if args.leftout_subject == 0:
         print(f"The value of --turn_on_kfold is {args.turn_on_kfold}")
@@ -282,28 +286,37 @@ else:
     print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
     print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
 
-model = resnet50(weights=ResNet50_Weights.DEFAULT)
-model = nn.Sequential(*list(model.children())[:-4])
-#model = nn.Sequential(*list(model.children())[:-4])
-num_features = model[-1][-1].conv3.out_channels
-#num_features = model.fc.in_features
-dropout = 0.5
-model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
-model.add_module('flatten', nn.Flatten())
-'''
-model.add_module('fc1', nn.Linear(num_features, 1024))
-model.add_module('relu', nn.ReLU())
-model.add_module('dropout1', nn.Dropout(dropout))
-model.add_module('fc2', nn.Linear(1024, 1024))
-model.add_module('relu2', nn.ReLU())
-model.add_module('dropout2', nn.Dropout(dropout))
-model.add_module('fc3', nn.Linear(1024, ut_NDB5.numGestures))
-'''
-model.add_module('fc1', nn.Linear(num_features, 512))
-model.add_module('relu', nn.ReLU())
-model.add_module('dropout1', nn.Dropout(dropout))
-model.add_module('fc3', nn.Linear(512, ut_NDB5.numGestures))
-model.add_module('softmax', nn.Softmax(dim=1))
+if args.model == 'resnet50':
+    model = resnet50(weights=ResNet50_Weights.DEFAULT)
+    model = nn.Sequential(*list(model.children())[:-4])
+    # #model = nn.Sequential(*list(model.children())[:-4])
+    num_features = model[-1][-1].conv3.out_channels
+    # #num_features = model.fc.in_features
+    dropout = 0.5
+    model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
+    model.add_module('flatten', nn.Flatten())
+    '''
+    model.add_module('fc1', nn.Linear(num_features, 1024))
+    model.add_module('relu', nn.ReLU())
+    model.add_module('dropout1', nn.Dropout(dropout))
+    model.add_module('fc2', nn.Linear(1024, 1024))
+    model.add_module('relu2', nn.ReLU())
+    model.add_module('dropout2', nn.Dropout(dropout))
+    model.add_module('fc3', nn.Linear(1024, ut_NDB5.numGestures))
+    '''
+    model.add_module('fc1', nn.Linear(num_features, 512))
+    model.add_module('relu', nn.ReLU())
+    model.add_module('dropout1', nn.Dropout(dropout))
+    model.add_module('fc3', nn.Linear(512, ut_NDB5.numGestures))
+    model.add_module('softmax', nn.Softmax(dim=1))
+else: 
+    # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
+    # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
+    model_name = args.model
+    model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB5.numGestures)
+    # # Load the Vision Transformer model
+    # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
+    # model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB5.numGestures)
 
 num = 0
 for name, param in model.named_parameters():
@@ -356,7 +369,9 @@ if args.turn_on_rms:
     wandb_runname += '_rms-windows-'+str(args.num_rms_windows)
 if args.turn_on_magnitude:  
     wandb_runname += '_magnitude'
-wandb_runname += '_electrode-normalized'
+if args.leftout_subject != 0:
+    wandb_runname += '_LOSO-'+str(args.leftout_subject)
+wandb_runname += '_' + model_name
 
 project_name = 'emg_benchmarking_ninapro-db5'
 if (leaveOut == 0):
@@ -365,7 +380,7 @@ if (leaveOut == 0):
     else:
         project_name += '_heldout'
 else:
-    project_name += '_LOSO-'+str(args.leftout_subject)
+    project_name += '_LOSO'
 
 run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn

@@ -162,13 +162,13 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         resize_length_factor = 3
     native_resnet_size = 224
 
-    with multiprocessing.Pool(processes=24) as pool:
+    with multiprocessing.Pool(processes=5) as pool:
         args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
         images_async = pool.starmap_async(optimized_makeOneImage, args)
         images = images_async.get()
 
     if turn_on_magnitude:
-        with multiprocessing.Pool(processes=24) as pool:
+        with multiprocessing.Pool(processes=5) as pool:
             args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
             images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
             images_magnitude = images_async.get()
