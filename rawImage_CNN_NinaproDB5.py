@@ -46,6 +46,10 @@ parser.add_argument('--fold_index', type=int, help='index of the fold to use for
 parser.add_argument('--turn_on_cyclical_lr', type=ut_NDB5.str2bool, help='whether or not to use cyclical learning rate. Set to False by default.', default=False)
 # Add argument for whether or not to use cosine annealing with warm restartfs
 parser.add_argument('--turn_on_cosine_annealing', type=ut_NDB5.str2bool, help='whether or not to use cosine annealing with warm restarts. Set to False by default.', default=False)
+# Add argument for whether or not to use RMS
+parser.add_argument('--turn_on_rms', type=ut_NDB5.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
+# Add argument for number of RMS windows
+parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows to use. Set to 10 by default.', default=10)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -70,6 +74,9 @@ if args.turn_on_cosine_annealing:
 if args.turn_on_cyclical_lr and args.turn_on_cosine_annealing:
     print("Cannot turn on both cyclical learning rate and cosine annealing")
     exit()
+if args.turn_on_rms:
+    print(f"The value of --turn_on_rms is {args.turn_on_rms}")
+    print(f"The value of --num_rms_windows is {args.num_rms_windows}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -147,7 +154,7 @@ data = []
 
 # add tqdm to show progress bar
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    data += [ut_NDB5.getImages(emg[x], s, length, width)]
+    data += [ut_NDB5.getImages(emg[x], s, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.num_rms_windows)]
 
 print("------------------------------------------------------------------------------------------------------------------------")
 print("NOTE: The width 224 is natively used in Resnet50, height is currently integer  multiples of number of electrode channels")
@@ -261,6 +268,8 @@ if args.turn_on_cyclical_lr:
     wandb_runname += '_cyclicallr'
 if args.turn_on_cosine_annealing: 
     wandb_runname += '_cosineannealing'
+if args.turn_on_rms:
+    wandb_runname += '_rmswindows-'+str(args.num_rms_windows)
 
 project_name = 'emg_benchmarking_ninapro-db5'
 if (leaveOut == 0):

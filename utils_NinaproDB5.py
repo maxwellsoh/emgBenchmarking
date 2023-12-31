@@ -92,7 +92,7 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
-    image_data = np.reshape(rgb_data, (16, 50, 3))
+    image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
     image = np.transpose(image_data, (2, 0, 1))
     
     # Split image and resize
@@ -114,9 +114,25 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     
     return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
 
-def getImages(emg, standardScaler, length, width):
+def calculate_rms(array_2d):
+    # Calculate RMS for 2D array where each row is a window
+    return np.sqrt(np.mean(array_2d**2))
+
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=5):
+
     emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
-    
+    # Use RMS preprocessing
+    if turn_on_rms:
+        emg = emg.reshape(len(emg), length, width)
+        # Reshape data for RMS calculation: (SAMPLES, 16, 5, 10)
+        emg = emg.reshape(len(emg), length, rms_windows, width // rms_windows)
+        
+        # Apply RMS calculation along the last axis (axis=-1)
+        emg_rms = np.apply_along_axis(calculate_rms, -1, emg)
+        emg = emg_rms  # Resulting shape will be (SAMPLES, 16, 5)
+        width = rms_windows
+        emg = emg.reshape(len(emg), length*width)
+
     # Parameters that don't change can be set once
     resize_length_factor = 6
     native_resnet_size = 224
