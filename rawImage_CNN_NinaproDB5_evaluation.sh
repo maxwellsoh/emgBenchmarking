@@ -13,6 +13,7 @@ print_usage() {
     printf " -i  Specify what index fold to start at. Default is 1.\n"
     printf " -r  Specify whether to use RMS normalization (True or False). Default is False.\n"
     printf " -n  Specify the number of windows to use for RMS normalization. Should be an even factor of sample timesteps (Probably 50). Default is 10.\n"
+    printf " -m  Specify whether to use a magnitude image concatenation (True or False). Default is False.\n"
     printf " -h  Show usage information.\n"
 }
 
@@ -26,9 +27,10 @@ FOLD_INDEX_START=1
 CYCLICAL_LR_ON="False"
 COSINE_ANNEALING_ON="False"
 RMS_ON="False"
+MAGNITUDE_ON="False"
 
 # Parse command line arguments
-while getopts 'l:v:k:s:e:c:a:i:r:n:h' flag; do  # Changed flags to single letters
+while getopts 'l:v:k:s:e:c:a:i:r:n:m:h' flag; do  # Changed flags to single letters
     case "${flag}" in
         l) LOSO_CV="${OPTARG}" ;;
         v) K_FOLDS_ON="${OPTARG}" ;;
@@ -40,6 +42,7 @@ while getopts 'l:v:k:s:e:c:a:i:r:n:h' flag; do  # Changed flags to single letter
         i) FOLD_INDEX_START="${OPTARG}" ;;
         r) RMS_ON="${OPTARG}" ;;
         n) RMS_WINDOWS="${OPTARG}" ;;
+        m) MAGNITUDE_ON="${OPTARG}" ;;
         h) print_usage
            exit 0 ;;
         *) print_usage
@@ -56,6 +59,10 @@ echo "SEED: $SEED"
 echo "EPOCHS: $EPOCHS"
 echo "CYCLICAL_LR_ON: $CYCLICAL_LR_ON"
 echo "COSINE_ANNEALING_ON: $COSINE_ANNEALING_ON"
+echo "FOLD_INDEX_START: $FOLD_INDEX_START"
+echo "RMS_ON: $RMS_ON"
+echo "RMS_WINDOWS: $RMS_WINDOWS"
+echo "MAGNITUDE_ON: $MAGNITUDE_ON"
 echo "*******************************************"
 
 # Main conditional execution based on LOSO_CV and K_FOLDS_ON flags
@@ -63,13 +70,13 @@ if [ "$LOSO_CV" = "True" ]; then
     echo "Running Leave-One-Subject-Out Cross-Validation..."
     for SUBJECT in {1..10}
     do
-        python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=$SUBJECT --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS
+        python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=$SUBJECT --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS --turn_on_magnitude=$MAGNITUDE_ON
     done
 elif [ "$K_FOLDS_ON" = "True" ]; then
     echo "Running stratified k-folds cross validation..."
     for FOLD_INDEX in $(seq $FOLD_INDEX_START $K_FOLDS)
     do
-        python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=0 --turn_on_kfold=True --kfold=$K_FOLDS --fold_index=$FOLD_INDEX --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS
+        python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=0 --turn_on_kfold=True --kfold=$K_FOLDS --fold_index=$FOLD_INDEX --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS --turn_on_magnitude=$MAGNITUDE_ON
     done
 else
     echo "Running standard training..."
@@ -77,5 +84,5 @@ else
     echo $COSINE_ANNEALING_ON
     echo "Value of cyclical_lr"
     echo $CYCLICAL_LR_ON
-    python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=0 --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS
+    python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=0 --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS --turn_on_magnitude=$MAGNITUDE_ON
 fi

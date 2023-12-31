@@ -86,6 +86,29 @@ def getLabels (n):
     restim = getRestim(n)
     return contract(restim[balance(restim)])
 
+def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
+    # Normalize with global min and max
+    data = (data - global_min) / (global_max - global_min)
+    data_converted = cmap(data)
+    rgb_data = data_converted[:, :3]
+    image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
+    image = np.transpose(image_data, (2, 0, 1))
+    
+    # Split image and resize
+    imageL, imageR = np.split(image, 2, axis=2)
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    
+    # Clamp between 0 and 1 using torch.clamp
+    imageL, imageR = map(lambda img: torch.clamp(img, 0, 1), (imageL, imageR))
+    
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    imageL, imageR = map(normalize, (imageL, imageR))
+    
+    return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
+
 def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size):
     # Contrast normalize and convert data
     # NOTE: Should this be contrast normalized? Then only patterns of data will be visible, not absolute values
@@ -118,7 +141,7 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=5):
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None):
 
     emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
     # Use RMS preprocessing
@@ -135,12 +158,21 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
 
     # Parameters that don't change can be set once
     resize_length_factor = 6
+    if turn_on_magnitude:
+        resize_length_factor = 3
     native_resnet_size = 224
 
-    with multiprocessing.Pool() as pool:
+    with multiprocessing.Pool(processes=24) as pool:
         args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
         images_async = pool.starmap_async(optimized_makeOneImage, args)
         images = images_async.get()
+
+    if turn_on_magnitude:
+        with multiprocessing.Pool(processes=24) as pool:
+            args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
+            images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
+            images_magnitude = images_async.get()
+        images = np.concatenate((images, images_magnitude), axis=2)
     
     return images
 

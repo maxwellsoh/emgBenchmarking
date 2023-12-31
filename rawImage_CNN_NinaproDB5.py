@@ -50,6 +50,8 @@ parser.add_argument('--turn_on_cosine_annealing', type=ut_NDB5.str2bool, help='w
 parser.add_argument('--turn_on_rms', type=ut_NDB5.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
 # Add argument for number of RMS windows
 parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows to use. Set to 10 by default.', default=10)
+# Add argument for whether or not to concatenate magnitude image
+parser.add_argument('--turn_on_magnitude', type=ut_NDB5.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -77,6 +79,8 @@ if args.turn_on_cyclical_lr and args.turn_on_cosine_annealing:
 if args.turn_on_rms:
     print(f"The value of --turn_on_rms is {args.turn_on_rms}")
     print(f"The value of --num_rms_windows is {args.num_rms_windows}")
+if args.turn_on_magnitude:
+    print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -112,11 +116,16 @@ width = len(emg[0][0][0])
 print("Number of Electrode Channels: ", length)
 print("Number of Timesteps per Trial:", width)
 
+if args.turn_on_rms:
+    sigma_coefficient = 0.1
+else:
+    sigma_coefficient = 2
+
 if (leaveOut == 0):
     if args.turn_on_kfold:
         skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
         
-        emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float16)
+        emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
         labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
         
         labels_for_folds = np.argmax(labels_in, axis=1)
@@ -129,32 +138,41 @@ if (leaveOut == 0):
                 break
             fold_count += 1
         s = preprocessing.StandardScaler().fit(emg_in[train_indices])
+        global_min = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
+        global_max = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
+
         del emg_in
         del labels_in
     else: 
         # Reshape and concatenate EMG data
         # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
         # Then concatenate along the subject dimension (axis=0)
-        emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float16)
+        emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
         labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
         indices = np.arange(emg_in.shape[0])
         train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
         train_emg_in = emg_in[train_indices]  # Select only the train indices
         s = preprocessing.StandardScaler().fit(train_emg_in)
+        global_min = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
+        global_max = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
+
         del emg_in
         del train_emg_in
         del labels_in
         del indices
 else: # Running LOSO
-    emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float16)
+    emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
     s = preprocessing.StandardScaler().fit(emg_in)
+    global_min = emg_in.mean() - sigma_coefficient*emg_in.std()
+    global_max = emg_in.mean() + sigma_coefficient*emg_in.std()
+
     del emg_in
 
 data = []
 
 # add tqdm to show progress bar
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    data += [ut_NDB5.getImages(emg[x], s, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.num_rms_windows)]
+    data += [ut_NDB5.getImages(emg[x], s, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.num_rms_windows, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
 
 print("------------------------------------------------------------------------------------------------------------------------")
 print("NOTE: The width 224 is natively used in Resnet50, height is currently integer  multiples of number of electrode channels")
@@ -270,6 +288,8 @@ if args.turn_on_cosine_annealing:
     wandb_runname += '_cosineannealing'
 if args.turn_on_rms:
     wandb_runname += '_rmswindows-'+str(args.num_rms_windows)
+if args.turn_on_magnitude:  
+    wandb_runname += '_magnitude'
 
 project_name = 'emg_benchmarking_ninapro-db5'
 if (leaveOut == 0):
