@@ -257,7 +257,7 @@ if args.turn_on_kfold:
     wandb_runname += '_kfold-'+str(args.kfold)+'_foldindex-'+str(args.fold_index)
 if args.turn_on_cyclical_lr:
     wandb_runname += '_cyclicallr'
-if args.turn_on_cosine_annealing:
+if args.turn_on_cosine_annealing: 
     wandb_runname += '_cosineannealing'
 
 project_name = 'emg_benchmarking_ninapro-db5'

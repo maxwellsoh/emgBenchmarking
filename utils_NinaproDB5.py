@@ -11,8 +11,11 @@ from math import ceil
 import argparse
 
 numGestures = 18
+fs = 200 #Hz
 wLen = 250 #ms
+wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 10 #50 ms
+numElectrodes = 16
 cmap = mpl.colormaps['viridis']
 
 def str2bool(v):
@@ -63,17 +66,21 @@ def filter(emg):
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
 def getRestim (n):
-    restim = torch.tensor((pd.read_csv('./NinaproDB5/s' + str(n) + '/restimulusS' + str(n) + '_E2.csv')).to_numpy(), dtype=torch.float32)
-    return restim.unfold(dimension=0, size=int(wLen / 5), step=stepLen)
+    # read hdf5 file 
+    restim = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/restimulusS{n}_E2.hdf5')
+    restim = torch.tensor(restim.values)
+    return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
 def getEMG (n):
     restim = getRestim(n)
-    emg = torch.tensor(((pd.read_csv('./NinaproDB5/s' + str(n) + '/emgS' + str(n) + '_E2.csv')).to_numpy()), dtype=torch.float32)
-    return filter(emg.unfold(dimension=0, size=int(wLen / 5), step=10)[balance(restim)])
+    emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
+    emg = torch.tensor(emg.values)
+    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=10)[balance(restim)])
 
 def getLabels (n):
     restim = getRestim(n)
     return contract(restim[balance(restim)])
+
 def makeOneImage(args):
     data, cmap, length, width = args
     data = data - min(data)
