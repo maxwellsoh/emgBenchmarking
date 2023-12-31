@@ -9,6 +9,11 @@ from torch.utils.data import DataLoader, Dataset
 import matplotlib as mpl
 from math import ceil
 import argparse
+import wandb
+from sklearn.metrics import confusion_matrix
+import seaborn as sn
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 numGestures = 18
 fs = 200 #Hz
@@ -81,32 +86,44 @@ def getLabels (n):
     restim = getRestim(n)
     return contract(restim[balance(restim)])
 
-def makeOneImage(args):
-    data, cmap, length, width = args
-    data = data - min(data)
-    data = data / max(data)
-    data = torch.from_numpy(data).view(length, width).to(torch.float32)
+def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size):
+    # Contrast normalize and convert data
+    # NOTE: Should this be contrast normalized? Then only patterns of data will be visible, not absolute values
+    data = (data - data.min()) / (data.max() - data.min())
+    data_converted = cmap(data)
+    rgb_data = data_converted[:, :3]
+    image_data = np.reshape(rgb_data, (16, 50, 3))
+    image = np.transpose(image_data, (2, 0, 1))
     
-    imageL = np.zeros((3, length, width//2))
-    imageR = np.zeros((3, length, width//2))
-    for p in range (length):
-        for q in range (width//2):
-            imageL[:, p, q] = (cmap(float(data[p][q])))[:3]
-            imageR[:, p, q] = (cmap(float(data[p][q+width//2])))[:3]
+    # Split image and resize
+    imageL, imageR = np.split(image, 2, axis=2)
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
     
-    imageL = transforms.Resize([96, 112], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(torch.from_numpy(imageL))
-    imageR = transforms.Resize([96, 112], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(torch.from_numpy(imageR))
-    imageL = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(imageL)
-    imageR = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(imageR)
+    # Get max and min values after interpolation
+    max_val = max(imageL.max(), imageR.max())
+    min_val = min(imageL.min(), imageR.min())
+    
+    # Contrast normalize again after interpolation
+    imageL, imageR = map(lambda img: (img - min_val) / (max_val - min_val), (imageL, imageR))
+    
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    imageL, imageR = map(normalize, (imageL, imageR))
     
     return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
 
 def getImages(emg, standardScaler, length, width):
     emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+    
+    # Parameters that don't change can be set once
+    resize_length_factor = 6
+    native_resnet_size = 224
 
     with multiprocessing.Pool() as pool:
-        args = [(emg[i], cmap, length, width) for i in range(len(emg))]
-        images_async = pool.map_async(makeOneImage, args)
+        args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_async = pool.starmap_async(optimized_makeOneImage, args)
         images = images_async.get()
     
     return images
@@ -128,3 +145,96 @@ class Data(Dataset):
 
     def __len__(self):
         return len(self.data)
+
+def plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
+    # Calculate confusion matrix
+    cf_matrix = confusion_matrix(true, pred)
+    df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
+    df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
+                        columns=gesture_labels)
+    plt.figure(figsize=(12, 7))
+    
+    # Plot confusion matrix square
+    sn.set(font_scale=0.8)
+    sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
+    confusionMatrix_filename = f'{testrun_foldername}confusionMatrix_{partition_name}_seed{args.seed}_{formatted_datetime}.png'
+    plt.savefig(confusionMatrix_filename)
+    df_cm_unnormalized.to_pickle(f'{testrun_foldername}confusionMatrix_{partition_name}_seed{args.seed}_{formatted_datetime}.pkl')
+    wandb.log({f"{partition_name} Confusion Matrix": wandb.Image(confusionMatrix_filename),
+                f"Raw {partition_name.capitalize()} Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
+    
+def denormalize(images):
+    # Define mean and std from imageNet
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+    
+    # Denormalize
+    images = images * std + mean
+    
+    # Clip the values to ensure they are within [0,1] as expected for image data
+    images = torch.clamp(images, 0, 1)
+    
+    return images
+
+
+def plot_average_images(image_data, true, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
+    # First, denormalize the images
+    image_data = denormalize(image_data)
+    # Calculate average image of each gesture
+    average_images = []
+    print(f"Plotting average {partition_name} images...")
+    for i in range(numGestures):
+        gesture_images = image_data[np.array(true) == i].cpu().detach().numpy()
+        first_three_images = gesture_images[:3]
+        average_images.append(np.mean(first_three_images, axis=0))
+    average_images = np.array(average_images)
+
+    # Plot average image of each gesture
+    fig, axs = plt.subplots(2, 9, figsize=(20, 5))
+    for i in range(numGestures):
+        axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
+        axs[i//9, i%9].set_title(gesture_labels[i])
+        axs[i//9, i%9].axis('off')
+    fig.suptitle('Average Image of Each Gesture')
+    
+    # Log in wandb
+    averageImages_filename = f'{testrun_foldername}averageImages_seed{args.seed}_{partition_name}_{formatted_datetime}.png'
+    plt.savefig(averageImages_filename, dpi=450)
+    wandb.log({f"Average {partition_name.capitalize()} Images": wandb.Image(averageImages_filename)})
+
+
+def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
+    # Convert true to numpy for quick indexing
+    true_np = np.array(true)
+
+    # Parameters for plotting
+    rows_per_gesture = 15
+    total_gestures = numGestures  # Replace with the actual number of gestures
+
+    # Create subplots
+    fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))
+
+    print(f"Plotting first fifteen {partition_name} images...")
+    for i in range(total_gestures):
+        # Find indices of the first 15 images for gesture i
+        gesture_indices = np.where(true_np == i)[0][:rows_per_gesture]
+        
+        # Select and denormalize only the required images
+        gesture_images = denormalize(image_data[gesture_indices]).cpu().detach().numpy()
+
+        for j in range(len(gesture_images)):  # len(gesture_images) is no more than rows_per_gesture
+            ax = axs[j, i]
+            # Transpose the image data to match the expected shape (H, W, C) for imshow
+            ax.imshow(gesture_images[j].transpose(1, 2, 0))
+            if j == 0:
+                ax.set_title(gesture_labels[i])
+            ax.axis('off')
+
+    fig.suptitle(f'First Fifteen {partition_name.capitalize()} Images of Each Gesture')
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    # Save and log the figure
+    firstThreeImages_filename = f'{testrun_foldername}firstFifteenImages_seed{args.seed}_{partition_name}_{formatted_datetime}.png'
+    plt.savefig(firstThreeImages_filename, dpi=300)
+    wandb.log({f"First Fifteen {partition_name.capitalize()} Images of Each Gesture": wandb.Image(firstThreeImages_filename)})
+

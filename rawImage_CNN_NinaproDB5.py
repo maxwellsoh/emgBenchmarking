@@ -12,8 +12,6 @@ import wandb
 from sklearn.metrics import confusion_matrix
 import seaborn as sn
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib as mpl
 import multiprocessing
 from tqdm import tqdm
 import argparse
@@ -22,6 +20,10 @@ import utils_NinaproDB5 as ut_NDB5
 from sklearn.model_selection import StratifiedKFold
 import os
 import datetime
+import matplotlib as mpl
+import logging
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
+import matplotlib.pyplot as plt
 
 ## Argument parser with optional argumenets
 
@@ -144,7 +146,7 @@ else: # Running LOSO
 data = []
 
 # add tqdm to show progress bar
-for x in tqdm(range(len(emg)), desc="Subject"):
+for x in tqdm(range(len(emg)), desc="Number of Subjects "):
     data += [ut_NDB5.getImages(emg[x], s, length, width)]
 
 print("------------------------------------------------------------------------------------------------------------------------")
@@ -379,22 +381,11 @@ if (leaveOut == 0):
                       'Ulnar Deviation', 'Wrist Extension Fist']
     
     # %% Confusion Matrix
-    
-    # Calculate test confusion matrix
-    cf_matrix = confusion_matrix(true, pred)
-    df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
-    df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
-                        columns=gesture_labels)
-    plt.figure(figsize=(12, 7))
-    
-    # Plot test confusion matrix square
-    sn.set(font_scale=0.8)
-    sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
-    confusionMatrix_filename = f'{testrun_foldername}confusionMatrix_test_seed{args.seed}_{formatted_datetime}.png'
-    plt.savefig(confusionMatrix_filename)
-    df_cm_unnormalized.to_pickle(f'{testrun_foldername}confusionMatrix_test_seed{args.seed}_{formatted_datetime}.pkl')
-    wandb.log({"Testing Confusion Matrix": wandb.Image(confusionMatrix_filename),
-               "Raw Testing Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
+    # Plot and log confusion matrix in wandb
+    ut_NDB5.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    # Plot and log images
+    ut_NDB5.plot_average_images(X_test, true, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    ut_NDB5.plot_first_fifteen_images(X_test, true, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
     
 # Load validation in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
@@ -408,21 +399,9 @@ with torch.no_grad():
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         validation_predictions.extend(preds)
 
-# Calculate validation confusion matrix
-cf_matrix = confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions))
-df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
-df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
-                    columns=gesture_labels)
-plt.figure(figsize=(12, 7))
-
-# Save validation confusion matrix in wandb
-sn.set(font_scale=0.8)
-sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
-confusionMatrix_filename = f'{testrun_foldername}confusionMatrix_validation_seed{args.seed}_{formatted_datetime}.png'
-plt.savefig(confusionMatrix_filename)
-df_cm_unnormalized.to_pickle(f'{testrun_foldername}confusionMatrix_validation_seed{args.seed}_{formatted_datetime}.pkl')
-wandb.log({"Validation Confusion Matrix": wandb.Image(confusionMatrix_filename), 
-            "Raw Validation Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
+ut_NDB5.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+ut_NDB5.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+ut_NDB5.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
 
 # Load training in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
@@ -436,21 +415,8 @@ with torch.no_grad():
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         train_predictions.extend(preds)
 
-# Calculate training confusion matrix
-cf_matrix = confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions))
-df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
-df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
-                    columns=gesture_labels)
-plt.figure(figsize=(12, 7))
-
-# Save training confusion matrix in wandb
-sn.set(font_scale=0.8)
-sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
-confusionMatrix_filename = f'{testrun_foldername}confusionMatrix_training_seed{args.seed}_{formatted_datetime}.png'
-plt.savefig(confusionMatrix_filename)
-# Save dataframe as pickle file
-df_cm_unnormalized.to_pickle(f'{testrun_foldername}confusionMatrix_training_seed{args.seed}_{formatted_datetime}.pkl')
-wandb.log({"Training Confusion Matrix": wandb.Image(confusionMatrix_filename),
-            "Raw Training Confusion Matrix": wandb.Table(dataframe=df_cm_unnormalized)})
+ut_NDB5.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+ut_NDB5.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+ut_NDB5.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
     
 run.finish()
