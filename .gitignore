@@ -1,4 +1,13 @@
 CapgMyo_B/
 Jehan_Dataset/
 NinaproDB5/
-NinaproDB2/
+NinaproDB2/test/
+wandb/
+__pycache__/
+.vscode/
+DatasetsProcessed_hdf5/
+test/
+LOSOimages_zarr/
+.gitignore
+OzdemirEMG/
+*.zip
