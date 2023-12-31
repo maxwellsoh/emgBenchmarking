@@ -1,7 +1,8 @@
 CapgMyo_B/
 Jehan_Dataset/
 NinaproDB5/
-NinaproDB2/test/
+NinaproDB2/
+test/
 wandb/
 __pycache__/
 .vscode/
