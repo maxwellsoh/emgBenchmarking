@@ -137,12 +137,34 @@ if (leaveOut == 0):
                 validation_indices = test_index
                 break
             fold_count += 1
-        s = preprocessing.StandardScaler().fit(emg_in[train_indices])
+
+        # Normalize by electrode
+        emg_in_by_electrode = emg_in[train_indices].reshape(-1, length, width)
+        # s = preprocessing.StandardScaler().fit(emg_in[train_indices])
         global_min = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
         global_max = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
 
+        # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+        # Reshape data to (SAMPLES*50, 16)
+        emg_reshaped = emg_in_by_electrode.reshape(-1, ut_NDB5.numElectrodes)
+
+        # Initialize and fit the scaler on the reshaped data
+        # This will compute the mean and std dev for each electrode across all samples and features
+        scaler = preprocessing.StandardScaler()
+        scaler.fit(emg_reshaped)
+        
+        # Repeat means and std_devs for each time point using np.repeat
+        scaler.mean_ = np.repeat(scaler.mean_, width)
+        scaler.scale_ = np.repeat(scaler.scale_, width)
+        scaler.var_ = np.repeat(scaler.var_, width)
+        scaler.n_features_in_ = width*ut_NDB5.numElectrodes
+
         del emg_in
         del labels_in
+
+        del emg_in_by_electrode
+        del emg_reshaped
+
     else: 
         # Reshape and concatenate EMG data
         # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
@@ -152,27 +174,71 @@ if (leaveOut == 0):
         indices = np.arange(emg_in.shape[0])
         train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
         train_emg_in = emg_in[train_indices]  # Select only the train indices
-        s = preprocessing.StandardScaler().fit(train_emg_in)
+        # s = preprocessing.StandardScaler().fit(train_emg_in)
+
+        # Normalize by electrode
+        emg_in_by_electrode = train_emg_in.reshape(-1, length, width)
         global_min = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
         global_max = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
 
+        # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+        # Reshape data to (SAMPLES*50, 16)
+        emg_reshaped = emg_in_by_electrode.reshape(-1, ut_NDB5.numElectrodes)
+
+        # Initialize and fit the scaler on the reshaped data
+        # This will compute the mean and std dev for each electrode across all samples and features
+        scaler = preprocessing.StandardScaler()
+        scaler.fit(emg_reshaped)
+        
+        # Repeat means and std_devs for each time point using np.repeat
+        scaler.mean_ = np.repeat(scaler.mean_, width)
+        scaler.scale_ = np.repeat(scaler.scale_, width)
+        scaler.var_ = np.repeat(scaler.var_, width)
+        scaler.n_features_in_ = width*ut_NDB5.numElectrodes
+
         del emg_in
-        del train_emg_in
         del labels_in
+
+        del train_emg_in
         del indices
+
+        del emg_in_by_electrode
+        del emg_reshaped
+
 else: # Running LOSO
     emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
-    s = preprocessing.StandardScaler().fit(emg_in)
+    # s = preprocessing.StandardScaler().fit(emg_in)
     global_min = emg_in.mean() - sigma_coefficient*emg_in.std()
     global_max = emg_in.mean() + sigma_coefficient*emg_in.std()
 
+    # Normalize by electrode
+    emg_in_by_electrode = emg_in.reshape(-1, length, width)
+
+    # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+    # Reshape data to (SAMPLES*50, 16)
+    emg_reshaped = emg_in_by_electrode.reshape(-1, ut_NDB5.numElectrodes)
+
+    # Initialize and fit the scaler on the reshaped data
+    # This will compute the mean and std dev for each electrode across all samples and features
+    scaler = preprocessing.StandardScaler()
+    scaler.fit(emg_reshaped)
+    
+    # Repeat means and std_devs for each time point using np.repeat
+    scaler.mean_ = np.repeat(scaler.mean_, width)
+    scaler.scale_ = np.repeat(scaler.scale_, width)
+    scaler.var_ = np.repeat(scaler.var_, width)
+    scaler.n_features_in_ = width*ut_NDB5.numElectrodes
+
     del emg_in
+    del emg_in_by_electrode
+    del emg_reshaped
+
 
 data = []
 
 # add tqdm to show progress bar
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    data += [ut_NDB5.getImages(emg[x], s, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.num_rms_windows, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
+    data += [ut_NDB5.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.num_rms_windows, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
 
 print("------------------------------------------------------------------------------------------------------------------------")
 print("NOTE: The width 224 is natively used in Resnet50, height is currently integer  multiples of number of electrode channels")
@@ -281,20 +347,21 @@ torch.cuda.empty_cache()
 
 wandb_runname = 'CNN_seed-'+str(args.seed)
 if args.turn_on_kfold:
-    wandb_runname += '_kfold-'+str(args.kfold)+'_foldindex-'+str(args.fold_index)
+    wandb_runname += '_k-fold-'+str(args.kfold)+'_fold-index-'+str(args.fold_index)
 if args.turn_on_cyclical_lr:
-    wandb_runname += '_cyclicallr'
+    wandb_runname += '_cyclical-lr'
 if args.turn_on_cosine_annealing: 
-    wandb_runname += '_cosineannealing'
+    wandb_runname += '_cosine-annealing'
 if args.turn_on_rms:
-    wandb_runname += '_rmswindows-'+str(args.num_rms_windows)
+    wandb_runname += '_rms-windows-'+str(args.num_rms_windows)
 if args.turn_on_magnitude:  
     wandb_runname += '_magnitude'
+wandb_runname += '_electrode-normalized'
 
 project_name = 'emg_benchmarking_ninapro-db5'
 if (leaveOut == 0):
     if args.turn_on_kfold:
-        project_name += '_kfold-'+str(args.kfold)
+        project_name += '_k-fold-'+str(args.kfold)
     else:
         project_name += '_heldout'
 else:

@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 numGestures = 18
 fs = 200 #Hz
-wLen = 250 #ms
+wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 10 #50 ms
 numElectrodes = 16
@@ -80,7 +80,7 @@ def getEMG (n):
     restim = getRestim(n)
     emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
     emg = torch.tensor(emg.values)
-    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=10)[balance(restim)])
+    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
 
 def getLabels (n):
     restim = getRestim(n)
@@ -238,7 +238,7 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     average_images = np.array(average_images)
 
     # Plot average image of each gesture
-    fig, axs = plt.subplots(2, 9, figsize=(3, 5))
+    fig, axs = plt.subplots(2, 9, figsize=(10, 5))
     for i in range(numGestures):
         axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])
