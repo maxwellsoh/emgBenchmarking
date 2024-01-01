@@ -30,6 +30,7 @@ mpl.use('Agg')  # Use a non-interactive backend like 'Agg'
 import matplotlib.pyplot as plt
 import zarr
 import os
+import timm
 
 ## Argument parser with optional argumenets
 
@@ -53,8 +54,8 @@ print("\n")
 leaveOut = int(args.leftout_subject)
 
 # root mean square instances per channel per image
-#numRMS = 500 # must be a factor of 1000
-numRMS = 250
+#RMS_input_windowsize = 500 # must be a factor of 1000
+RMS_input_windowsize = 250
 
 # image width - must be multiple of 64
 width = 64
@@ -100,7 +101,7 @@ class DataExtract:
         else:
             file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
         data = self.highpassFilter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=int(wLen/1000*freq), step=int(stepLen/1000*freq))).unfold(dimension=-1,
-                        size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq))
+                        size=int(wLen/(1000*RMS_input_windowsize)*freq), step=int(wLen/(1000*RMS_input_windowsize)*freq))
 
         return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2, 3])
 
@@ -117,7 +118,7 @@ class DataExtract:
         numGestures = []
         for gesture in self.gestures: 
             data = self.highpassFilter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=int(wLen/1000*freq), step=int(stepLen/1000*freq))).unfold(dimension=-1,
-            size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq))
+            size=int(wLen/(1000*RMS_input_windowsize)*freq), step=int(wLen/(1000*RMS_input_windowsize)*freq))
             numGestures += [len(data)]
         return numGestures
 
@@ -138,29 +139,29 @@ class DataAugment:
         emg = data_noRMS[n].view(64, wLen*4)
         '''
 
-        cs = scipy.interpolate.CubicSpline([i*25 for i in range(numRMS//25+1)], [gauss(1.0, std) for i in range(numRMS//25+1)])
-        scaleFact = cs([i for i in range(numRMS)])
-        for i in range(numRMS):
+        cs = scipy.interpolate.CubicSpline([i*25 for i in range(RMS_input_windowsize//25+1)], [gauss(1.0, std) for i in range(RMS_input_windowsize//25+1)])
+        scaleFact = cs([i for i in range(RMS_input_windowsize)])
+        for i in range(RMS_input_windowsize):
             for j in range(64):
                 emg[i*64 + j] = emg[i*64 + j] * scaleFact[i]
-                #emg[i + j*numRMS] = emg[i + j*numRMS] * scaleFact[i]
+                #emg[i + j*RMS_input_windowsize] = emg[i + j*RMS_input_windowsize] * scaleFact[i]
         '''
         for i in range(len(scaleFact)):
             emg[:, i] = emg[:, i] * scaleFact[i]
         '''
         return emg
-        #return torch.sqrt(torch.mean(emg.unfold(dimension=-1, size=int(wLen/(1000*numRMS)*freq), step=int(wLen/(1000*numRMS)*freq)) ** 2, dim=2)).view([64*numRMS])
+        #return torch.sqrt(torch.mean(emg.unfold(dimension=-1, size=int(wLen/(1000*RMS_input_windowsize)*freq), step=int(wLen/(1000*RMS_input_windowsize)*freq)) ** 2, dim=2)).view([64*RMS_input_windowsize])
 
     # electrode offseting
     def shift_up (batch):
-        batch_up = batch.view(4, 16, numRMS).clone()
+        batch_up = batch.view(4, 16, RMS_input_windowsize).clone()
         for k in range(len(batch_up)):
             for j in range(len(batch_up[k])-1):
                 batch_up[k][j] = batch_up[k][j+1]
         return batch_up
 
     def shift_down (batch):
-        batch_down = batch.view(4, 16, numRMS).clone()
+        batch_down = batch.view(4, 16, RMS_input_windowsize).clone()
         for k in range(len(batch_down)):
             for j in range(len(batch_down[k])-1):
                 batch_down[k][len(batch_down[k])-j-1] = batch_down[k][len(batch_down[k])-j-2]
@@ -168,7 +169,7 @@ class DataAugment:
 
 ### Data Processing
 class DataProcessing:
-    # raw emg data -> 64x(numRMS) image
+    # raw emg data -> 64x(RMS_input_windowsize) image
     cmap = mpl.colormaps['viridis']
     order = list(chain.from_iterable([[[k for k in range(64)][(i+j*16+32) % 64] for j in range(4)] for i in range(16)]))
     
@@ -176,20 +177,20 @@ class DataProcessing:
         rectified = emg - min(emg)
         rectified = rectified / max(rectified)
 
-        data = rectified.view(64, numRMS).clone()
+        data = rectified.view(64, RMS_input_windowsize).clone()
         data = torch.stack([data[i] for i in self.order])
 
         frames = []
-        for i in range(numRMS):
+        for i in range(RMS_input_windowsize):
             frames += [np.transpose(np.array(list(map(lambda x: self.cmap(x[i]), data.numpy()))), axes=[1, 0])[:3]]
 
         image_1 = torch.from_numpy(np.transpose(np.stack(frames[:(int(len(frames)/2))]), axes=[1, 2, 0]))
         image_2 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/2)):]), axes=[1, 2, 0]))
         image_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_1)
         image_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_2)
-        image_1 = transforms.Resize(size=[width, int(numRMS/2)], interpolation=transforms.InterpolationMode.BICUBIC,
+        image_1 = transforms.Resize(size=[width, int(RMS_input_windowsize/2)], interpolation=transforms.InterpolationMode.BICUBIC,
                                     antialias=True)(image_1)
-        image_2 = transforms.Resize(size=[width, int(numRMS/2)], interpolation=transforms.InterpolationMode.BICUBIC,
+        image_2 = transforms.Resize(size=[width, int(RMS_input_windowsize/2)], interpolation=transforms.InterpolationMode.BICUBIC,
                                     antialias=True)(image_2)
         return torch.cat([image_1, image_2], dim=2).numpy().astype(np.float32)
 
@@ -353,12 +354,12 @@ if leaveOut != 0:
     emg_subject_leftout = emg[leaveOut-1]
     emg_leftin = emg.copy()
     emg_leftin.pop(leaveOut-1)
-    emg_scaling_subjects_leftin = np.concatenate([np.array(i.view(len(i), 64*numRMS)) for i in emg_leftin], axis=0, dtype=np.float16)
+    emg_scaling_subjects_leftin = np.concatenate([np.array(i.view(len(i), 64*RMS_input_windowsize)) for i in emg_leftin], axis=0, dtype=np.float16)
     
     labels_subject_leftout = labels[leaveOut-1]
 
     standard_scalar = preprocessing.StandardScaler().fit(emg_scaling_subjects_leftin )
-    emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*numRMS))))
+    emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*RMS_input_windowsize))))
     del emg_scaling_subjects_leftin 
     del emg_subject_leftout
     
@@ -393,7 +394,7 @@ if leaveOut != 0:
     data = []
     for i in range(len(emg)):
         print(i)
-        data += [getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))]
+        data += [getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*RMS_input_windowsize)))))]
         #data += [getImages_noAugment(torch.from_numpy(s.transform(np.array(emg[i]))))]
     '''
     
@@ -411,7 +412,7 @@ if leaveOut != 0:
             print("Training images found. Training images loaded for subject", subject+1)
         else:
             print("Generating training images for subject", subject+1)
-            X_train_subject = torch.from_numpy(np.array(data_process.getImages(torch.from_numpy(standard_scalar.transform(np.array(emg[subject].view(len(emg[subject]), 64*numRMS))))))
+            X_train_subject = torch.from_numpy(np.array(data_process.getImages(torch.from_numpy(standard_scalar.transform(np.array(emg[subject].view(len(emg[subject]), 64*RMS_input_windowsize))))))
                                             .astype(np.float16)).to(torch.float16)
             Y_train_subject = torch.from_numpy(np.repeat(np.array(labels[subject]), data_process.dataCopies, axis=0)).to(torch.float16)
             X_train_np = X_train_subject.numpy().astype(np.float16)
@@ -441,7 +442,7 @@ if leaveOut != 0:
     
         
     '''
-    X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*numRMS)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16),
+    X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*RMS_input_windowsize)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16),
                                                                                     np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16), test_size=0.1)
     '''
 
@@ -475,17 +476,20 @@ class LayerNorm2d(nn.LayerNorm):
         x = x.permute(0, 3, 1, 2)
         return x
 
+n_inputs = 768
+hidden_size = 128 # default is 2048
+n_outputs = 10
+
+# model_name = 'davit_tiny.msft_in1k'
 #model = resnet50(weights=ResNet50_Weights.DEFAULT)
+model_name = 'convnext_tiny'
+# model = timm.create_model(model_name, pretrained=True, num_classes=10)
 model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
 #model = nn.Sequential(*list(model.children())[:-4])
 #model = nn.Sequential(*list(model.children())[:-3])
 #num_features = model[-1][-1].conv3.out_channels
 #num_features = model.fc.in_features
 dropout = 0.1 # was 0.5
-
-n_inputs = 768
-hidden_size = 128 # default is 2048
-n_outputs = 10
 
 sequential_layers = nn.Sequential(
     LayerNorm2d((n_inputs,), eps=1e-06, elementwise_affine=True),
@@ -547,9 +551,9 @@ class Data(Dataset):
 
 batch_size = 64
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, worker_init_fn=seed_worker)
-val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=2, pin_memory=True, worker_init_fn=seed_worker)
+val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, pin_memory=True, worker_init_fn=seed_worker)
 if (leaveOut == 0):
-    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=2, pin_memory=True, worker_init_fn=seed_worker)
+    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, pin_memory=True, worker_init_fn=seed_worker)
 
 print("number of batches: ", len(train_loader))
 
@@ -563,7 +567,12 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
 gc.collect()
 torch.cuda.empty_cache()
 
-run = wandb.init(name='CNN_seed-' + str(args.seed), project='emg_benchmarking_LOSO' + str(args.leftout_subject), entity='jehanyang')
+wandb_runname = 'CNN_seed-' + str(args.seed)
+if leaveOut != 0:
+    wandb_runname += '_LOSO-' + str(args.leftout_subject)     
+wandb_runname += '_' + model_name      
+
+run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
 wandb.config.lr = learn
 
 num_epochs = 50
@@ -625,7 +634,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
         "Train Loss": train_loss,
         "Train Acc": train_acc,
         "Valid Loss": val_loss,
-        "Valid Acc": val_acc})
+        "Valid Acc": val_acc, })
 
 #run.finish()
 
