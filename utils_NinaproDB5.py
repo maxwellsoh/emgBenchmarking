@@ -22,6 +22,10 @@ wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 10 #50 ms
 numElectrodes = 16
 cmap = mpl.colormaps['viridis']
+# Gesture Labels
+gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction', 
+                    'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 
+                    'Ulnar Deviation', 'Wrist Extension Fist']
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -226,15 +230,20 @@ def denormalize(images):
 
 
 def plot_average_images(image_data, true, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
-    # First, denormalize the images
-    image_data = denormalize(image_data)
+    # Convert true to numpy for quick indexing
+    true_np = np.array(true)        
+
     # Calculate average image of each gesture
     average_images = []
     print(f"Plotting average {partition_name} images...")
     for i in range(numGestures):
-        gesture_images = image_data[np.array(true) == i].cpu().detach().numpy()
-        first_three_images = gesture_images[:3]
-        average_images.append(np.mean(first_three_images, axis=0))
+        # Find indices
+        gesture_indices = np.where(true_np == i)[0]
+
+        # Select and denormalize only the required images
+        gesture_images = denormalize(image_data[gesture_indices]).cpu().detach().numpy()
+        average_images.append(np.mean(gesture_images, axis=0))
+
     average_images = np.array(average_images)
 
     # Plot average image of each gesture

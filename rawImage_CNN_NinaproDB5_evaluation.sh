@@ -14,6 +14,7 @@ print_usage() {
     printf " -r  Specify whether to use RMS normalization (True or False). Default is False.\n"
     printf " -n  Specify the number of windows to use for RMS normalization. Should be an even factor of sample timesteps (Probably 50). Default is 10.\n"
     printf " -m  Specify whether to use a magnitude image concatenation (True or False). Default is False.\n"
+    printf " -o  Specify what model to use. ('davit_tiny.msft_in1k', 'efficientnet_b3.ns_jft_in1k', 'vit_tiny_path16_224', 'efficientnet_b0'). Default is 'resnet50'. \n"
     printf " -h  Show usage information.\n"
 }
 

@@ -25,6 +25,8 @@ import logging
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 import timm
+from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
+
 
 ## Argument parser with optional argumenets
 
@@ -54,7 +56,7 @@ parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows t
 # Add argument for whether or not to concatenate magnitude image
 parser.add_argument('--turn_on_magnitude', type=ut_NDB5.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 # Add argument for model to use
-parser.add_argument('--model', type=str, help='model to use (\'david_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
+parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -286,6 +288,7 @@ else:
     print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
     print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
 
+model_name = args.model
 if args.model == 'resnet50':
     model = resnet50(weights=ResNet50_Weights.DEFAULT)
     model = nn.Sequential(*list(model.children())[:-4])
@@ -309,10 +312,45 @@ if args.model == 'resnet50':
     model.add_module('dropout1', nn.Dropout(dropout))
     model.add_module('fc3', nn.Linear(512, ut_NDB5.numGestures))
     model.add_module('softmax', nn.Softmax(dim=1))
+elif args.model == 'convnext_tiny_custom':
+    # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
+    class LayerNorm2d(nn.LayerNorm):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            x = x.permute(0, 2, 3, 1)
+            x = torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+            x = x.permute(0, 3, 1, 2)
+            return x
+
+    n_inputs = 768
+    hidden_size = 128 # default is 2048
+    n_outputs = ut_NDB5.numGestures
+
+    # model = timm.create_model(model_name, pretrained=True, num_classes=10)
+    model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
+    #model = nn.Sequential(*list(model.children())[:-4])
+    #model = nn.Sequential(*list(model.children())[:-3])
+    #num_features = model[-1][-1].conv3.out_channels
+    #num_features = model.fc.in_features
+    dropout = 0.1 # was 0.5
+
+    sequential_layers = nn.Sequential(
+        LayerNorm2d((n_inputs,), eps=1e-06, elementwise_affine=True),
+        nn.Flatten(start_dim=1, end_dim=-1),
+        nn.Linear(n_inputs, hidden_size, bias=True),
+        nn.BatchNorm1d(hidden_size),
+        nn.GELU(),
+        nn.Dropout(dropout),
+        nn.Linear(hidden_size, hidden_size),
+        nn.BatchNorm1d(hidden_size),
+        nn.GELU(),
+        nn.Linear(hidden_size, n_outputs),
+        nn.LogSoftmax(dim=1)
+    )
+    model.classifier = sequential_layers
+
 else: 
     # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
     # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-    model_name = args.model
     model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB5.numGestures)
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
@@ -392,6 +430,23 @@ model.to(device)
 
 wandb.watch(model)
 
+testrun_foldername = f'test/{project_name}/{wandb_runname}/{formatted_datetime}/'
+# Make folder if it doesn't exist
+if not os.path.exists(testrun_foldername):
+    os.makedirs(testrun_foldername)
+model_filename = f'{testrun_foldername}model_{formatted_datetime}.pth'
+
+if leaveOut == 0:
+    # Plot and log images
+    ut_NDB5.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    ut_NDB5.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+
+ut_NDB5.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+ut_NDB5.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+
+ut_NDB5.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+ut_NDB5.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+
 for epoch in tqdm(range(num_epochs), desc="Epoch"):
     model.train()
     train_acc = 0.0
@@ -446,12 +501,6 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
         "Valid Acc": val_acc, 
         "Learning Rate": optimizer.param_groups[0]['lr']})
 
-# Save the model checkpoint in wandb
-testrun_foldername = f'test/{project_name}/{wandb_runname}/{formatted_datetime}/'
-# Make folder if it doesn't exist
-if not os.path.exists(testrun_foldername):
-    os.makedirs(testrun_foldername)
-model_filename = f'{testrun_foldername}model_{formatted_datetime}.pth'
 torch.save(model.state_dict(), model_filename)
 wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
@@ -486,18 +535,11 @@ if (leaveOut == 0):
         "Test Loss": test_loss,
         "Test Acc": test_acc}) 
     
-    # Gesture Labels
-    gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction', 
-                      'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 
-                      'Ulnar Deviation', 'Wrist Extension Fist']
     
     # %% Confusion Matrix
     # Plot and log confusion matrix in wandb
-    ut_NDB5.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-    # Plot and log images
-    ut_NDB5.plot_average_images(X_test, true, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-    ut_NDB5.plot_first_fifteen_images(X_test, true, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-    
+    ut_NDB5.plot_confusion_matrix(true, pred, ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+
 # Load validation in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
 
@@ -510,9 +552,7 @@ with torch.no_grad():
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         validation_predictions.extend(preds)
 
-ut_NDB5.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
-ut_NDB5.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
-ut_NDB5.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+ut_NDB5.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
 
 # Load training in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
@@ -520,14 +560,12 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     train_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/20))), desc="Training Batch Loading"):  # Or some other number that fits in memory
+    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/40))), desc="Training Batch Loading"):  # Or some other number that fits in memory
         batch = batch.to(device)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         train_predictions.extend(preds)
 
-ut_NDB5.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-ut_NDB5.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-ut_NDB5.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+ut_NDB5.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
     
 run.finish()
