@@ -122,9 +122,19 @@ width = len(emg[0][0][0])
 print("Number of Electrode Channels: ", length)
 print("Number of Timesteps per Trial:", width)
 
+# These can be tuned to change the normalization
+# This is the coefficient for the standard deviation
+# used for the magnitude images. In practice, these
+# should be fairly small so that images have more
+# contrast
 if args.turn_on_rms:
+    # This tends to be small because in pracitice
+    # the RMS is usually much smaller than the raw EMG
+    # NOTE: Should check why this is the case
     sigma_coefficient = 0.1
 else:
+    # This tends to be larger because the raw EMG
+    # is usually much larger than the RMS
     sigma_coefficient = 0.5
 
 if (leaveOut == 0):
