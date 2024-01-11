@@ -9,7 +9,7 @@ To install the virtual environment, run
 $ mamba env create -n emgbench -f environment.yml
 ```
 # Benchmarking
-Currently, to download the datasets, you will have to go to the website that hosts the datasets, download each individuals data (for Ninapro DB2, DB5, and Capgmyo), downolad the whole dataset (for Ozdemir's open dataset), or request the dataset (for Jehan's dataset). 
+Currently, to download the datasets, you will have to go to the website that hosts the datasets, download each individuals data (for Ninapro DB2, DB5, and Capgmyo), download the whole dataset (for Ozdemir's open dataset), or request the dataset (for Jehan's dataset). 
 
 You will follow this up with running the python notebooks `dataset_processing_[DATASET-NAME].ipynb` in order to process the dataset into hdf5 files (with the exception of Jehan's dataset, which is already in hdf5 format). 
 
