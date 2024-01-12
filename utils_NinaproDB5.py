@@ -24,7 +24,10 @@ cmap = mpl.colormaps['viridis']
 # Gesture Labels
 gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction', 
                     'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 
-                    'Ulnar Deviation', 'Wrist Extension Fist']
+                    'Ulnar Deviation', 'Wrist Extension Fist', 'Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook Grasp', 'Index fingex extension grasp', 'Medium wrap', 
+                    'Ring grasp', 'Prismatic four fingers grasp', 'Stick grasp', 'Writing tripod grasp', 'Power sphere grasp', 'Three finger sphere grasp', 'Precision sphere grasp', 
+                    'Tripod grasp', 'Prismatic pinch grasp', 'Tip pinch grasp', 'Quadrupod grasp', 'Lateral grasp', 'Parallel extension grasp', 'Extension type grasp', 'Power disk grasp', 
+                    'Open a bottle with a tripod grasp', 'Turn a screw', 'Cut something']
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -212,7 +215,7 @@ def plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, 
     plt.figure(figsize=(12, 7))
     
     # Plot confusion matrix square
-    sn.set(font_scale=0.8)
+    sn.set(font_scale=0.4)
     sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
     confusionMatrix_filename = f'{testrun_foldername}confusionMatrix_{partition_name}_seed{args.seed}_{formatted_datetime}.png'
     plt.savefig(confusionMatrix_filename)
@@ -254,7 +257,7 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     average_images = np.array(average_images)
 
     # Plot average image of each gesture
-    fig, axs = plt.subplots(2, 9, figsize=(10, 5))
+    fig, axs = plt.subplots(5, 9, figsize=(10, 5))
     for i in range(numGestures):
         axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])

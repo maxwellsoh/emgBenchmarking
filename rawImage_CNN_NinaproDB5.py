@@ -604,7 +604,6 @@ if (leaveOut == 0):
         "Test Loss": test_loss,
         "Test Acc": test_acc}) 
     
-    
     # %% Confusion Matrix
     # Plot and log confusion matrix in wandb
     ut_NDB5.plot_confusion_matrix(true, pred, ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
@@ -629,7 +628,7 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     train_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/40))), desc="Training Batch Loading"):  # Or some other number that fits in memory
+    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/120))), desc="Training Batch Loading"):  # Or some other number that fits in memory
         batch = batch.to(device)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
