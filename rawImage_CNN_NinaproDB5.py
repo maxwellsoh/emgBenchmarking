@@ -478,6 +478,7 @@ if args.turn_on_magnitude:
 if args.leftout_subject != 0:
     wandb_runname += '_LOSO-'+str(args.leftout_subject)
 wandb_runname += '_' + model_name
+wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
 
 project_name = 'emg_benchmarking_ninapro-db5'
 if (leaveOut == 0):
