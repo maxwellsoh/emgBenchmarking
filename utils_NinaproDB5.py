@@ -15,7 +15,6 @@ import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-numGestures = 18
 fs = 200 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
@@ -45,10 +44,12 @@ def seed_worker(worker_id):
 def balance (restimulus):
     numZero = 0
     indices = []
-    #print(restimulus.shape)
+    # indices indicates the indices to keep
+    # this function will keep the first 380 zeros samples and all other restimulus indices that are not zero
     for x in range (len(restimulus)):
-        L = torch.chunk(restimulus[x], 2, dim=1)
-        if torch.equal(L[0], L[1]):
+        # torch.chunk attempts to split a tensor into the specified number of chunks
+        L = torch.chunk(restimulus[x], 2, dim=1) # L : (CHUNK, 1, VALUE)
+        if torch.equal(L[0], L[1]): # Checks if first half of sample is equal to second half
             if L[0][0][0] == 0:
                 if (numZero < 380):
                     #print("working")
@@ -59,6 +60,7 @@ def balance (restimulus):
     return indices
 
 def contract(R):
+    numGestures = R.max() + 1
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
     for x in range(len(R)):
@@ -78,15 +80,18 @@ def getRestim (n: int, exercise: int = 2):
     # read hdf5 file 
     restim = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/restimulusS{n}_E{exercise}.hdf5')
     restim = torch.tensor(restim.values)
+    # unfold extrcts sliding local blocks from a batched input tensor
     return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
-def getEMG (n, exercise: int = 2):
-    restim = getRestim(n)
+def getEMG(args):
+    n, exercise = args
+    restim = getRestim(n, exercise)
     emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E{exercise}.hdf5')
     emg = torch.tensor(emg.values)
     return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
 
-def getLabels (n, exercise: int = 2):
+def getLabels (args):
+    n, exercise = args
     restim = getRestim(n, exercise)
     return contract(restim[balance(restim)])
 
@@ -236,6 +241,8 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     # Calculate average image of each gesture
     average_images = []
     print(f"Plotting average {partition_name} images...")
+    numGestures = len(gesture_labels)
+    
     for i in range(numGestures):
         # Find indices
         gesture_indices = np.where(true_np == i)[0]
@@ -267,7 +274,7 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
 
     # Parameters for plotting
     rows_per_gesture = 15
-    total_gestures = numGestures  # Replace with the actual number of gestures
+    total_gestures = len(gesture_labels)  # Replace with the actual number of gestures
 
     # Create subplots
     fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))

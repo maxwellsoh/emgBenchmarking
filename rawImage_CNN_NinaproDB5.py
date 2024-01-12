@@ -56,6 +56,8 @@ parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows t
 parser.add_argument('--turn_on_magnitude', type=ut_NDB5.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 # Add argument for model to use
 parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
+# Add argument for exercises to include
+parser.add_argument('--exercises', type=int, nargs="+", help='List the exercises of the 3 to load. The most popular for benchmarking seem to be 2 and 3. Can format as \'--exercises 2 3\'', default=[2, 3])
 
 # Parse the arguments
 args = parser.parse_args()
@@ -86,6 +88,7 @@ if args.turn_on_rms:
     print(f"The value of --num_rms_windows is {args.num_rms_windows}")
 if args.turn_on_magnitude:
     print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
+print(f"The value of --exercises is {args.exercises}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -109,14 +112,72 @@ if torch.cuda.is_available():
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-with  multiprocessing.Pool() as pool:
-    emg_async = pool.map_async(ut_NDB5.getEMG, [(i+1) for i in range(10)])
-    emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-    
-    labels_async = pool.map_async(ut_NDB5.getLabels, [(i+1) for i in range(10)])
-    labels = labels_async.get()
+emg = []
+labels = []
 
-length = len(emg[0][0])
+with  multiprocessing.Pool() as pool:
+    for exercise in args.exercises:
+        emg_async = pool.map_async(ut_NDB5.getEMG, list(zip([(i+1) for i in range(10)], exercise*np.ones(10).astype(int))))
+        emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
+        
+        labels_async = pool.map_async(ut_NDB5.getLabels, list(zip([(i+1) for i in range(10)], exercise*np.ones(10).astype(int))))
+        labels.append(labels_async.get())
+        
+        assert len(emg[-1]) == len(labels[-1]), "Number of trials for EMG and labels do not match"
+        
+# Append exercise sets together and add dimensions to labels if necessary
+num_subjects = 10
+
+new_emg = []  # This will store the concatenated data for each subject
+new_labels = []  # This will store the concatenated labels for each subject
+numGestures = 0 # This will store the number of gestures for each subject
+
+for subject in range(num_subjects): 
+    subject_trials = []  # List to store trials for this subject across all exercise sets
+    subject_labels = []  # List to store labels for this subject across all exercise sets
+    
+    for exercise_set in range(len(emg)):  
+        # Append the trials of this subject in this exercise set
+        subject_trials.append(emg[exercise_set][subject])
+        subject_labels.append(labels[exercise_set][subject])
+
+    concatenated_trials = np.concatenate(subject_trials, axis=0)  # Concatenate trials across exercise sets
+    
+    total_number_labels = 0
+    for i in range(len(subject_labels)):
+        total_number_labels += subject_labels[i].shape[1]
+        
+    # Convert from one hot encoding to labels
+    # Assuming labels are stored separately and need to be concatenated end-to-end
+    labels_set = []
+    index_to_start_at = 0
+    for i in range(len(subject_labels)):
+        subject_labels_to_concatenate = [x + index_to_start_at if x != 0 else 0 for x in np.argmax(subject_labels[i], axis=1)]
+        index_to_start_at = max(subject_labels_to_concatenate)
+        labels_set.append(subject_labels_to_concatenate)
+    
+    # Assuming labels are stored separately and need to be concatenated end-to-end
+    concatenated_labels = np.concatenate(labels_set, axis=0) # (TRIAL)
+    
+    numGestures = len(np.unique(concatenated_labels))
+    
+    # Convert to one hot encoding
+    concatenated_labels = np.eye(numGestures)[concatenated_labels] # (TRIAL, GESTURE)
+    
+    # Append the concatenated trials to the new_emg list
+    new_emg.append(concatenated_trials)
+    new_labels.append(concatenated_labels)
+
+# for i in range(num_subjects):
+#     emg_result = np.concatenate(emg, axis=0)
+#     labels = np.concatenate(labels, axis=0)
+#     if len(labels.shape) == 1:
+#         labels = np.expand_dims(labels, axis=1)
+
+emg = [torch.from_numpy(emg_np) for emg_np in new_emg]
+labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
+
+length = len(emg[0][0]) # (SUBJECT X TRIAL X CHANNEL X TIME)
 width = len(emg[0][0][0])
 print("Number of Electrode Channels: ", length)
 print("Number of Timesteps per Trial:", width)
@@ -314,12 +375,12 @@ if args.model == 'resnet50':
     model.add_module('fc2', nn.Linear(1024, 1024))
     model.add_module('relu2', nn.ReLU())
     model.add_module('dropout2', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(1024, ut_NDB5.numGestures))
+    model.add_module('fc3', nn.Linear(1024, numGestures))
     '''
     model.add_module('fc1', nn.Linear(num_features, 512))
     model.add_module('relu', nn.ReLU())
     model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(512, ut_NDB5.numGestures))
+    model.add_module('fc3', nn.Linear(512, numGestures))
     model.add_module('softmax', nn.Softmax(dim=1))
 elif args.model == 'convnext_tiny_custom':
     # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
@@ -332,7 +393,7 @@ elif args.model == 'convnext_tiny_custom':
 
     n_inputs = 768
     hidden_size = 128 # default is 2048
-    n_outputs = ut_NDB5.numGestures
+    n_outputs = numGestures
 
     # model = timm.create_model(model_name, pretrained=True, num_classes=10)
     model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
@@ -360,10 +421,10 @@ elif args.model == 'convnext_tiny_custom':
 else: 
     # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
     # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-    model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB5.numGestures)
+    model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
-    # model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB5.numGestures)
+    # model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
 
 num = 0
 for name, param in model.named_parameters():
