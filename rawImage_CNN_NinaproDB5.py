@@ -11,7 +11,6 @@ from scipy.signal import butter,filtfilt,iirnotch
 import wandb
 from sklearn.metrics import confusion_matrix
 import seaborn as sn
-import pandas as pd
 import multiprocessing
 from tqdm import tqdm
 import argparse
@@ -21,12 +20,12 @@ from sklearn.model_selection import StratifiedKFold
 import os
 import datetime
 import matplotlib as mpl
-import logging
-logging.getLogger('matplotlib').setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
-
+import gc
+import logging
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 ## Argument parser with optional argumenets
 
@@ -256,9 +255,9 @@ data = []
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
     data += [ut_NDB5.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.num_rms_windows, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
 
-print("------------------------------------------------------------------------------------------------------------------------")
-print("NOTE: The width 224 is natively used in Resnet50, height is currently integer  multiples of number of electrode channels")
-print("------------------------------------------------------------------------------------------------------------------------")
+print("-----------------------------------------------------------------------------------------------------------------------")
+print("NOTE: The width 224 is natively used in Resnet50, height is currently integer multiples of number of electrode channels")
+print("-----------------------------------------------------------------------------------------------------------------------")
 if leaveOut == 0:
     combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
     combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
@@ -401,8 +400,6 @@ elif args.turn_on_cyclical_lr:
     scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
 
 # Training loop
-import gc
-import datetime
 gc.collect()
 torch.cuda.empty_cache()
 

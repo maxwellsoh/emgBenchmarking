@@ -74,20 +74,20 @@ def filter(emg):
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=200.0)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
-def getRestim (n):
+def getRestim (n: int, exercise: int = 2):
     # read hdf5 file 
-    restim = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/restimulusS{n}_E2.hdf5')
+    restim = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/restimulusS{n}_E{exercise}.hdf5')
     restim = torch.tensor(restim.values)
     return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
-def getEMG (n):
+def getEMG (n, exercise: int = 2):
     restim = getRestim(n)
-    emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
+    emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E{exercise}.hdf5')
     emg = torch.tensor(emg.values)
     return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
 
-def getLabels (n):
-    restim = getRestim(n)
+def getLabels (n, exercise: int = 2):
+    restim = getRestim(n, exercise)
     return contract(restim[balance(restim)])
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
