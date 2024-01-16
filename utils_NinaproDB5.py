@@ -22,12 +22,21 @@ stepLen = 10 #50 ms
 numElectrodes = 16
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
-gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction', 
-                    'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 
-                    'Ulnar Deviation', 'Wrist Extension Fist', 'Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook Grasp', 'Index fingex extension grasp', 'Medium wrap', 
-                    'Ring grasp', 'Prismatic four fingers grasp', 'Stick grasp', 'Writing tripod grasp', 'Power sphere grasp', 'Three finger sphere grasp', 'Precision sphere grasp', 
-                    'Tripod grasp', 'Prismatic pinch grasp', 'Tip pinch grasp', 'Quadrupod grasp', 'Lateral grasp', 'Parallel extension grasp', 'Extension type grasp', 'Power disk grasp', 
-                    'Open a bottle with a tripod grasp', 'Turn a screw', 'Cut something']
+gesture_labels = {}
+gesture_labels['Rest'] = ['Rest'] # Shared between exercises
+
+gesture_labels[1] = ['Index Flexion', 'Index Extension', 'Middle Flexion', 'Middle Extension', 'Ring Flexion', 'Ring Extension',
+                    'Little Finger Flexion', 'Little Finger Extension', 'Thumb Adduction', 'Thumb Abduction', 'Thumb Flexion',
+                    'Thumb Extension'] # End exercise A
+
+gesture_labels[2] = ['Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction',
+                    'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation',
+                    'Ulnar Deviation', 'Wrist Extension Fist'] # End exercise B
+
+gesture_labels[3] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook Grasp', 'Index Finger Extension Grasp', 'Medium Wrap',
+                    'Ring Grasp', 'Prismatic Four Fingers Grasp', 'Stick Grasp', 'Writing Tripod Grasp', 'Power Sphere Grasp', 'Three Finger Sphere Grasp', 'Precision Sphere Grasp',
+                    'Tripod Grasp', 'Prismatic Pinch Grasp', 'Tip Pinch Grasp', 'Quadrupod Grasp', 'Lateral Grasp', 'Parallel Extension Grasp', 'Extension Type Grasp', 'Power Disk Grasp',
+                    'Open A Bottle With A Tripod Grasp', 'Turn A Screw', 'Cut Something'] # End exercise C
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -257,7 +266,7 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     average_images = np.array(average_images)
 
     # Plot average image of each gesture
-    fig, axs = plt.subplots(5, 9, figsize=(10, 5))
+    fig, axs = plt.subplots(ceil(len(gesture_labels) / 9), 9, figsize=(10, 5))
     for i in range(numGestures):
         axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])

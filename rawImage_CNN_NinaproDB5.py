@@ -32,6 +32,10 @@ logging.getLogger('matplotlib').setLevel(logging.WARNING)
 # Create the parser
 parser = argparse.ArgumentParser(description="Include arguments for running different trials")
 
+# Define a custom argument type for a list of integers
+def list_of_ints(arg):
+    return list(map(int, arg.split(',')))
+
 # Add argument for leftout subject
 parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
 # Add parser for seed
@@ -57,7 +61,7 @@ parser.add_argument('--turn_on_magnitude', type=ut_NDB5.str2bool, help='whether 
 # Add argument for model to use
 parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
 # Add argument for exercises to include
-parser.add_argument('--exercises', type=int, nargs="+", help='List the exercises of the 3 to load. The most popular for benchmarking seem to be 2 and 3. Can format as \'--exercises 2 3\'', default=[2, 3])
+parser.add_argument('--exercises', type=list_of_ints, help='List the exercises of the 3 to load. The most popular for benchmarking seem to be 2 and 3. Can format as \'--exercises 1,2,3\'', default=[1, 2, 3])
 
 # Parse the arguments
 args = parser.parse_args()
@@ -505,16 +509,20 @@ if not os.path.exists(testrun_foldername):
     os.makedirs(testrun_foldername)
 model_filename = f'{testrun_foldername}model_{formatted_datetime}.pth'
 
+gesture_labels = ut_NDB5.gesture_labels['Rest']
+for exercise_set in args.exercises:
+    gesture_labels = gesture_labels + ut_NDB5.gesture_labels[exercise_set]
+
 if leaveOut == 0:
     # Plot and log images
-    ut_NDB5.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-    ut_NDB5.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    ut_NDB5.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    ut_NDB5.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
-ut_NDB5.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
-ut_NDB5.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+ut_NDB5.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+ut_NDB5.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
 
-ut_NDB5.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-ut_NDB5.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+ut_NDB5.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+ut_NDB5.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
 
 for epoch in tqdm(range(num_epochs), desc="Epoch"):
     model.train()
@@ -606,7 +614,7 @@ if (leaveOut == 0):
     
     # %% Confusion Matrix
     # Plot and log confusion matrix in wandb
-    ut_NDB5.plot_confusion_matrix(true, pred, ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    ut_NDB5.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
 # Load validation in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
@@ -620,7 +628,7 @@ with torch.no_grad():
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         validation_predictions.extend(preds)
 
-ut_NDB5.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+ut_NDB5.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
 
 # Load training in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
@@ -634,6 +642,6 @@ with torch.no_grad():
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         train_predictions.extend(preds)
 
-ut_NDB5.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+ut_NDB5.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
     
 run.finish()
