@@ -35,7 +35,7 @@ MODEL_TO_USE="resnet50"
 EXERCISE_SETS="1,2,3"
 
 # Parse command line arguments
-while getopts 'l:v:k:s:e:c:a:i:r:n:m:o:h' flag; do  # Changed flags to single letters
+while getopts 'l:v:k:s:e:c:a:i:r:n:m:o:x:h' flag; do  # Changed flags to single letters
     case "${flag}" in
         l) LOSO_CV="${OPTARG}" ;;
         v) K_FOLDS_ON="${OPTARG}" ;;
