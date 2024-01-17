@@ -423,7 +423,7 @@ elif args.model == 'convnext_tiny_custom':
 else: 
     # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
     # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-    model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
+    model = timm.create_model(model_name, pretrained=True, num_classes=numGestures, interpolate_input=True)
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
     # model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
