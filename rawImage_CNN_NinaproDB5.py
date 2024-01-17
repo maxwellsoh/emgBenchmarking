@@ -364,28 +364,26 @@ else:
 
 model_name = args.model
 if args.model == 'resnet50':
+    # model = resnet50(weights=ResNet50_Weights.DEFAULT)
+    # model = nn.Sequential(*list(model.children())[:-4])
+    # # #model = nn.Sequential(*list(model.children())[:-4])
+    # num_features = model[-1][-1].conv3.out_channels
+    # # #num_features = model.fc.in_features
+    # dropout = 0.5
+    # model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
+    # model.add_module('flatten', nn.Flatten())
+    # model.add_module('fc1', nn.Linear(num_features, 512))
+    # model.add_module('relu', nn.ReLU())
+    # model.add_module('dropout1', nn.Dropout(dropout))
+    # model.add_module('fc3', nn.Linear(512, numGestures))
+    # model.add_module('softmax', nn.Softmax(dim=1))
+    
+    # Load the pre-trained ResNet50 model
     model = resnet50(weights=ResNet50_Weights.DEFAULT)
-    model = nn.Sequential(*list(model.children())[:-4])
-    # #model = nn.Sequential(*list(model.children())[:-4])
-    num_features = model[-1][-1].conv3.out_channels
-    # #num_features = model.fc.in_features
-    dropout = 0.5
-    model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
-    model.add_module('flatten', nn.Flatten())
-    '''
-    model.add_module('fc1', nn.Linear(num_features, 1024))
-    model.add_module('relu', nn.ReLU())
-    model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc2', nn.Linear(1024, 1024))
-    model.add_module('relu2', nn.ReLU())
-    model.add_module('dropout2', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(1024, numGestures))
-    '''
-    model.add_module('fc1', nn.Linear(num_features, 512))
-    model.add_module('relu', nn.ReLU())
-    model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(512, numGestures))
-    model.add_module('softmax', nn.Softmax(dim=1))
+
+    # Replace the last fully connected layer
+    num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
+    model.fc = nn.Linear(num_ftrs, ut_NDB5.numGestures)  # Replace with a new linear layer
 elif args.model == 'convnext_tiny_custom':
     # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
     class LayerNorm2d(nn.LayerNorm):
