@@ -427,6 +427,13 @@ else:
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
     # model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
+    
+# Log number of parameters in the model
+total_params = sum(p.numel() for p in model.parameters())
+print(f'{total_params:,} total parameters.')
+total_trainable_params = sum(
+    p.numel() for p in model.parameters() if p.requires_grad)
+print(f'{total_trainable_params:,} training parameters.')
 
 num = 0
 for name, param in model.named_parameters():
@@ -505,6 +512,8 @@ else:
 run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
 
+wandb.log({"Number of Parameters": total_params, 
+           "Number of Trainable Parameters": total_trainable_params})
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
