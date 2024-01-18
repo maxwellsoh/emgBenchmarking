@@ -4,7 +4,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as transforms
 from torchvision.models import resnet50, ResNet50_Weights
-from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
+from torchvision.models import convnext_base, ConvNeXt_Base_Weights
+from functools import partial
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing, model_selection
@@ -40,6 +41,7 @@ parser = argparse.ArgumentParser(description="Include arguments for running diff
 # Add an optional argument
 parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
 parser.add_argument('--seed', type=int, help='number of seed that is used for randomization. Set to 0 by default.', default=0)
+parser.add_argument('--save_images', type=bool, help='whether to save the RMS images. Set to false by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -47,6 +49,7 @@ args = parser.parse_args()
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
 print(f"The value of --seed is {args.seed}")
+print(f"The value of --save_images is {args.save_images}")
 print("\n")
 
 # %%
@@ -379,9 +382,10 @@ if leaveOut != 0:
         Y_validation_np = Y_validation.numpy().astype(np.float16)
 
         # Save the numpy arrays using Zarr
-        zarr.save(foldername_zarr + 'val_data_LOSO' + str(leaveOut) + '.zarr', X_validation_np)
-        zarr.save(foldername_zarr + 'val_labels_LOSO' + str(leaveOut) + '.zarr', Y_validation_np)
-        print("Validation images generated for left out subject " + str(leaveOut) + " and saved")
+        if (args.save_images):
+            zarr.save(foldername_zarr + 'val_data_LOSO' + str(leaveOut) + '.zarr', X_validation_np)
+            zarr.save(foldername_zarr + 'val_labels_LOSO' + str(leaveOut) + '.zarr', Y_validation_np)
+            print("Validation images generated for left out subject " + str(leaveOut) + " and saved")
     print("\n")
     
     del X_validation_np
@@ -417,9 +421,10 @@ if leaveOut != 0:
             Y_train_subject = torch.from_numpy(np.repeat(np.array(labels[subject]), data_process.dataCopies, axis=0)).to(torch.float16)
             X_train_np = X_train_subject.numpy().astype(np.float16)
             Y_train_np = Y_train_subject.numpy().astype(np.float16)
-            zarr.save(foldername_zarr + 'train_data_LOSO_subject' + str(subject+1) + '.zarr', X_train_np)
-            zarr.save(foldername_zarr + 'train_labels_LOSO_subject' + str(subject+1) + '.zarr', Y_train_np)
-            print("Training images generated and saved for subject", subject+1)
+            if (args.save_images):
+                zarr.save(foldername_zarr + 'train_data_LOSO_subject' + str(subject+1) + '.zarr', X_train_np)
+                zarr.save(foldername_zarr + 'train_labels_LOSO_subject' + str(subject+1) + '.zarr', Y_train_np)
+                print("Training images generated and saved for subject", subject+1)
 
         # Append the subject's data to the accumulating lists
         X_train_all.append(X_train_np)
@@ -480,64 +485,34 @@ n_inputs = 768
 hidden_size = 128 # default is 2048
 n_outputs = 10
 
-# model_name = 'davit_tiny.msft_in1k'
+model_name = 'ConvNeXt_Base'
 #model = resnet50(weights=ResNet50_Weights.DEFAULT)
-model_name = 'convnext_tiny'
-# model = timm.create_model(model_name, pretrained=True, num_classes=10)
-model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
+#model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
+#model = ConvNextV2ForImageClassification.from_pretrained("facebook/convnextv2-tiny-1k-224")
 #model = nn.Sequential(*list(model.children())[:-4])
 #model = nn.Sequential(*list(model.children())[:-3])
 #num_features = model[-1][-1].conv3.out_channels
 #num_features = model.fc.in_features
-dropout = 0.1 # was 0.5
+dropout = 0.5 # was 0.5
 
-sequential_layers = nn.Sequential(
-    LayerNorm2d((n_inputs,), eps=1e-06, elementwise_affine=True),
-    nn.Flatten(start_dim=1, end_dim=-1),
-    nn.Linear(n_inputs, hidden_size, bias=True),
+n_inputs = 256
+hidden_size = 256 # default is 2048
+n_outputs = 10
+
+model = convnext_base(weights=ConvNeXt_Base_Weights.DEFAULT)
+model.features = model.features[:-4]
+norm_layer = partial(LayerNorm2d, eps=1e-6)
+
+model.classifier = nn.Sequential(
+    norm_layer(n_inputs),
+    nn.Flatten(1),
+    nn.Linear(n_inputs, hidden_size),
     nn.BatchNorm1d(hidden_size),
     nn.GELU(),
     nn.Dropout(dropout),
-    nn.Linear(hidden_size, hidden_size),
-    nn.BatchNorm1d(hidden_size),
-    nn.GELU(),
     nn.Linear(hidden_size, n_outputs),
     nn.LogSoftmax(dim=1)
 )
-model.classifier = sequential_layers
-'''
-num = 0
-for name, param in model.named_parameters():
-    num += 1
-    #if (num > 159): # for freezing layers 1, 2, 3, and 4
-    #if (num > 129): # for freezing layers 1, 2, and 3
-    #if (num > 72): # for freezing layers 1 and 2
-    #if (num > 33): #for freezing layer 1
-    if (num >= 0): # for no freezing
-        param.requires_grad = True
-    else:
-        param.requires_grad = False
-
-model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
-model.add_module('flatten', nn.Flatten())
-
-
-#model.add_module('fc1', nn.Linear(num_lstm_units*2, 256))
-model.add_module('fc1', nn.Linear(128, 256))
-model.add_module('gelu', nn.GELU())
-model.add_module('dropout5', nn.Dropout(dropout))
-#model.add_module('fc2', nn.Linear(512, 512))
-#model.add_module('relu2', nn.ReLU())
-#model.add_module('dropout2', nn.Dropout(dropout))
-model.add_module('fc2', nn.Linear(256, 10))
-#model.add_module('fc1', nn.Linear(num_features, 10))
-model.add_module('softmax', nn.Softmax(dim=1))
-'''
-'''
-layers = [(name, param.requires_grad) for name, param in model.named_parameters()]
-for i in range(len(layers)):
-    print(layers[i])
-'''
 
 class Data(Dataset):
     def __init__(self, data):
@@ -572,7 +547,7 @@ if leaveOut != 0:
     wandb_runname += '_LOSO-' + str(args.leftout_subject)     
 wandb_runname += '_' + model_name      
 
-run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
+run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='msoh')
 wandb.config.lr = learn
 
 num_epochs = 50
@@ -591,6 +566,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
         Y_batch = Y_batch.to(device).to(torch.float32)
 
         optimizer.zero_grad()
+        #output = model(X_batch).logits
         output = model(X_batch)
         loss = criterion(output, Y_batch)
         train_loss += loss.item()
@@ -613,6 +589,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
             X_batch = X_batch.to(device).to(torch.float32)
             Y_batch = Y_batch.to(device).to(torch.float32)
 
+            #output = model(X_batch).logits
             output = model(X_batch)
             val_loss += criterion(output, Y_batch).item()
 
@@ -651,7 +628,7 @@ if (leaveOut == 0):
             X_batch = X_batch.to(device).to(torch.float32)
             Y_batch = Y_batch.to(device).to(torch.float32)
 
-            output = model(X_batch)
+            output = model(X_batch).logits
             test_loss += criterion(output, Y_batch).item()
 
             test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
