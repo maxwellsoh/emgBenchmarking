@@ -423,7 +423,7 @@ elif args.model == 'convnext_tiny_custom':
 else: 
     # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
     # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-    model = timm.create_model(model_name, pretrained=True, num_classes=numGestures, interpolate_input=True)
+    model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
     # model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
@@ -438,11 +438,22 @@ for name, param in model.named_parameters():
     else:
         param.requires_grad = False
 
+# Define the transform
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resizing the image
+    # Add any other transformations you need here
+])
+
+# Apply the transform to your datasets
+train_dataset = ut_NDB5.CustomDataset(X_train, Y_train, transform=transform)
+val_dataset = ut_NDB5.CustomDataset(X_validation, Y_validation, transform=transform)
+test_dataset = ut_NDB5.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
+
 batch_size = 64
-train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
-val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
 if (leaveOut == 0):
-    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
 
 # Define the loss function and optimizer
 criterion = nn.CrossEntropyLoss()

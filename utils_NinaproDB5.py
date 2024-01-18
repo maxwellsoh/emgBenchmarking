@@ -38,6 +38,24 @@ gesture_labels[3] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook
                     'Tripod Grasp', 'Prismatic Pinch Grasp', 'Tip Pinch Grasp', 'Quadrupod Grasp', 'Lateral Grasp', 'Parallel Extension Grasp', 'Extension Type Grasp', 'Power Disk Grasp',
                     'Open A Bottle With A Tripod Grasp', 'Turn A Screw', 'Cut Something'] # End exercise C
 
+class CustomDataset(Dataset):
+    def __init__(self, data, labels, transform=None):
+        self.data = data
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        x = self.data[idx]
+        y = self.labels[idx]
+
+        if self.transform:
+            x = self.transform(x)
+
+        return x, y
+
 def str2bool(v):
     if isinstance(v, bool):
         return v
