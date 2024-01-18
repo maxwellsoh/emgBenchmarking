@@ -628,12 +628,13 @@ if (leaveOut == 0):
 # Load validation in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
 
+# Assuming you have already created val_loader and train_loader with the transformed datasets
 model.eval()
 with torch.no_grad():
     validation_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=int(X_validation.shape[0]/200))), desc="Validation Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device)
-        outputs = model(batch)
+    for data, _ in tqdm(val_loader, desc="Validation Batch Loading"):
+        data = data.to(device)
+        outputs = model(data)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         validation_predictions.extend(preds)
 
@@ -645,9 +646,9 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     train_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/200))), desc="Training Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device)
-        outputs = model(batch)
+    for data, _ in tqdm(train_loader, desc="Training Batch Loading"):
+        data = data.to(device)
+        outputs = model(data)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         train_predictions.extend(preds)
 
