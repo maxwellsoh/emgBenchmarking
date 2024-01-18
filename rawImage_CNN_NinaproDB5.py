@@ -383,7 +383,7 @@ if args.model == 'resnet50':
 
     # Replace the last fully connected layer
     num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
-    model.fc = nn.Linear(num_ftrs, ut_NDB5.numGestures)  # Replace with a new linear layer
+    model.fc = nn.Linear(num_ftrs, numGestures)  # Replace with a new linear layer
 elif args.model == 'convnext_tiny_custom':
     # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
     class LayerNorm2d(nn.LayerNorm):
