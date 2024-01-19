@@ -22,6 +22,7 @@ import multiprocessing
 from sklearn.model_selection import StratifiedKFold
 from tqdm import tqdm
 import timm
+import utils_NinaproDB5 as ut_NDB5
 
 # script not updated for LOSO
 leaveOut = 0
@@ -330,6 +331,8 @@ print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
 print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
 print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
 
+numGestures = Y_train.size()[1]
+
 class Data(Dataset):
     def __init__(self, data):
         self.data = data
@@ -340,13 +343,24 @@ class Data(Dataset):
     def __len__(self):
         return len(self.data)
 
+# Define the transform
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resizing the image
+    # Add any other transformations you need here
+])
+
+# Apply the transform to your datasets
+train_dataset = ut_NDB5.CustomDataset(X_train, Y_train, transform=transform)
+val_dataset = ut_NDB5.CustomDataset(X_validation, Y_validation, transform=transform)
+test_dataset = ut_NDB5.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
+
 batch_size = 64
-train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
-val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
-test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
 
 model_name = args.model
-if args.model == 'resnet50':
+if args.model == 'resnet50_custom':
     model = resnet50(weights=ResNet50_Weights.DEFAULT)
     model = nn.Sequential(*list(model.children())[:-2])
     num_features = model[-1][-1].conv3.out_channels
@@ -370,6 +384,14 @@ if args.model == 'resnet50':
             param.requires_grad = True
         else:
             param.requires_grad = False
+elif args.model == 'resnet50':
+    # Load the pre-trained ResNet50 model
+    model = resnet50(weights=ResNet50_Weights.DEFAULT)
+
+    # Replace the last fully connected layer
+    num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
+    model.fc = nn.Linear(num_ftrs, numGestures)  # Replace with a new linear layer
+    
 else:
     model = timm.create_model(model_name, pretrained=True, num_classes=8)
     for name, param in model.named_parameters():
@@ -404,6 +426,15 @@ else:
 run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
 
+# Log number of parameters in the model
+total_params = sum(p.numel() for p in model.parameters())
+print(f'{total_params:,} total parameters.')
+total_trainable_params = sum(
+    p.numel() for p in model.parameters() if p.requires_grad)
+print(f'{total_trainable_params:,} training parameters.')
+
+wandb.log({"Number of Parameters": total_params, 
+           "Number of Trainable Parameters": total_trainable_params})
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
