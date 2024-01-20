@@ -97,7 +97,7 @@ print("Starting run at", formatted_datetime)
 print("------------------------------------------------------------------------------------------------------------------------")
 
 # %%
-# 0 for no LOSO; participants here are 1-13
+# 0 for no LOSO; participants here are 1-40
 leaveOut = int(args.leftout_subject)
 
 # Set seeds for reproducibility
@@ -111,10 +111,10 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 with  multiprocessing.Pool() as pool:
-    emg_async = pool.map_async(ut_NDB5.getEMG, [(i+1) for i in range(10)])
+    emg_async = pool.map_async(ut_NDB5.getEMG, [(i+1) for i in range(40)])
     emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
     
-    labels_async = pool.map_async(ut_NDB5.getLabels, [(i+1) for i in range(10)])
+    labels_async = pool.map_async(ut_NDB5.getLabels, [(i+1) for i in range(40)])
     labels = labels_async.get()
 
 length = len(emg[0][0])
@@ -421,7 +421,7 @@ if args.leftout_subject != 0:
     wandb_runname += '_LOSO-'+str(args.leftout_subject)
 wandb_runname += '_' + model_name
 
-project_name = 'emg_benchmarking_ninapro-db5'
+project_name = 'emg_benchmarking_ninapro-db2'
 if (leaveOut == 0):
     if args.turn_on_kfold:
         project_name += '_k-fold-'+str(args.kfold)
@@ -430,7 +430,7 @@ if (leaveOut == 0):
 else:
     project_name += '_LOSO'
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
+run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
 wandb.config.lr = learn
 
 

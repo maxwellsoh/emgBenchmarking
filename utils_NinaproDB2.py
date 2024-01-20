@@ -75,14 +75,14 @@ def getRestim (n):
     # read hdf5 file 
     #restim = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/restimulusS{n}_E2.hdf5')
     #restim = torch.tensor(restim.values)
-    restim = io.loadmat('./NinaproDB2/DB2_s{n}/S{n}_E1_A1.mat')['restimulus']
+    restim = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E1_A1.mat')['restimulus'])
     return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
 def getEMG (n):
     restim = getRestim(n)
     #emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
     #emg = torch.tensor(emg.values)
-    emg = io.loadmat('./NinaproDB2/DB2_s{n}/S{n}_E1_A1.mat')['restimulus']
+    emg = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E1_A1.mat')['emg'])
     return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
 
 def getLabels (n):
