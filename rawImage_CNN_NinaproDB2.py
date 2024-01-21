@@ -299,7 +299,10 @@ else:
     print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
 
 model_name = args.model
-if args.model == 'resnet50':
+numGestures = Y_train.size()[1]
+print("Number of Gestures:", str(numGestures))
+
+if args.model == 'resnet50_custom':
     model = resnet50(weights=ResNet50_Weights.DEFAULT)
     model = nn.Sequential(*list(model.children())[:-4])
     # #model = nn.Sequential(*list(model.children())[:-4])
@@ -322,12 +325,19 @@ if args.model == 'resnet50':
     model.add_module('dropout1', nn.Dropout(dropout))
     model.add_module('fc3', nn.Linear(512, ut_NDB5.numGestures))
     model.add_module('softmax', nn.Softmax(dim=1))
+elif args.model == 'resnet50':
+    # Load the pre-trained ResNet50 model
+    model = resnet50(weights=ResNet50_Weights.DEFAULT)
+
+    # Replace the last fully connected layer
+    num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
+    model.fc = nn.Linear(num_ftrs, numGestures)  # Replace with a new linear layer
+    
 elif args.model == 'convnext_tiny_custom':
     # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
     class LayerNorm2d(nn.LayerNorm):
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             x = x.permute(0, 2, 3, 1)
-            x = torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
             x = x.permute(0, 3, 1, 2)
             return x
 
@@ -375,6 +385,18 @@ for name, param in model.named_parameters():
         param.requires_grad = True
     else:
         param.requires_grad = False
+        
+
+# Define the transform
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resizing the image
+    # Add any other transformations you need here
+])
+
+# Apply the transform to your datasets
+train_dataset = ut_NDB5.CustomDataset(X_train, Y_train, transform=transform)
+val_dataset = ut_NDB5.CustomDataset(X_validation, Y_validation, transform=transform)
+test_dataset = ut_NDB5.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
 
 batch_size = 64
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
@@ -430,7 +452,7 @@ if (leaveOut == 0):
 else:
     project_name += '_LOSO'
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
+run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
 
 
@@ -556,7 +578,7 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     validation_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=int(X_validation.shape[0]/10))), desc="Validation Batch Loading"):  # Or some other number that fits in memory
+    for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=int(X_validation.shape[0]/500))), desc="Validation Batch Loading"):  # Or some other number that fits in memory
         batch = batch.to(device)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
@@ -570,7 +592,7 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     train_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/40))), desc="Training Batch Loading"):  # Or some other number that fits in memory
+    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/500))), desc="Training Batch Loading"):  # Or some other number that fits in memory
         batch = batch.to(device)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
