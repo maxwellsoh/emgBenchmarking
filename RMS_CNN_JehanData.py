@@ -45,6 +45,7 @@ parser.add_argument('--leftout_subject', type=int, help='number of subject that 
 parser.add_argument('--seed', type=int, help='number of seed that is used for randomization. Set to 0 by default.', default=0)
 parser.add_argument('--save_images', type=bool, help='whether to save the RMS images. Set to false by default.', default=False)
 parser.add_argument('--model', type=str, help='model to use. Set to resnet50 by default.', default='resnet50')
+parser.add_argument('--epochs', type=int, help='number of epochs to train for. Set to 50 by default.', default=50)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -54,6 +55,7 @@ print(f"The value of --leftout_subject is {args.leftout_subject}")
 print(f"The value of --seed is {args.seed}")
 print(f"The value of --save_images is {args.save_images}")
 print(f"The value of --model is {args.model}")
+print(f"The value of --epochs is {args.epochs}")
 print("\n")
 
 # %%
@@ -613,7 +615,7 @@ wandb_runname += '_' + model_name
 run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='msoh')
 wandb.config.lr = learn
 
-num_epochs = 50
+num_epochs = args.epochs
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 model.to(device)
