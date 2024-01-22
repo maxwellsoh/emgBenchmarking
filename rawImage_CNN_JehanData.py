@@ -47,7 +47,8 @@ parser.add_argument('--seed', type=int, help='number of seed that is used for ra
 parser.add_argument('--save_images', type=bool, help='whether to save the RMS images. Set to false by default.', default=False)
 parser.add_argument('--model', type=str, help='model to use. Set to resnet50 by default.', default='resnet50')
 parser.add_argument('--epochs', type=int, help='number of epochs to train for. Set to 50 by default.', default=50)
-parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 250 by default.', default=250)
+parser.add_argument('--turn_on_rms', type=bool, help='whether to use RMS images. Set to false by default.', default=False)
+parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -58,6 +59,7 @@ print(f"The value of --seed is {args.seed}")
 print(f"The value of --save_images is {args.save_images}")
 print(f"The value of --model is {args.model}")
 print(f"The value of --epochs is {args.epochs}")
+print(f"The value of --turn_on_rms is {args.turn_on_rms}")
 print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
 print("\n")
 
@@ -126,7 +128,10 @@ class DataExtract:
 
 
     def getEMG(self, n):
-        return torch.cat([torch.sqrt(torch.mean(self.getData(n, name) ** 2, dim=3)) for name in self.gestures], axis=0)
+        if args.turn_on_rms:
+            return torch.cat([torch.sqrt(torch.mean(self.getData(n, name) ** 2, dim=3)) for name in self.gestures], axis=0)
+        else: 
+            return torch.cat([self.getData(n, name) for name in self.gestures], axis=0).squeeze()
 
     def getGestures(self, n):
         if (n<10):
@@ -478,6 +483,8 @@ else:
     train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))) for subject in train_emg]
     val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))) for subject in val_emg]
     test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize)))for subject in test_emg]
+    
+    # debug_number = 2
 
     # Generate images (or your specific data processing) for training, validation, and test sets
     X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled))).to(torch.float16)
