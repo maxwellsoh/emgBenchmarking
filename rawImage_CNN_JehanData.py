@@ -484,17 +484,17 @@ else:
     val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))) for subject in val_emg]
     test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize)))for subject in test_emg]
     
-    # debug_number = 2
+    debug_number = 300
 
     # Generate images (or your specific data processing) for training, validation, and test sets
-    X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled))).to(torch.float16)
-    X_validation = torch.tensor(np.array(data_process.getImages_noAugment(val_emg_scaled))).to(torch.float16)
-    X_test = torch.tensor(np.array(data_process.getImages_noAugment(test_emg_scaled))).to(torch.float16)
+    X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
+    X_validation = torch.tensor(np.array(data_process.getImages_noAugment(val_emg_scaled[:debug_number]))).to(torch.float16)
+    X_test = torch.tensor(np.array(data_process.getImages_noAugment(test_emg_scaled[:debug_number]))).to(torch.float16)
 
     # Convert labels to tensors and possibly perform additional processing
-    Y_train = torch.stack([torch.tensor(labels) for labels in train_labels])
-    Y_validation = torch.stack([torch.tensor(labels) for labels in val_labels])
-    Y_test = torch.stack([torch.tensor(labels) for labels in test_labels])
+    Y_train = torch.stack([torch.tensor(labels) for labels in train_labels[:debug_number]])
+    Y_validation = torch.stack([torch.tensor(labels) for labels in val_labels[:debug_number]])
+    Y_test = torch.stack([torch.tensor(labels) for labels in test_labels[:debug_number]])
 
     # Concatenate data for each set if necessary
     # This step depends on how you want to structure your data for training
