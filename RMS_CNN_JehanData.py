@@ -32,6 +32,8 @@ import matplotlib.pyplot as plt
 import zarr
 import os
 import timm
+import utils_NinaproDB2 as ut_NDB2
+from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 
 ## Argument parser with optional argumenets
 
@@ -42,6 +44,7 @@ parser = argparse.ArgumentParser(description="Include arguments for running diff
 parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
 parser.add_argument('--seed', type=int, help='number of seed that is used for randomization. Set to 0 by default.', default=0)
 parser.add_argument('--save_images', type=bool, help='whether to save the RMS images. Set to false by default.', default=False)
+parser.add_argument('--model', type=str, help='model to use. Set to resnet50 by default.', default='resnet50')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -50,6 +53,7 @@ args = parser.parse_args()
 print(f"The value of --leftout_subject is {args.leftout_subject}")
 print(f"The value of --seed is {args.seed}")
 print(f"The value of --save_images is {args.save_images}")
+print(f"The value of --model is {args.model}")
 print("\n")
 
 # %%
@@ -468,10 +472,12 @@ else:
     X_test = torch.from_numpy(X_test).to(torch.float16)
     Y_test = torch.from_numpy(Y_test).to(torch.float16)
 
-print(X_train.size())
-print(Y_train.size())
-print(X_validation.size())
-print(Y_validation.size())
+print("X_train size", X_train.size())
+print("Y_train size", Y_train.size())
+print("X_validation size", X_validation.size())
+print("Y_validation size", Y_validation.size())
+
+numGestures = len(labels[0])
 
 # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
 class LayerNorm2d(nn.LayerNorm):
@@ -485,34 +491,80 @@ n_inputs = 768
 hidden_size = 128 # default is 2048
 n_outputs = 10
 
-model_name = 'ConvNeXt_Base'
-#model = resnet50(weights=ResNet50_Weights.DEFAULT)
-#model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
-#model = ConvNextV2ForImageClassification.from_pretrained("facebook/convnextv2-tiny-1k-224")
-#model = nn.Sequential(*list(model.children())[:-4])
-#model = nn.Sequential(*list(model.children())[:-3])
-#num_features = model[-1][-1].conv3.out_channels
-#num_features = model.fc.in_features
-dropout = 0.5 # was 0.5
+if args.model == 'resnet50_custom':
+    model = resnet50(weights=ResNet50_Weights.DEFAULT)
+    model = nn.Sequential(*list(model.children())[:-4])
+    # #model = nn.Sequential(*list(model.children())[:-4])
+    num_features = model[-1][-1].conv3.out_channels
+    # #num_features = model.fc.in_features
+    dropout = 0.5
+    model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
+    model.add_module('flatten', nn.Flatten())
+    '''
+    model.add_module('fc1', nn.Linear(num_features, 1024))
+    model.add_module('relu', nn.ReLU())
+    model.add_module('dropout1', nn.Dropout(dropout))
+    model.add_module('fc2', nn.Linear(1024, 1024))
+    model.add_module('relu2', nn.ReLU())
+    model.add_module('dropout2', nn.Dropout(dropout))
+    model.add_module('fc3', nn.Linear(1024, ut_NDB2.numGestures))
+    '''
+    model.add_module('fc1', nn.Linear(num_features, 512))
+    model.add_module('relu', nn.ReLU())
+    model.add_module('dropout1', nn.Dropout(dropout))
+    model.add_module('fc3', nn.Linear(512, numGestures))
+    model.add_module('softmax', nn.Softmax(dim=1))
+elif args.model == 'resnet50':
+    # Load the pre-trained ResNet50 model
+    model = resnet50(weights=ResNet50_Weights.DEFAULT)
 
-n_inputs = 256
-hidden_size = 256 # default is 2048
-n_outputs = 10
+    # Replace the last fully connected layer
+    num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
+    model.fc = nn.Linear(num_ftrs, numGestures)  # Replace with a new linear layer
+    
+elif args.model == 'convnext_tiny_custom':
+    # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
+    class LayerNorm2d(nn.LayerNorm):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            x = x.permute(0, 2, 3, 1)
+            x = x.permute(0, 3, 1, 2)
+            return x
 
-model = convnext_base(weights=ConvNeXt_Base_Weights.DEFAULT)
-model.features = model.features[:-4]
-norm_layer = partial(LayerNorm2d, eps=1e-6)
+    n_inputs = 256
+    hidden_size = 256 # default is 2048
+    n_outputs = numGestures
+    
+    model = convnext_base(weights=ConvNeXt_Base_Weights.DEFAULT)
+    model.features = model.features[:-4]
+    norm_layer = partial(LayerNorm2d, eps=1e-6)
 
-model.classifier = nn.Sequential(
-    norm_layer(n_inputs),
-    nn.Flatten(1),
-    nn.Linear(n_inputs, hidden_size),
-    nn.BatchNorm1d(hidden_size),
-    nn.GELU(),
-    nn.Dropout(dropout),
-    nn.Linear(hidden_size, n_outputs),
-    nn.LogSoftmax(dim=1)
-)
+    # model = timm.create_model(model_name, pretrained=True, num_classes=10)
+    model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
+    #model = nn.Sequential(*list(model.children())[:-4])
+    #model = nn.Sequential(*list(model.children())[:-3])
+    #num_features = model[-1][-1].conv3.out_channels
+    #num_features = model.fc.in_features
+    dropout = 0.5 # was 0.5
+
+    sequential_layers = nn.Sequential(
+        norm_layer(n_inputs),
+        nn.Flatten(1),
+        nn.Linear(n_inputs, hidden_size),
+        nn.BatchNorm1d(hidden_size),
+        nn.GELU(),
+        nn.Dropout(dropout),
+        nn.Linear(hidden_size, n_outputs),
+        nn.LogSoftmax(dim=1)
+    )
+    model.classifier = sequential_layers
+
+else: 
+    # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
+    # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
+    model = timm.create_model(args.model, pretrained=True, num_classes=numGestures)
+    # # Load the Vision Transformer model
+    # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
+    # model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB2.numGestures)
 
 class Data(Dataset):
     def __init__(self, data):
@@ -523,12 +575,23 @@ class Data(Dataset):
 
     def __len__(self):
         return len(self.data)
+    
+# Define the transform
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resizing the image
+    # Add any other transformations you need here
+])
+
+# Apply the transform to your datasets
+train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
+val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
+test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
 
 batch_size = 64
-train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, worker_init_fn=seed_worker)
-val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, pin_memory=True, worker_init_fn=seed_worker)
-if (leaveOut == 0):
-    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, pin_memory=True, worker_init_fn=seed_worker)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+
 
 print("number of batches: ", len(train_loader))
 
