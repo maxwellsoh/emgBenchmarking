@@ -199,6 +199,7 @@ class DataProcessing:
     order = list(chain.from_iterable([[[k for k in range(64)][(i+j*16+32) % 64] for j in range(4)] for i in range(16)]))
     
     def dataToImage (self, emg):
+        emg = emg.squeeze()
         rectified = emg - min(emg)
         rectified = rectified / max(rectified)
 
