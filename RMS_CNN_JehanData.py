@@ -69,6 +69,8 @@ RMS_input_windowsize = 250
 # image width - must be multiple of 64
 width = 64
 
+number_channels = 64
+
 # gaussian Noise signal-to-noise ratio
 SNR = 15
 
@@ -460,24 +462,74 @@ if leaveOut != 0:
 # non-LOSO data processing (not updated)
 
 else:
+    # Reshape and concatenate EMG data
+    # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
+    # Then concatenate along the subject dimension (axis=0)
+    length = number_channels
+    emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
+    labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+    indices = np.arange(emg_in.shape[0])
+    train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
+    train_emg_in = emg_in[train_indices]  # Select only the train indices
+    # s = preprocessing.StandardScaler().fit(train_emg_in)
+
+    # Normalize by electrode
+    emg_in_by_electrode = train_emg_in.reshape(-1, length, width)
+
+    # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+    # Reshape data to (SAMPLES*50, 16)
+    emg_reshaped = emg_in_by_electrode.reshape(-1, number_channels)
+
+    # Initialize and fit the scaler on the reshaped data
+    # This will compute the mean and std dev for each electrode across all samples and features
+    scaler = preprocessing.StandardScaler()
+    scaler.fit(emg_reshaped)
+    
+    # Repeat means and std_devs for each time point using np.repeat
+    scaler.mean_ = np.repeat(scaler.mean_, width)
+    scaler.scale_ = np.repeat(scaler.scale_, width)
+    scaler.var_ = np.repeat(scaler.var_, width)
+    scaler.n_features_in_ = width*number_channels
+
+    del emg_in
+    del labels_in
+
+    del train_emg_in
+    del indices
+
+    del emg_in_by_electrode
+    del emg_reshaped
+    
     data = []
     for i in range(len(emg)):
         data += [data_process.getImages(emg[i])]
 
-    X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16),
-                                                                                    np.concatenate([np.repeat(np.array(i), data_process.dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16), test_size=0.2)
-    X_validation, X_test, Y_validation, Y_test = model_selection.train_test_split(X_validation, Y_validation, test_size=0.5)
-    X_train = torch.from_numpy(X_train).to(torch.float16).squeeze()
-    Y_train = torch.from_numpy(Y_train).to(torch.float16).squeeze()
-    X_validation = torch.from_numpy(X_validation).to(torch.float16)
-    Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-    X_test = torch.from_numpy(X_test).to(torch.float16)
-    Y_test = torch.from_numpy(Y_test).to(torch.float16)
+    combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+    combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
+    X_train = combined_images[train_indices]
+    Y_train = combined_labels[train_indices]
+    X_validation = combined_images[validation_indices]
+    Y_validation = combined_labels[validation_indices]
+    X_validation, X_test, Y_validation, Y_test = model_selection.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation)
+    del combined_images
+    del combined_labels
+    del data
+    del emg
 
-print("X_train size", X_train.size())
-print("Y_train size", Y_train.size())
-print("X_validation size", X_validation.size())
-print("Y_validation size", Y_validation.size())
+    X_train = torch.from_numpy(X_train).to(torch.float32)
+    Y_train = torch.from_numpy(Y_train).to(torch.float32)
+    X_validation = torch.from_numpy(X_validation).to(torch.float32)
+    Y_validation = torch.from_numpy(Y_validation).to(torch.float32)
+    X_test = torch.from_numpy(X_test).to(torch.float32)
+    Y_test = torch.from_numpy(Y_test).to(torch.float32)
+
+print("Size of X_train:     ", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+print("Size of Y_train:     ", Y_train.size()) # (SAMPLE, GESTURE)
+print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
+if leaveOut == 0:
+    print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+    print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
 
 numGestures = len(labels[0])
 
