@@ -610,7 +610,7 @@ torch.cuda.empty_cache()
 wandb_runname = 'CNN_seed-' + str(args.seed)
 if leaveOut != 0:
     wandb_runname += '_LOSO-' + str(args.leftout_subject)     
-wandb_runname += '_' + model_name      
+wandb_runname += '_' + args.model
 
 run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='msoh')
 wandb.config.lr = learn
