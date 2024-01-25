@@ -56,6 +56,7 @@ parser.add_argument('--turn_on_rms', type=ut_NDB2.str2bool, help='whether to use
 parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
 parser.add_argument('--window_size_in_ms', type=int, help='window size in ms. Set to 250 by default.', default=250)
 parser.add_argument('--downsample_factor', type=int, help='downsample factor, should be multiple of 1. Set to 1 by default.', default=1)
+parser.add_argument('--freeze_model', type=ut_NDB2.str2bool, help='whether to freeze the model. Set to false by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -70,6 +71,7 @@ print(f"The value of --turn_on_rms is {args.turn_on_rms}")
 print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
 print(f"The value of --window_size_in_ms is {args.window_size_in_ms}")
 print(f"The value of --downsample_factor is {args.downsample_factor}")
+print(f"The value of --freeze_model is {args.freeze_model}")
 print("\n")
 
 # %%
@@ -492,7 +494,7 @@ if leaveOut != 0:
     del X_train_all
     del Y_train_all
     
-# non-LOSO data processing (not updated)
+# non-LOSO data processing
 
 else:
     # emg is of dimensions [SUBJECT, SAMPLE, CHANNEL, TIME]
@@ -643,6 +645,27 @@ else:
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
     # model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB2.numGestures)
+    
+def find_last_layer(module):
+    children = list(module.children())
+    if len(children) == 0:
+        return module
+    else: 
+        return find_last_layer(children[-1])
+
+if args.freeze_model:
+    for param in model.parameters():
+        param.requires_grad = False
+        
+    # get the last layer
+    last_layer = find_last_layer(model)
+    
+    print("Last layer: ", last_layer)
+
+    # Unfreeze the last layer if it has parameters
+    if hasattr(last_layer, 'parameters'):
+        for param in last_layer.parameters():
+            param.requires_grad = True
 
 class Data(Dataset):
     def __init__(self, data):
