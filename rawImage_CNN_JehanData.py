@@ -37,6 +37,7 @@ from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 from sklearn.model_selection import train_test_split
 import logging
 from concurrent.futures import ProcessPoolExecutor
+from joblib import Parallel, delayed
 
 logging.basicConfig(filename='error_log.log', level=logging.DEBUG, 
                     format='%(asctime)s:%(levelname)s:%(message)s')
@@ -310,28 +311,38 @@ class DataProcessing:
 
     # no augmentation image generation
 
+    # def getImages_noAugment(self, emg_sample):
+    #     allImages = []
+    #     pbar = tqdm(total=len(emg_sample), desc="Non-Augmented Image Generation")
+
+    #     # def collect_result(result):
+    #     #     allImages.append(result)
+    #     #     print("progress: " + str(len(allImages)) + "/" + str(len(emg_sample)))
+    #         #pbar.update()
+
+    #     # with multiprocessing.Pool(processes=multiprocessing.cpu_count() // 2) as pool:  # Use half of available CPU cores
+    #     #     results = [pool.apply_async(self.dataToImage, args=(sample,), callback=collect_result) for sample in emg_sample]
+
+    #     #     pool.close()  # Close the pool to any more tasks
+    #     #     pool.join()   # Wait for all worker processes to exit
+
+    #         # pbar.update(1)
+    #     for i in range(len(emg_sample)):
+    #         allImages.append(self.dataToImage(emg_sample[i]))
+    #         pbar.update(1)
+
+    #     return allImages
     def getImages_noAugment(self, emg_sample):
-        allImages = []
-        pbar = tqdm(total=len(emg_sample), desc="Non-Augmented Image Generation")
+        # Parallel processing using Joblib
+        
+        # Wrap emg_sample with tqdm for progress reporting
+        emg_sample_wrapped = tqdm(emg_sample, desc="Processing", total=len(emg_sample))
 
-        # def collect_result(result):
-        #     allImages.append(result)
-        #     print("progress: " + str(len(allImages)) + "/" + str(len(emg_sample)))
-            #pbar.update()
+        # Use Joblib to parallel process the data
+        results = Parallel(n_jobs=-1)(delayed(self.dataToImage)(sample) for sample in emg_sample_wrapped)
 
-        # with multiprocessing.Pool(processes=multiprocessing.cpu_count() // 2) as pool:  # Use half of available CPU cores
-        #     results = [pool.apply_async(self.dataToImage, args=(sample,), callback=collect_result) for sample in emg_sample]
-
-        #     pool.close()  # Close the pool to any more tasks
-        #     pool.join()   # Wait for all worker processes to exit
-
-            # pbar.update(1)
-        for i in range(len(emg_sample)):
-            allImages.append(self.dataToImage(emg_sample[i]))
-            pbar.update(1)
-
-        return allImages
-
+        return results
+    
 # extracting raw EMG data
 
 participants = [8, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22]  # Example participant IDs
@@ -512,7 +523,7 @@ else:
         val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))) for subject in val_emg]
         test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps)))for subject in test_emg]
     
-    debug_number = 1000
+    debug_number = 35
 
     # Generate images (or your specific data processing) for training, validation, and test sets
     X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
