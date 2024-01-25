@@ -523,7 +523,7 @@ else:
         val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))) for subject in val_emg]
         test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps)))for subject in test_emg]
     
-    debug_number = 35
+    debug_number = int(1e6)
 
     # Generate images (or your specific data processing) for training, validation, and test sets
     X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
