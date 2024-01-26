@@ -527,7 +527,7 @@ else:
         val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))) for subject in val_emg]
         test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps)))for subject in test_emg]
     
-    debug_number = int(1e1)
+    debug_number = int(1e2)
 
     # Generate images (or your specific data processing) for training, validation, and test sets
     X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
@@ -776,8 +776,8 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
         loss = criterion(output, Y_batch)
         train_loss += loss.item()
 
-        train_acc += np.mean(np.argmax(output.cpu().detach().numpy(),
-                                       axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+        train_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(),
+                                       axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
         loss.backward()
         optimizer.step()
@@ -798,7 +798,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
             output = model(X_batch)
             val_loss += criterion(output, Y_batch).item()
 
-            val_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            val_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(), axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
             del X_batch, Y_batch
             torch.cuda.empty_cache()
