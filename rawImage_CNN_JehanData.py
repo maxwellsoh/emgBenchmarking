@@ -836,7 +836,7 @@ if (leaveOut == 0):
             output = model(X_batch)
             test_loss += criterion(output, Y_batch).item()
 
-            test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            test_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(), axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
             output = np.argmax(output.cpu().detach().numpy(), axis=1)
             pred.extend(output)
@@ -850,7 +850,7 @@ if (leaveOut == 0):
         "Test Loss": test_loss,
         "Test Acc": test_acc, })
 
-    cf_matrix = confusion_matrix(true, np.argmax(output, axis=-1))
+    cf_matrix = confusion_matrix(true, np.argmax(pred, axis=-1))
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index = np.arange(1, 11, 1),
                         columns = np.arange(1, 11, 1))
     plt.figure(figsize = (12,7))
