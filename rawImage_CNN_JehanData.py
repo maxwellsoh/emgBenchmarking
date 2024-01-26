@@ -35,7 +35,12 @@ import timm
 import utils_NinaproDB2 as ut_NDB2
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 from sklearn.model_selection import train_test_split
+import logging
+from concurrent.futures import ProcessPoolExecutor
+from joblib import Parallel, delayed
 
+logging.basicConfig(filename='error_log.log', level=logging.DEBUG, 
+                    format='%(asctime)s:%(levelname)s:%(message)s')
 ## Argument parser with optional argumenets
 
 # Create the parser
@@ -44,10 +49,16 @@ parser = argparse.ArgumentParser(description="Include arguments for running diff
 # Add an optional argument
 parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
 parser.add_argument('--seed', type=int, help='number of seed that is used for randomization. Set to 0 by default.', default=0)
-parser.add_argument('--save_images', type=bool, help='whether to save the RMS images. Set to false by default.', default=False)
+parser.add_argument('--save_images', type=ut_NDB2.str2bool, help='whether to save the RMS images. Set to false by default.', default=False)
 parser.add_argument('--model', type=str, help='model to use. Set to resnet50 by default.', default='resnet50')
 parser.add_argument('--epochs', type=int, help='number of epochs to train for. Set to 50 by default.', default=50)
-parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 250 by default.', default=250)
+parser.add_argument('--turn_on_rms', type=ut_NDB2.str2bool, help='whether to use RMS images. Set to false by default.', default=False)
+parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
+parser.add_argument('--window_size_in_ms', type=int, help='window size in ms. Set to 250 by default.', default=250)
+parser.add_argument('--downsample_factor', type=int, help='downsample factor, should be multiple of 1. Set to 1 by default.', default=1)
+parser.add_argument('--freeze_model', type=ut_NDB2.str2bool, help='whether to freeze the model. Set to false by default.', default=False)
+parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
+parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -58,7 +69,11 @@ print(f"The value of --seed is {args.seed}")
 print(f"The value of --save_images is {args.save_images}")
 print(f"The value of --model is {args.model}")
 print(f"The value of --epochs is {args.epochs}")
+print(f"The value of --turn_on_rms is {args.turn_on_rms}")
 print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
+print(f"The value of --window_size_in_ms is {args.window_size_in_ms}")
+print(f"The value of --downsample_factor is {args.downsample_factor}")
+print(f"The value of --freeze_model is {args.freeze_model}")
 print("\n")
 
 # %%
@@ -80,7 +95,7 @@ SNR = 15
 # magnitude warping std
 std = 0.05
 
-window_length_in_milliseconds = 250 #ms
+window_length_in_milliseconds = args.window_size_in_ms #ms
 step_length_in_milliseconds = 50 #ms
 sampling_frequency = 4000 #Hz
 
@@ -93,6 +108,10 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
+
+milliseconds_in_second = 1000
+window_size_in_timesteps = int(window_length_in_milliseconds/milliseconds_in_second*sampling_frequency)
+step_size_in_timesteps = int(step_length_in_milliseconds/milliseconds_in_second*sampling_frequency)
 
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
@@ -110,23 +129,35 @@ class DataExtract:
 
     # returns array with dimensions (# of samples)x64x10x100 [SAMPLES, CHANNELS, GESTURES, TIME]
     def getData(self, n, gesture):
+        milliseconds_in_second = 1000
         if (n<10):
             file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
         else:
             file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
-        data = self.highpassFilter(torch.from_numpy(np.array(file[gesture]))\
-                    .unfold(
-                        dimension=-1, size=int(window_length_in_milliseconds/1000*sampling_frequency), # window length in time steps
-                        step=int(step_length_in_milliseconds/1000*sampling_frequency)))\
-                    .unfold(
-                        dimension=-1, size=int(window_length_in_milliseconds/(1000*RMS_input_windowsize)*sampling_frequency), # RMS window length
-                        step=int(window_length_in_milliseconds/(1000*RMS_input_windowsize)*sampling_frequency))
+        data = self.highpassFilter(torch.from_numpy(np.array(file[gesture])).unfold( # [SAMPLE, CHANNEL, TIME]
+                        dimension=-1, 
+                        size=int(window_length_in_milliseconds/milliseconds_in_second*sampling_frequency), # window length in time steps
+                        step=int(step_length_in_milliseconds/milliseconds_in_second*sampling_frequency))) # [SAMPLE, CHANNEL, WINDOW, TIME]
+        if (args.turn_on_rms):
+            data = data.unfold(
+                    dimension=-1, 
+                    size=int(window_length_in_milliseconds/(milliseconds_in_second*RMS_input_windowsize)*sampling_frequency), # RMS window length
+                    step=int(window_length_in_milliseconds/(milliseconds_in_second*RMS_input_windowsize)*sampling_frequency)) # [SAMPLE, CHANNEL, WINDOW, RMS_WINDOW, TIME]
+        else: 
+            data = data.unsqueeze(3) # [SAMPLE, CHANNEL, WINDOW, 1, TIME]
 
-        return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2, 3])
+        # Downsample tensor by downsample_factor
+        if args.downsample_factor != 1:
+            data = data[:, :, :, :, ::args.downsample_factor]
+
+        return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2, 3]) # [SAMPLE, CHANNEL, RMS_WINDOW or 1, TIME]
 
 
     def getEMG(self, n):
-        return torch.cat([torch.sqrt(torch.mean(self.getData(n, name) ** 2, dim=3)) for name in self.gestures], axis=0)
+        if args.turn_on_rms:
+            return torch.cat([torch.sqrt(torch.mean(self.getData(n, name) ** 2, dim=3)) for name in self.gestures], axis=0)
+        else: 
+            return torch.cat([self.getData(n, name) for name in self.gestures], axis=0).squeeze()
 
     def getGestures(self, n):
         if (n<10):
@@ -135,14 +166,18 @@ class DataExtract:
             file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
 
         numGestures = []
+        milliseconds_in_second = 1000
         for gesture in self.gestures: 
             data = self.highpassFilter(torch.from_numpy(np.array(file[gesture]))\
                 .unfold(dimension=-1, 
-                        size=int(window_length_in_milliseconds/1000*sampling_frequency), 
-                        step=int(step_length_in_milliseconds/1000*sampling_frequency)))\
-                .unfold(dimension=-1,
-                        size=int(window_length_in_milliseconds/(1000*RMS_input_windowsize)*sampling_frequency), 
-                        step=int(window_length_in_milliseconds/(1000*RMS_input_windowsize)*sampling_frequency))
+                        size=int(window_length_in_milliseconds/milliseconds_in_second*sampling_frequency), 
+                        step=int(step_length_in_milliseconds/milliseconds_in_second*sampling_frequency)))
+            if args.turn_on_rms:
+                data = data.unfold(dimension=-1,
+                        size=int(window_length_in_milliseconds/(milliseconds_in_second*RMS_input_windowsize)*sampling_frequency), 
+                        step=int(window_length_in_milliseconds/(milliseconds_in_second*RMS_input_windowsize)*sampling_frequency))
+            else:
+                data = data.unsqueeze(3)
             numGestures += [len(data)]
         return numGestures
 
@@ -200,27 +235,35 @@ class DataProcessing:
     cmap = mpl.colormaps['viridis']
     order = list(chain.from_iterable([[[k for k in range(64)][(i+j*16+32) % 64] for j in range(4)] for i in range(16)]))
     
-    def dataToImage (self, emg):
-        emg = emg.squeeze()
-        rectified = emg - min(emg)
-        rectified = rectified / max(rectified)
+    def dataToImage(self, emg_sample):
+        try:
+            emg_sample = emg_sample.squeeze()
+            emg_sample -= torch.min(emg_sample)
+            emg_sample /= torch.max(emg_sample)
 
-        data = rectified.view(64, RMS_input_windowsize).clone()
-        data = torch.stack([data[i] for i in self.order])
+            window_size = RMS_input_windowsize if args.turn_on_rms else window_size_in_timesteps
 
-        frames = []
-        for i in range(RMS_input_windowsize):
-            frames += [np.transpose(np.array(list(map(lambda x: self.cmap(x[i]), data.numpy()))), axes=[1, 0])[:3]]
+            emg_sample = emg_sample.view(64, window_size)
+            emg_sample = torch.stack([emg_sample[i] for i in self.order])
 
-        image_1 = torch.from_numpy(np.transpose(np.stack(frames[:(int(len(frames)/2))]), axes=[1, 2, 0]))
-        image_2 = torch.from_numpy(np.transpose(np.stack(frames[(int(len(frames)/2)):]), axes=[1, 2, 0]))
-        image_1 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_1)
-        image_2 = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image_2)
-        image_1 = transforms.Resize(size=[width, int(RMS_input_windowsize/2)], interpolation=transforms.InterpolationMode.BICUBIC,
-                                    antialias=True)(image_1)
-        image_2 = transforms.Resize(size=[width, int(RMS_input_windowsize/2)], interpolation=transforms.InterpolationMode.BICUBIC,
-                                    antialias=True)(image_2)
-        return torch.cat([image_1, image_2], dim=2).numpy().astype(np.float32)
+            # Preallocate frames array for efficiency
+            frames = [None] * window_size
+            for i in range(window_size):
+                frame = np.array(list(map(lambda x: self.cmap(x[i]), emg_sample.numpy())), dtype=np.float32)
+                frames[i] = np.transpose(frame, axes=[1, 0])[:3]
+
+            image = torch.from_numpy(np.transpose(np.stack(frames), axes=[1, 2, 0]))
+            norm_transform = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            resize_transform = transforms.Resize(size=[width, window_size], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+
+            image = resize_transform(norm_transform(image))
+
+            return image.numpy().astype(np.float32)
+
+        except Exception as e:
+            logging.exception("Error occurred in dataToImage")
+            raise e  # Re-raise the exception for further handling if necessary
+
 
     # image generation with augmentation
     dataCopies = 1
@@ -256,6 +299,8 @@ class DataProcessing:
             pool.close()  # Close the pool to any more tasks
             pool.join()   # Wait for all worker processes to exit
 
+        
+
         pbar.close()
 
         '''
@@ -270,27 +315,38 @@ class DataProcessing:
 
     # no augmentation image generation
 
-    def getImages_noAugment (self, emg):
-        allImages = []
-        pbar = tqdm(total = len(emg), desc="Non-Augmented Image Generation")
+    # def getImages_noAugment(self, emg_sample):
+    #     allImages = []
+    #     pbar = tqdm(total=len(emg_sample), desc="Non-Augmented Image Generation")
+
+    #     # def collect_result(result):
+    #     #     allImages.append(result)
+    #     #     print("progress: " + str(len(allImages)) + "/" + str(len(emg_sample)))
+    #         #pbar.update()
+
+    #     # with multiprocessing.Pool(processes=multiprocessing.cpu_count() // 2) as pool:  # Use half of available CPU cores
+    #     #     results = [pool.apply_async(self.dataToImage, args=(sample,), callback=collect_result) for sample in emg_sample]
+
+    #     #     pool.close()  # Close the pool to any more tasks
+    #     #     pool.join()   # Wait for all worker processes to exit
+
+    #         # pbar.update(1)
+    #     for i in range(len(emg_sample)):
+    #         allImages.append(self.dataToImage(emg_sample[i]))
+    #         pbar.update(1)
+
+    #     return allImages
+    def getImages_noAugment(self, emg_sample):
+        # Parallel processing using Joblib
         
-        # Define a callback function to collect results and update progress bar
-        def collect_result(result):
-            allImages.append(result)
-            pbar.update()
-            
-        with multiprocessing.Pool(processes=32) as pool:
-            results = []
-            for i in range(len(emg)):
-                # Use collect_result as the callback to append results
-                async_result = pool.apply_async(self.dataToImage, args=(emg[i],), callback=collect_result)
-                results.append(async_result)
-                
-            pool.close()  # Close the pool to any more tasks
-            pool.join()   # Wait for all worker processes to exit
+        # Wrap emg_sample with tqdm for progress reporting
+        emg_sample_wrapped = tqdm(emg_sample, desc="Processing", total=len(emg_sample))
 
-        return allImages
+        # Use Joblib to parallel process the data
+        results = Parallel(n_jobs=-1)(delayed(self.dataToImage)(sample) for sample in emg_sample_wrapped)
 
+        return results
+    
 # extracting raw EMG data
 
 participants = [8, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22]  # Example participant IDs
@@ -329,7 +385,8 @@ print("\n")
 # generating labels
 
 labels = []
-windowsPerSample = 36 # change this if window_length_in_milliseconds or step_length_in_milliseconds is changed
+
+windowsPerSample = math.ceil((8000 - window_size_in_timesteps) / (step_size_in_timesteps - 1))  
 
 for nums in tqdm(numGestures, desc="Label Generation"):
     sub_labels = torch.tensor(()).new_zeros(size=(sum(nums)*windowsPerSample, 10))
@@ -396,14 +453,6 @@ if leaveOut != 0:
     del participants[leaveOut-1]
     del emg_scaled_subject_leftout
 
-    '''
-    data = []
-    for i in range(len(emg)):
-        print(i)
-        data += [getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*RMS_input_windowsize)))))]
-        #data += [getImages_noAugment(torch.from_numpy(s.transform(np.array(emg[i]))))]
-    '''
-    
     X_train_all = []
     Y_train_all = []
     
@@ -447,13 +496,7 @@ if leaveOut != 0:
     del X_train_all
     del Y_train_all
     
-        
-    '''
-    X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(np.concatenate([np.array(getImages(torch.from_numpy(s.transform(np.array(emg[i].view(len(emg[i]), 64*RMS_input_windowsize)))))).astype(np.float16) for i in range(len(emg))], axis=0, dtype=np.float16),
-                                                                                    np.concatenate([np.repeat(np.array(i), dataCopies, axis=0) for i in labels], axis=0, dtype=np.float16), test_size=0.1)
-    '''
-
-# non-LOSO data processing (not updated)
+# non-LOSO data processing
 
 else:
     # emg is of dimensions [SUBJECT, SAMPLE, CHANNEL, TIME]
@@ -462,7 +505,7 @@ else:
     test_split_ratio = 0.2  # For example, 20% for testing
 
     # Flatten and concatenate all EMG data
-    all_emg = np.concatenate([np.array(i.view(len(i), 64*RMS_input_windowsize)) for i in emg], axis=0)
+    all_emg = np.concatenate([np.array(i.view(len(i), -1)) for i in emg], axis=0)
 
     # Flatten and concatenate all labels
     all_labels = np.concatenate(labels, axis=0)
@@ -475,19 +518,26 @@ else:
     standard_scalar = preprocessing.StandardScaler().fit(train_emg)
     
     # Apply the scaler to training, validation, and test sets
-    train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))) for subject in train_emg]
-    val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))) for subject in val_emg]
-    test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize)))for subject in test_emg]
+    if args.turn_on_rms:
+        train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))) for subject in train_emg]
+        val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))) for subject in val_emg]
+        test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize)))for subject in test_emg]
+    else:
+        train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))) for subject in train_emg]
+        val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))) for subject in val_emg]
+        test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps)))for subject in test_emg]
+    
+    debug_number = int(1e2)
 
     # Generate images (or your specific data processing) for training, validation, and test sets
-    X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled))).to(torch.float16)
-    X_validation = torch.tensor(np.array(data_process.getImages_noAugment(val_emg_scaled))).to(torch.float16)
-    X_test = torch.tensor(np.array(data_process.getImages_noAugment(test_emg_scaled))).to(torch.float16)
+    X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
+    X_validation = torch.tensor(np.array(data_process.getImages_noAugment(val_emg_scaled[:debug_number]))).to(torch.float16)
+    X_test = torch.tensor(np.array(data_process.getImages_noAugment(test_emg_scaled[:debug_number]))).to(torch.float16)
 
     # Convert labels to tensors and possibly perform additional processing
-    Y_train = torch.stack([torch.tensor(labels) for labels in train_labels])
-    Y_validation = torch.stack([torch.tensor(labels) for labels in val_labels])
-    Y_test = torch.stack([torch.tensor(labels) for labels in test_labels])
+    Y_train = torch.stack([torch.tensor(labels) for labels in train_labels[:debug_number]])
+    Y_validation = torch.stack([torch.tensor(labels) for labels in val_labels[:debug_number]])
+    Y_test = torch.stack([torch.tensor(labels) for labels in test_labels[:debug_number]])
 
     # Concatenate data for each set if necessary
     # This step depends on how you want to structure your data for training
@@ -597,7 +647,60 @@ else:
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
     # model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB2.numGestures)
+    
+def find_last_layer(module):
+    children = list(module.children())
+    if len(children) == 0:
+        return module
+    else: 
+        return find_last_layer(children[-1])
 
+last_layer = find_last_layer(model)
+if args.freeze_model:
+    for param in model.parameters():
+        param.requires_grad = False
+    
+    print("Last layer: ", last_layer)
+
+    # Unfreeze the last layer if it has parameters
+    if hasattr(last_layer, 'parameters'):
+        for param in last_layer.parameters():
+            param.requires_grad = True
+            
+if args.number_hidden_classifier_layers > 0:
+    # Determine in_features for the last layer
+    if isinstance(last_layer, nn.Linear):
+        in_features = last_layer.in_features
+    else:
+        raise Exception("Last layer is not a linear layer. Please check the model architecture.")
+                
+    # Function to remove the last layer
+    def remove_last_layer(model):
+        # Convert model to a list of its children
+        model_children = list(model.children())
+        # Remove the last layer
+        model_children = model_children[:-1]
+        # Create a new Sequential container
+        return nn.Sequential(*model_children)
+
+    # Remove the last layer
+    model = remove_last_layer(model)
+
+    layers = []
+    for hidden_size in range(args.number_hidden_classifier_layers):
+        layers.append(nn.Linear(in_features, args.hidden_classifier_layer_size))
+        layers.append(nn.ReLU())
+        in_features = args.hidden_classifier_layer_size
+        
+    # Add the last layer
+    layers.append(nn.Linear(in_features, numGestureTypes))
+    
+    new_layers = nn.Sequential(*layers)
+        
+    model.add_module('classifier_layers', new_layers)
+    
+    print(model)
+    
 class Data(Dataset):
     def __init__(self, data):
         self.data = data
@@ -641,8 +744,15 @@ wandb_runname = 'CNN_seed-' + str(args.seed)
 if leaveOut != 0:
     wandb_runname += '_LOSO-' + str(args.leftout_subject)     
 wandb_runname += '_' + args.model
-
-run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
+if args.freeze_model:
+    wandb_runname += '_freeze'
+if args.number_hidden_classifier_layers > 0:
+    wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
+    
+if leaveOut != 0:
+    run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
+else:
+    run = wandb.init(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset', entity='jehanyang')
 wandb.config.lr = learn
 
 num_epochs = args.epochs
@@ -658,7 +768,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     train_loss = 0.0
     for X_batch, Y_batch in train_loader:
         X_batch = X_batch.to(device).to(torch.float32)
-        Y_batch = Y_batch.to(device).to(torch.float32)
+        Y_batch = Y_batch.to(device).to(torch.long)
 
         optimizer.zero_grad()
         #output = model(X_batch).logits
@@ -666,8 +776,8 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
         loss = criterion(output, Y_batch)
         train_loss += loss.item()
 
-        train_acc += np.mean(np.argmax(output.cpu().detach().numpy(),
-                                       axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+        train_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(),
+                                       axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
         loss.backward()
         optimizer.step()
@@ -682,13 +792,13 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     with torch.no_grad():
         for X_batch, Y_batch in val_loader:
             X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.float32)
+            Y_batch = Y_batch.to(device).to(torch.long)
 
             #output = model(X_batch).logits
             output = model(X_batch)
             val_loss += criterion(output, Y_batch).item()
 
-            val_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            val_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(), axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
             del X_batch, Y_batch
             torch.cuda.empty_cache()
@@ -721,12 +831,12 @@ if (leaveOut == 0):
     with torch.no_grad():
         for X_batch, Y_batch in test_loader:
             X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.float32)
+            Y_batch = Y_batch.to(device).to(torch.long)
 
             output = model(X_batch)
             test_loss += criterion(output, Y_batch).item()
 
-            test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            test_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(), axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
             output = np.argmax(output.cpu().detach().numpy(), axis=1)
             pred.extend(output)
@@ -740,7 +850,7 @@ if (leaveOut == 0):
         "Test Loss": test_loss,
         "Test Acc": test_acc, })
 
-    cf_matrix = confusion_matrix(true, pred)
+    cf_matrix = confusion_matrix(true, np.argmax(pred, axis=-1))
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index = np.arange(1, 11, 1),
                         columns = np.arange(1, 11, 1))
     plt.figure(figsize = (12,7))
