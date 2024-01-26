@@ -57,6 +57,8 @@ parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window s
 parser.add_argument('--window_size_in_ms', type=int, help='window size in ms. Set to 250 by default.', default=250)
 parser.add_argument('--downsample_factor', type=int, help='downsample factor, should be multiple of 1. Set to 1 by default.', default=1)
 parser.add_argument('--freeze_model', type=ut_NDB2.str2bool, help='whether to freeze the model. Set to false by default.', default=False)
+parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
+parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -525,7 +527,7 @@ else:
         val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))) for subject in val_emg]
         test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps)))for subject in test_emg]
     
-    debug_number = int(1e6)
+    debug_number = int(1e1)
 
     # Generate images (or your specific data processing) for training, validation, and test sets
     X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
@@ -653,12 +655,10 @@ def find_last_layer(module):
     else: 
         return find_last_layer(children[-1])
 
+last_layer = find_last_layer(model)
 if args.freeze_model:
     for param in model.parameters():
         param.requires_grad = False
-        
-    # get the last layer
-    last_layer = find_last_layer(model)
     
     print("Last layer: ", last_layer)
 
@@ -666,7 +666,41 @@ if args.freeze_model:
     if hasattr(last_layer, 'parameters'):
         for param in last_layer.parameters():
             param.requires_grad = True
+            
+if args.number_hidden_classifier_layers > 0:
+    # Determine in_features for the last layer
+    if isinstance(last_layer, nn.Linear):
+        in_features = last_layer.in_features
+    else:
+        raise Exception("Last layer is not a linear layer. Please check the model architecture.")
+                
+    # Function to remove the last layer
+    def remove_last_layer(model):
+        # Convert model to a list of its children
+        model_children = list(model.children())
+        # Remove the last layer
+        model_children = model_children[:-1]
+        # Create a new Sequential container
+        return nn.Sequential(*model_children)
 
+    # Remove the last layer
+    model = remove_last_layer(model)
+
+    layers = []
+    for hidden_size in range(args.number_hidden_classifier_layers):
+        layers.append(nn.Linear(in_features, args.hidden_classifier_layer_size))
+        layers.append(nn.ReLU())
+        in_features = args.hidden_classifier_layer_size
+        
+    # Add the last layer
+    layers.append(nn.Linear(in_features, numGestureTypes))
+    
+    new_layers = nn.Sequential(*layers)
+        
+    model.add_module('classifier_layers', new_layers)
+    
+    print(model)
+    
 class Data(Dataset):
     def __init__(self, data):
         self.data = data
@@ -712,8 +746,13 @@ if leaveOut != 0:
 wandb_runname += '_' + args.model
 if args.freeze_model:
     wandb_runname += '_freeze'
-
-run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
+if args.number_hidden_classifier_layers > 0:
+    wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
+    
+if leaveOut != 0:
+    run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
+else:
+    run = wandb.init(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset', entity='jehanyang')
 wandb.config.lr = learn
 
 num_epochs = args.epochs
@@ -729,7 +768,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     train_loss = 0.0
     for X_batch, Y_batch in train_loader:
         X_batch = X_batch.to(device).to(torch.float32)
-        Y_batch = Y_batch.to(device).to(torch.float32)
+        Y_batch = Y_batch.to(device).to(torch.long)
 
         optimizer.zero_grad()
         #output = model(X_batch).logits
@@ -753,7 +792,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     with torch.no_grad():
         for X_batch, Y_batch in val_loader:
             X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.float32)
+            Y_batch = Y_batch.to(device).to(torch.long)
 
             #output = model(X_batch).logits
             output = model(X_batch)
@@ -792,7 +831,7 @@ if (leaveOut == 0):
     with torch.no_grad():
         for X_batch, Y_batch in test_loader:
             X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.float32)
+            Y_batch = Y_batch.to(device).to(torch.long)
 
             output = model(X_batch)
             test_loss += criterion(output, Y_batch).item()
@@ -811,7 +850,7 @@ if (leaveOut == 0):
         "Test Loss": test_loss,
         "Test Acc": test_acc, })
 
-    cf_matrix = confusion_matrix(true, pred)
+    cf_matrix = confusion_matrix(true, np.argmax(output, axis=-1))
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index = np.arange(1, 11, 1),
                         columns = np.arange(1, 11, 1))
     plt.figure(figsize = (12,7))
