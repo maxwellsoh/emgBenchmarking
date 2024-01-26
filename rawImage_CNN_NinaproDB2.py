@@ -308,20 +308,12 @@ if args.model == 'resnet50':
     dropout = 0.5
     model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
     model.add_module('flatten', nn.Flatten())
-    '''
-    model.add_module('fc1', nn.Linear(num_features, 1024))
-    model.add_module('relu', nn.ReLU())
+    model.add_module('fc1', nn.Linear(num_features, 256))
+    model.add_module('batchnorm', nn.BatchNorm1d(256))
+    model.add_module('GELU', nn.GELU())
     model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc2', nn.Linear(1024, 1024))
-    model.add_module('relu2', nn.ReLU())
-    model.add_module('dropout2', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(1024, ut_NDB5.numGestures))
-    '''
-    model.add_module('fc1', nn.Linear(num_features, 512))
-    model.add_module('relu', nn.ReLU())
-    model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(512, ut_NDB5.numGestures))
-    model.add_module('softmax', nn.Softmax(dim=1))
+    model.add_module('fc3', nn.Linear(256, ut_NDB5.numGestures))
+    model.add_module('softmax', nn.LogSoftmax(dim=1))
 elif args.model == 'convnext_tiny_custom':
     # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
     class LayerNorm2d(nn.LayerNorm):

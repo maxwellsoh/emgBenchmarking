@@ -99,9 +99,10 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
     
     # Split image and resize
     imageL, imageR = np.split(image, 2, axis=2)
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    #resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+    #                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    #imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
     
     # Clamp between 0 and 1 using torch.clamp
     imageL, imageR = map(lambda img: torch.clamp(img, 0, 1), (imageL, imageR))
@@ -123,9 +124,10 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     
     # Split image and resize
     imageL, imageR = np.split(image, 2, axis=2)
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    #resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+    #                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    #imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
     
     # Get max and min values after interpolation
     max_val = max(imageL.max(), imageR.max())
