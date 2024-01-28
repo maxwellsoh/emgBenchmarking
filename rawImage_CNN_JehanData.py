@@ -527,7 +527,7 @@ else:
         val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))) for subject in val_emg]
         test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps)))for subject in test_emg]
     
-    debug_number = int(1e7)
+    debug_number = int(1e2)
 
     # Generate images (or your specific data processing) for training, validation, and test sets
     X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
@@ -673,15 +673,20 @@ if args.number_hidden_classifier_layers > 0:
         in_features = last_layer.in_features
     else:
         raise Exception("Last layer is not a linear layer. Please check the model architecture.")
-                
-    # Function to remove the last layer
-    def remove_last_layer(model):
-        # Convert model to a list of its children
-        model_children = list(model.children())
-        # Remove the last layer
-        model_children = model_children[:-1]
-        # Create a new Sequential container
-        return nn.Sequential(*model_children)
+    
+    def remove_last_layer(module):
+        children = list(module.children())
+        if len(children) == 0:
+            # Base case: module has no children
+            return module
+        else:
+            # If the child is a leaf (has no children), remove it
+            if len(list(children[-1].children())) == 0:
+                return nn.Sequential(*children[:-1])
+            else:
+                # Otherwise, recursively remove the last layer from the last child
+                new_children = children[:-1] + [remove_last_layer(children[-1])]
+                return nn.Sequential(*new_children)
 
     # Remove the last layer
     model = remove_last_layer(model)
