@@ -7,6 +7,7 @@ Install a version of Miniforge distribution `>= Miniforge3-22.3.1-0`, which will
 To install the virtual environment, run 
 ```console
 $ mamba env create -n emgbench -f environment.yml
+$ pip install -r requirements.txt
 ```
 
 # Troubleshooting
