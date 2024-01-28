@@ -59,6 +59,7 @@ parser.add_argument('--downsample_factor', type=int, help='downsample factor, sh
 parser.add_argument('--freeze_model', type=ut_NDB2.str2bool, help='whether to freeze the model. Set to false by default.', default=False)
 parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
 parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
+parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -74,6 +75,7 @@ print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
 print(f"The value of --window_size_in_ms is {args.window_size_in_ms}")
 print(f"The value of --downsample_factor is {args.downsample_factor}")
 print(f"The value of --freeze_model is {args.freeze_model}")
+print(f"The value of --number_hidden_classifier_layers is {args.number_hidden_classifier_layers}")
 print("\n")
 
 # %%
@@ -732,7 +734,7 @@ print("number of batches: ", len(train_loader))
 
 # loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-learn = 1e-4
+learn = args.learning_rate
 optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
 
 # %%
@@ -748,6 +750,7 @@ if args.freeze_model:
     wandb_runname += '_freeze'
 if args.number_hidden_classifier_layers > 0:
     wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
+wandb_runname += '_lr-' + str(args.learning_rate)
     
 if leaveOut != 0:
     run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
