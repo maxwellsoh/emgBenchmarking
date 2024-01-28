@@ -774,6 +774,8 @@ if args.freeze_model:
 if args.number_hidden_classifier_layers > 0:
     wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
 wandb_runname += '_lr-' + str(args.learning_rate)
+if args.turn_on_rms:
+    wandb_runname += '_rms' + str(RMS_input_windowsize)
     
 if leaveOut != 0:
     run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
