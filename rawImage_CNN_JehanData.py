@@ -427,7 +427,7 @@ if leaveOut != 0:
     del emg_scaling_subjects_leftin 
     del emg_subject_leftout
     
-    # load zarr images if they exist
+    # load validation zarr images if they exist
     if (os.path.exists(foldername_zarr + 'val_data_LOSO' + str(leaveOut) + '.zarr')):
         X_validation_np = zarr.load(foldername_zarr + 'val_data_LOSO' + str(leaveOut) + '.zarr')
         Y_validation_np = zarr.load(foldername_zarr + 'val_labels_LOSO' + str(leaveOut) + '.zarr')
@@ -458,7 +458,7 @@ if leaveOut != 0:
     X_train_all = []
     Y_train_all = []
     
-    # load zarr images if they exist
+    # load training zarr images if they exist
     for subject in range(len(emg)):
         if subject + 1 == leaveOut:
             continue
@@ -503,8 +503,7 @@ if leaveOut != 0:
 else:
     # emg is of dimensions [SUBJECT, SAMPLE, CHANNEL, TIME]
     # Split the dataset into training, validation, and test sets
-    # You'll need to define your own splitting logic here based on your dataset
-    test_split_ratio = 0.2  # For example, 20% for testing
+    test_split_ratio = 0.2  
 
     # Flatten and concatenate all EMG data
     all_emg = np.concatenate([np.array(i.view(len(i), -1)) for i in emg], axis=0)
@@ -529,26 +528,45 @@ else:
         val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))) for subject in val_emg]
         test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps)))for subject in test_emg]
     
-    debug_number = int(1e2)
+    debug_number = int(1e7)
 
-    # Generate images (or your specific data processing) for training, validation, and test sets
-    X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
-    X_validation = torch.tensor(np.array(data_process.getImages_noAugment(val_emg_scaled[:debug_number]))).to(torch.float16)
-    X_test = torch.tensor(np.array(data_process.getImages_noAugment(test_emg_scaled[:debug_number]))).to(torch.float16)
+    # Define folder names for Zarr file saving based on the seed and train-test proportions
+    train_test_ratio = str(int((1 - test_split_ratio) * 100)) + '_' + str(int(test_split_ratio * 100))
+    foldername_zarr = f'NonLOSOimages_zarr/JehanDataset/seed_{args.seed}_split_{train_test_ratio}/'
 
-    # Convert labels to tensors and possibly perform additional processing
-    Y_train = torch.stack([torch.tensor(labels) for labels in train_labels[:debug_number]])
-    Y_validation = torch.stack([torch.tensor(labels) for labels in val_labels[:debug_number]])
-    Y_test = torch.stack([torch.tensor(labels) for labels in test_labels[:debug_number]])
+    # Check if Zarr files exist and load them if they do
+    if (os.path.exists(foldername_zarr + 'train_data.zarr') and
+        os.path.exists(foldername_zarr + 'val_data.zarr') and
+        os.path.exists(foldername_zarr + 'test_data.zarr')):
+        X_train = torch.from_numpy(zarr.load(foldername_zarr + 'train_data.zarr')).to(torch.float16)
+        Y_train = torch.from_numpy(zarr.load(foldername_zarr + 'train_labels.zarr')).to(torch.float16)
+        X_validation = torch.from_numpy(zarr.load(foldername_zarr + 'val_data.zarr')).to(torch.float16)
+        Y_validation = torch.from_numpy(zarr.load(foldername_zarr + 'val_labels.zarr')).to(torch.float16)
+        X_test = torch.from_numpy(zarr.load(foldername_zarr + 'test_data.zarr')).to(torch.float16)
+        Y_test = torch.from_numpy(zarr.load(foldername_zarr + 'test_labels.zarr')).to(torch.float16)
+        print("Non-LOSO data loaded from Zarr files.")
 
-    # Concatenate data for each set if necessary
-    # This step depends on how you want to structure your data for training
-    # X_train = torch.concat(X_train).to(torch.float16).squeeze()
-    # Y_train = torch.concat(Y_train).to(torch.float16).squeeze()
-    # X_val = torch.concat(X_val).to(torch.float16).squeeze()
-    # Y_val = torch.concat(Y_val).to(torch.float16).squeeze()
-    # X_test = torch.concat(X_test).to(torch.float16).squeeze()
-    # Y_test = torch.concat(Y_test).to(torch.float16).squeeze()
+    else: 
+        # Generate images (or your specific data processing) for training, validation, and test sets
+        X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
+        X_validation = torch.tensor(np.array(data_process.getImages_noAugment(val_emg_scaled[:debug_number]))).to(torch.float16)
+        X_test = torch.tensor(np.array(data_process.getImages_noAugment(test_emg_scaled[:debug_number]))).to(torch.float16)
+
+        # Convert labels to tensors and possibly perform additional processing
+        Y_train = torch.stack([torch.tensor(labels) for labels in train_labels[:debug_number]])
+        Y_validation = torch.stack([torch.tensor(labels) for labels in val_labels[:debug_number]])
+        Y_test = torch.stack([torch.tensor(labels) for labels in test_labels[:debug_number]])
+
+        # Convert the PyTorch tensors to NumPy and save using Zarr
+        if args.save_images:
+            os.makedirs(foldername_zarr, exist_ok=True)
+            zarr.save(foldername_zarr + 'train_data.zarr', X_train.numpy().astype(np.float16))
+            zarr.save(foldername_zarr + 'train_labels.zarr', Y_train.numpy().astype(np.float16))
+            zarr.save(foldername_zarr + 'val_data.zarr', X_validation.numpy().astype(np.float16))
+            zarr.save(foldername_zarr + 'val_labels.zarr', Y_validation.numpy().astype(np.float16))
+            zarr.save(foldername_zarr + 'test_data.zarr', X_test.numpy().astype(np.float16))
+            zarr.save(foldername_zarr + 'test_labels.zarr', Y_test.numpy().astype(np.float16))
+            print("Non-LOSO data processed and saved in Zarr files.")
 
     # At this point, you have your data ready for a standard training/validation/test procedure.
 
