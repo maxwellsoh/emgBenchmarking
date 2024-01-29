@@ -57,6 +57,7 @@ parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window s
 parser.add_argument('--window_size_in_ms', type=int, help='window size in ms. Set to 250 by default.', default=250)
 parser.add_argument('--downsample_factor', type=int, help='downsample factor, should be multiple of 1. Set to 1 by default.', default=1)
 parser.add_argument('--freeze_model', type=ut_NDB2.str2bool, help='whether to freeze the model. Set to false by default.', default=False)
+parser.add_argument('--number_layers_to_freeze', type=int, help='number of layers to freeze (only active when --freeze_model=True). Set to -1 by default, meaning all layers will freeze.', default=-1)
 parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
 parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
@@ -75,7 +76,10 @@ print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
 print(f"The value of --window_size_in_ms is {args.window_size_in_ms}")
 print(f"The value of --downsample_factor is {args.downsample_factor}")
 print(f"The value of --freeze_model is {args.freeze_model}")
+print(f"The value of --number_layers_to_freeze is {args.number_layers_to_freeze}")
 print(f"The value of --number_hidden_classifier_layers is {args.number_hidden_classifier_layers}")
+print(f"The value of --hidden_classifier_layer_size is {args.hidden_classifier_layer_size}")
+print(f"The value of --learning_rate is {args.learning_rate}")
 print("\n")
 
 # %%
@@ -677,8 +681,18 @@ def find_last_layer(module):
 
 last_layer = find_last_layer(model)
 if args.freeze_model:
-    for param in model.parameters():
-        param.requires_grad = False
+    layer_count = 0
+    
+    number_layers_to_freeze = 1e9 if args.number_layers_to_freeze == -1 else args.number_layers_to_freeze
+    for child in model.children():
+        layer_count += 1
+        if layer_count <= number_layers_to_freeze:
+            print("Freezing layer ", layer_count)
+            print("Layer:", child)
+            for param in child.parameters():
+                param.requires_grad = False
+        else:
+            break
     
     print("Last layer: ", last_layer)
 
@@ -770,7 +784,7 @@ if leaveOut != 0:
     wandb_runname += '_LOSO-' + str(args.leftout_subject)     
 wandb_runname += '_' + args.model
 if args.freeze_model:
-    wandb_runname += '_freeze'
+    wandb_runname += '_freeze' + str(args.number_layers_to_freeze)
 if args.number_hidden_classifier_layers > 0:
     wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
 wandb_runname += '_lr-' + str(args.learning_rate)
