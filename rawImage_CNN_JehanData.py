@@ -682,7 +682,7 @@ def find_last_layer(module):
 last_layer = find_last_layer(model)
 if args.freeze_model:
     layer_count = 0
-    
+    print(f"************Freezing Layers**************************************")
     number_layers_to_freeze = 1e9 if args.number_layers_to_freeze == -1 else args.number_layers_to_freeze
     for child in model.children():
         layer_count += 1
@@ -691,17 +691,19 @@ if args.freeze_model:
             print("Layer:", child)
             for param in child.parameters():
                 param.requires_grad = False
+            print(f"***********Freezing Layer {layer_count} Info End***************")
         else:
             break
     
     print("Last layer: ", last_layer)
+    print("****************************************************************")
 
     # Unfreeze the last layer if it has parameters
     if hasattr(last_layer, 'parameters'):
         for param in last_layer.parameters():
             param.requires_grad = True
             
-if args.number_hidden_classifier_layers > 0:
+if args.number_hidden_classifier_layers >= 0:
     # Determine in_features for the last layer
     if isinstance(last_layer, nn.Linear):
         in_features = last_layer.in_features
