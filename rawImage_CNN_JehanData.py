@@ -56,8 +56,9 @@ parser.add_argument('--turn_on_rms', type=ut_NDB2.str2bool, help='whether to use
 parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
 parser.add_argument('--window_size_in_ms', type=int, help='window size in ms. Set to 250 by default.', default=250)
 parser.add_argument('--downsample_factor', type=int, help='downsample factor, should be multiple of 1. Set to 1 by default.', default=1)
-parser.add_argument('--freeze_model', type=ut_NDB2.str2bool, help='whether to freeze the model. Set to false by default.', default=False)
-parser.add_argument('--number_layers_to_freeze', type=int, help='number of layers to freeze (only active when --freeze_model=True). Set to -1 by default, meaning all layers will freeze.', default=-1)
+parser.add_argument('--freeze_model', type=ut_NDB2.str2bool, help='whether to freeze the model. Set to False by default.', default=False)
+parser.add_argument('--number_sequential_layers_to_freeze', type=int, help='number of sequential layers to freeze (only active when --freeze_model=True). Set to -1 by default, meaning all sequential layers will freeze.', default=-1)
+parser.add_argument('--freeze_all_layers', type=ut_NDB2.str2bool, help='whether to freeze ALL layers. Set to False by default.', default=False)
 parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
 parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
@@ -76,7 +77,8 @@ print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
 print(f"The value of --window_size_in_ms is {args.window_size_in_ms}")
 print(f"The value of --downsample_factor is {args.downsample_factor}")
 print(f"The value of --freeze_model is {args.freeze_model}")
-print(f"The value of --number_layers_to_freeze is {args.number_layers_to_freeze}")
+print(f"The value of --number_sequential_layers_to_freeze is {args.number_sequential_layers_to_freeze}")
+print(f"The value of --freeze_all_layers is {args.freeze_all_layers}")
 print(f"The value of --number_hidden_classifier_layers is {args.number_hidden_classifier_layers}")
 print(f"The value of --hidden_classifier_layer_size is {args.hidden_classifier_layer_size}")
 print(f"The value of --learning_rate is {args.learning_rate}")
@@ -304,7 +306,6 @@ class DataProcessing:
                     
             pool.close()  # Close the pool to any more tasks
             pool.join()   # Wait for all worker processes to exit
-
         
 
         pbar.close()
@@ -682,13 +683,13 @@ def find_last_layer(module):
 last_layer = find_last_layer(model)
 if args.freeze_model:
     layer_count = 0
-    print("************Freezing Layers**************************************")
-    number_layers_to_freeze = 1e9 if args.number_layers_to_freeze == -1 else args.number_layers_to_freeze
+    print("************Freezing Layers**************************************************************************************************")
+    number_sequential_layers_to_freeze = 1e9 if args.number_sequential_layers_to_freeze == -1 else args.number_sequential_layers_to_freeze
     
     for child in model.children():
         if isinstance(child, nn.Sequential):   
             for grandchild in child.children():
-                if layer_count < number_layers_to_freeze:
+                if layer_count < number_sequential_layers_to_freeze:
                     print("Freezing layer ", layer_count)
                     print("Layer:", grandchild)
                     for param in grandchild.parameters():
@@ -701,7 +702,11 @@ if args.freeze_model:
             continue
     
     print("Last layer: ", last_layer)
-    print("****************************************************************")
+    print("*****************************************************************************************************************************")
+    
+    if args.freeze_all_layers:
+        for param in model.parameters():
+            param.requires_grad = False
 
     # Unfreeze the last layer if it has parameters
     if hasattr(last_layer, 'parameters'):
@@ -791,7 +796,9 @@ if leaveOut != 0:
     wandb_runname += '_LOSO-' + str(args.leftout_subject)     
 wandb_runname += '_' + args.model
 if args.freeze_model:
-    wandb_runname += '_freeze' + str(args.number_layers_to_freeze)
+    wandb_runname += '_freeze' + str(args.number_sequential_layers_to_freeze)
+    if args.freeze_all_layers:
+        wandb_runname += '_all'
 if args.number_hidden_classifier_layers > 0:
     wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
 wandb_runname += '_lr-' + str(args.learning_rate)
@@ -898,7 +905,7 @@ if (leaveOut == 0):
         "Test Loss": test_loss,
         "Test Acc": test_acc, })
 
-    cf_matrix = confusion_matrix(true, np.argmax(pred, axis=-1))
+    cf_matrix = confusion_matrix(true, pred, axis=-1) # TODO: TypeError: Singleton array 5 cannot be considered a valid collection.
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index = np.arange(1, 11, 1),
                         columns = np.arange(1, 11, 1))
     plt.figure(figsize = (12,7))
