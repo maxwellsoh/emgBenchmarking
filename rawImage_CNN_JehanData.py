@@ -682,18 +682,23 @@ def find_last_layer(module):
 last_layer = find_last_layer(model)
 if args.freeze_model:
     layer_count = 0
-    print(f"************Freezing Layers**************************************")
+    print("************Freezing Layers**************************************")
     number_layers_to_freeze = 1e9 if args.number_layers_to_freeze == -1 else args.number_layers_to_freeze
+    
     for child in model.children():
-        layer_count += 1
-        if layer_count <= number_layers_to_freeze:
-            print("Freezing layer ", layer_count)
-            print("Layer:", child)
-            for param in child.parameters():
-                param.requires_grad = False
-            print(f"***********Freezing Layer {layer_count} Info End***************")
+        if isinstance(child, nn.Sequential):   
+            for grandchild in child.children():
+                if layer_count < number_layers_to_freeze:
+                    print("Freezing layer ", layer_count)
+                    print("Layer:", grandchild)
+                    for param in grandchild.parameters():
+                        param.requires_grad = False
+                    print(f"***********Freezing Layer {layer_count} Info End***************")
+                else:
+                    break
+                layer_count += 1
         else:
-            break
+            continue
     
     print("Last layer: ", last_layer)
     print("****************************************************************")
@@ -812,7 +817,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     train_loss = 0.0
     for X_batch, Y_batch in train_loader:
         X_batch = X_batch.to(device).to(torch.float32)
-        Y_batch = Y_batch.to(device).to(torch.long)
+        Y_batch = Y_batch.to(device).to(torch.float32)
 
         optimizer.zero_grad()
         #output = model(X_batch).logits
@@ -820,8 +825,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
         loss = criterion(output, Y_batch)
         train_loss += loss.item()
 
-        train_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(),
-                                       axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+        train_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
         loss.backward()
         optimizer.step()
@@ -836,13 +840,13 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     with torch.no_grad():
         for X_batch, Y_batch in val_loader:
             X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.long)
+            Y_batch = Y_batch.to(device).to(torch.float32)
 
             #output = model(X_batch).logits
             output = model(X_batch)
             val_loss += criterion(output, Y_batch).item()
 
-            val_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(), axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            val_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
             del X_batch, Y_batch
             torch.cuda.empty_cache()
@@ -875,12 +879,12 @@ if (leaveOut == 0):
     with torch.no_grad():
         for X_batch, Y_batch in test_loader:
             X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.long)
+            Y_batch = Y_batch.to(device).to(torch.float32)
 
             output = model(X_batch)
             test_loss += criterion(output, Y_batch).item()
 
-            test_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(), axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
             output = np.argmax(output.cpu().detach().numpy(), axis=1)
             pred.extend(output)
