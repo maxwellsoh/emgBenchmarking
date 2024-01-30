@@ -38,6 +38,8 @@ from sklearn.model_selection import train_test_split
 import logging
 from concurrent.futures import ProcessPoolExecutor
 from joblib import Parallel, delayed
+from collections import OrderedDict
+import copy
 
 logging.basicConfig(filename='error_log.log', level=logging.DEBUG, 
                     format='%(asctime)s:%(levelname)s:%(message)s')
@@ -720,22 +722,32 @@ if args.number_hidden_classifier_layers >= 0:
     else:
         raise Exception("Last layer is not a linear layer. Please check the model architecture.")
     
-    def remove_last_layer(module):
-        children = list(module.children())
-        if len(children) == 0:
-            # Base case: module has no children
-            return module
-        else:
-            # If the child is a leaf (has no children), remove it
-            if len(list(children[-1].children())) == 0:
-                return nn.Sequential(*children[:-1])
-            else:
-                # Otherwise, recursively remove the last layer from the last child
-                new_children = children[:-1] + [remove_last_layer(children[-1])]
-                return nn.Sequential(*new_children)
+    def replace_last_leaf_layer(module, new_module):
+        # Convert the module's children into a list
+        children = list(module.named_children())
 
-    # Remove the last layer
-    model = remove_last_layer(model)
+        if not children:
+            # Base case: the module is a leaf node
+            return None
+        else:
+            name, last_child = children[-1]
+            # If the last child is a leaf node, replace it
+            if not list(last_child.children()):
+                setattr(module, name, new_module)
+            else:
+                # Otherwise, recursively continue
+                replace_last_leaf_layer(last_child, new_module)
+            return module
+
+    def replace_last_layer(original_model, new_module):
+        # Create a deep copy of the original model
+        model_copy = copy.deepcopy(original_model)
+
+        # Recursively replace the last leaf layer
+        replace_last_leaf_layer(model_copy, new_module)
+
+        # Return the modified copy of the model
+        return model_copy
 
     layers = []
     for hidden_size in range(args.number_hidden_classifier_layers):
@@ -747,8 +759,8 @@ if args.number_hidden_classifier_layers >= 0:
     layers.append(nn.Linear(in_features, numGestureTypes))
     
     new_layers = nn.Sequential(*layers)
-        
-    model.add_module('classifier_layers', new_layers)
+    
+    model = replace_last_layer(model, new_layers)
     
     print(model)
     
@@ -905,7 +917,7 @@ if (leaveOut == 0):
         "Test Loss": test_loss,
         "Test Acc": test_acc, })
 
-    cf_matrix = confusion_matrix(true, pred, axis=-1) # TODO: TypeError: Singleton array 5 cannot be considered a valid collection.
+    cf_matrix = confusion_matrix(true, pred) 
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index = np.arange(1, 11, 1),
                         columns = np.arange(1, 11, 1))
     plt.figure(figsize = (12,7))
