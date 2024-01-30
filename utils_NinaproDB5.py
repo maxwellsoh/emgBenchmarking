@@ -15,7 +15,6 @@ import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-numGestures = 18
 fs = 200 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
@@ -23,9 +22,39 @@ stepLen = 10 #50 ms
 numElectrodes = 16
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
-gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction', 
-                    'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 
-                    'Ulnar Deviation', 'Wrist Extension Fist']
+gesture_labels = {}
+gesture_labels['Rest'] = ['Rest'] # Shared between exercises
+
+gesture_labels[1] = ['Index Flexion', 'Index Extension', 'Middle Flexion', 'Middle Extension', 'Ring Flexion', 'Ring Extension',
+                    'Little Finger Flexion', 'Little Finger Extension', 'Thumb Adduction', 'Thumb Abduction', 'Thumb Flexion',
+                    'Thumb Extension'] # End exercise A
+
+gesture_labels[2] = ['Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction',
+                    'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation',
+                    'Ulnar Deviation', 'Wrist Extension Fist'] # End exercise B
+
+gesture_labels[3] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook Grasp', 'Index Finger Extension Grasp', 'Medium Wrap',
+                    'Ring Grasp', 'Prismatic Four Fingers Grasp', 'Stick Grasp', 'Writing Tripod Grasp', 'Power Sphere Grasp', 'Three Finger Sphere Grasp', 'Precision Sphere Grasp',
+                    'Tripod Grasp', 'Prismatic Pinch Grasp', 'Tip Pinch Grasp', 'Quadrupod Grasp', 'Lateral Grasp', 'Parallel Extension Grasp', 'Extension Type Grasp', 'Power Disk Grasp',
+                    'Open A Bottle With A Tripod Grasp', 'Turn A Screw', 'Cut Something'] # End exercise C
+
+class CustomDataset(Dataset):
+    def __init__(self, data, labels, transform=None):
+        self.data = data
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        x = self.data[idx]
+        y = self.labels[idx]
+
+        if self.transform:
+            x = self.transform(x)
+
+        return x, y
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -63,10 +92,12 @@ def seed_worker(worker_id):
 def balance (restimulus):
     numZero = 0
     indices = []
-    #print(restimulus.shape)
+    # indices indicates the indices to keep
+    # this function will keep the first 380 zeros samples and all other restimulus indices that are not zero
     for x in range (len(restimulus)):
-        L = torch.chunk(restimulus[x], 2, dim=1)
-        if torch.equal(L[0], L[1]):
+        # torch.chunk attempts to split a tensor into the specified number of chunks
+        L = torch.chunk(restimulus[x], 2, dim=1) # L : (CHUNK, 1, VALUE)
+        if torch.equal(L[0], L[1]): # Checks if first half of sample is equal to second half
             if L[0][0][0] == 0:
                 if (numZero < 380):
                     #print("working")
@@ -77,6 +108,7 @@ def balance (restimulus):
     return indices
 
 def contract(R):
+    numGestures = R.max() + 1
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
     for x in range(len(R)):
@@ -92,20 +124,23 @@ def filter(emg):
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=200.0)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
-def getRestim (n):
+def getRestim (n: int, exercise: int = 2):
     # read hdf5 file 
-    restim = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/restimulusS{n}_E2.hdf5')
+    restim = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/restimulusS{n}_E{exercise}.hdf5')
     restim = torch.tensor(restim.values)
+    # unfold extrcts sliding local blocks from a batched input tensor
     return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
-def getEMG (n):
-    restim = getRestim(n)
-    emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
+def getEMG(args):
+    n, exercise = args
+    restim = getRestim(n, exercise)
+    emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E{exercise}.hdf5')
     emg = torch.tensor(emg.values)
     return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
 
-def getLabels (n):
-    restim = getRestim(n)
+def getLabels (args):
+    n, exercise = args
+    restim = getRestim(n, exercise)
     return contract(restim[balance(restim)])
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
@@ -225,7 +260,7 @@ def plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, 
     plt.figure(figsize=(12, 7))
     
     # Plot confusion matrix square
-    sn.set(font_scale=0.8)
+    sn.set(font_scale=0.4)
     sn.heatmap(df_cm, annot=True, fmt=".0%", square=True)
     confusionMatrix_filename = f'{testrun_foldername}confusionMatrix_{partition_name}_seed{args.seed}_{formatted_datetime}.png'
     plt.savefig(confusionMatrix_filename)
@@ -254,6 +289,8 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     # Calculate average image of each gesture
     average_images = []
     print(f"Plotting average {partition_name} images...")
+    numGestures = len(gesture_labels)
+    
     for i in range(numGestures):
         # Find indices
         gesture_indices = np.where(true_np == i)[0]
@@ -265,7 +302,7 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     average_images = np.array(average_images)
 
     # Plot average image of each gesture
-    fig, axs = plt.subplots(2, 9, figsize=(10, 5))
+    fig, axs = plt.subplots(ceil(len(gesture_labels) / 9), 9, figsize=(10, 5))
     for i in range(numGestures):
         axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])
@@ -285,7 +322,7 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
 
     # Parameters for plotting
     rows_per_gesture = 15
-    total_gestures = numGestures  # Replace with the actual number of gestures
+    total_gestures = len(gesture_labels)  # Replace with the actual number of gestures
 
     # Create subplots
     fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))

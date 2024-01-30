@@ -14,7 +14,8 @@ print_usage() {
     printf " -r  Specify whether to use RMS normalization (True or False). Default is False.\n"
     printf " -n  Specify the number of windows to use for RMS normalization. Should be an even factor of sample timesteps (Probably 50). Default is 10.\n"
     printf " -m  Specify whether to use a magnitude image concatenation (True or False). Default is False.\n"
-    printf " -o  Specify what model to use. ('davit_tiny.msft_in1k', 'efficientnet_b3.ns_jft_in1k', 'vit_tiny_path16_224', 'efficientnet_b0'). Default is 'resnet50'. \n"
+    printf " -o  Specify what model to use. ('davit_tiny.msft_in1k', 'efficientnet_b3', 'vit_tiny_patch16_224', 'efficientnet_b0'). Default is 'resnet50'. \n"
+    printf " -x  Specify which exercises to classify in a list format. Default is 1,2,3.\n"
     printf " -h  Show usage information.\n"
 }
 
@@ -31,9 +32,10 @@ RMS_ON="False"
 RMS_WINDOWS=10
 MAGNITUDE_ON="False"
 MODEL_TO_USE="resnet50"
+EXERCISE_SETS="1,2,3"
 
 # Parse command line arguments
-while getopts 'l:v:k:s:e:c:a:i:r:n:m:o:h' flag; do  # Changed flags to single letters
+while getopts 'l:v:k:s:e:c:a:i:r:n:m:o:x:h' flag; do  # Changed flags to single letters
     case "${flag}" in
         l) LOSO_CV="${OPTARG}" ;;
         v) K_FOLDS_ON="${OPTARG}" ;;
@@ -47,6 +49,7 @@ while getopts 'l:v:k:s:e:c:a:i:r:n:m:o:h' flag; do  # Changed flags to single le
         n) RMS_WINDOWS="${OPTARG}" ;;
         m) MAGNITUDE_ON="${OPTARG}" ;;
         o) MODEL_TO_USE="${OPTARG}" ;;
+        x) EXERCISE_SETS="${OPTARG}" ;;
         h) print_usage
            exit 0 ;;
         *) print_usage
@@ -68,6 +71,7 @@ echo "RMS_ON: $RMS_ON"
 echo "RMS_WINDOWS: $RMS_WINDOWS"
 echo "MAGNITUDE_ON: $MAGNITUDE_ON"
 echo "MODEL_TO_USE: $MODEL_TO_USE"
+echo "EXERCISE_SETS: $EXERCISE_SETS"
 echo "*******************************************"
 
 # Main conditional execution based on LOSO_CV and K_FOLDS_ON flags
@@ -75,13 +79,13 @@ if [ "$LOSO_CV" = "True" ]; then
     echo "Running Leave-One-Subject-Out Cross-Validation..."
     for SUBJECT in {1..10}
     do
-        python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=$SUBJECT --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS --turn_on_magnitude=$MAGNITUDE_ON --model=$MODEL_TO_USE
+        python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=$SUBJECT --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS --turn_on_magnitude=$MAGNITUDE_ON --model=$MODEL_TO_USE --exercises=$EXERCISE_SETS
     done
 elif [ "$K_FOLDS_ON" = "True" ]; then
     echo "Running stratified k-folds cross validation..."
     for FOLD_INDEX in $(seq $FOLD_INDEX_START $K_FOLDS)
     do
-        python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=0 --turn_on_kfold=True --kfold=$K_FOLDS --fold_index=$FOLD_INDEX --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS --turn_on_magnitude=$MAGNITUDE_ON --model=$MODEL_TO_USE
+        python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=0 --turn_on_kfold=True --kfold=$K_FOLDS --fold_index=$FOLD_INDEX --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS --turn_on_magnitude=$MAGNITUDE_ON --model=$MODEL_TO_USE --exercises=$EXERCISE_SETS
     done
 else
     echo "Running standard training..."
@@ -89,5 +93,5 @@ else
     echo $COSINE_ANNEALING_ON
     echo "Value of cyclical_lr"
     echo $CYCLICAL_LR_ON
-    python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=0 --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS --turn_on_magnitude=$MAGNITUDE_ON --model=$MODEL_TO_USE
+    python rawImage_CNN_NinaproDB5.py --epochs=$EPOCHS --seed=$SEED --leftout_subject=0 --turn_on_cyclical_lr=$CYCLICAL_LR_ON --turn_on_cosine_annealing=$COSINE_ANNEALING_ON --turn_on_rms=$RMS_ON --num_rms_windows=$RMS_WINDOWS --turn_on_magnitude=$MAGNITUDE_ON --model=$MODEL_TO_USE --exercises=$EXERCISE_SETS
 fi
