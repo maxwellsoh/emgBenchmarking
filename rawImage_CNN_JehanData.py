@@ -360,7 +360,7 @@ class DataProcessing:
         emg_sample_wrapped = tqdm(emg_sample, desc="Processing", total=len(emg_sample))
 
         # Use Joblib to parallel process the data
-        results = Parallel(n_jobs=-1)(delayed(self.dataToImage)(sample) for sample in emg_sample_wrapped)
+        results = Parallel(n_jobs=32)(delayed(self.dataToImage)(sample) for sample in emg_sample_wrapped)
 
         return results
     
@@ -429,17 +429,28 @@ data_process = DataProcessing()
 
 if leaveOut != 0:
     foldername_zarr = 'LOSOimages_zarr/JehanDataset/LOSO_subject' + str(leaveOut) + '/'
+    if args.turn_on_rms:
+        foldername_zarr += 'RMS_input_windowsize_' + str(RMS_input_windowsize) + '/'
+    else:
+        foldername_zarr += 'window_size_in_ms_' + str(window_length_in_milliseconds) + '/'
     
     emg_subject_leftout = emg[leaveOut-1]
     emg_leftin = emg.copy()
     emg_leftin.pop(leaveOut-1)
-    emg_scaling_subjects_leftin = np.concatenate([np.array(i.view(len(i), 64*RMS_input_windowsize)) for i in emg_leftin], axis=0, dtype=np.float16)
+    all_emg_subjects_leftin = np.concatenate([np.array(i.view(len(i), -1)) for i in emg_leftin], axis=0, dtype=np.float16)
     
     labels_subject_leftout = labels[leaveOut-1]
 
-    standard_scalar = preprocessing.StandardScaler().fit(emg_scaling_subjects_leftin )
-    emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*RMS_input_windowsize))))
-    del emg_scaling_subjects_leftin 
+    standard_scalar = preprocessing.StandardScaler().fit(all_emg_subjects_leftin)
+
+    if args.turn_on_rms:
+        all_emg_subjects_leftin = torch.from_numpy(standard_scalar.transform(all_emg_subjects_leftin)).view(len(all_emg_subjects_leftin), 64*RMS_input_windowsize)
+        emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*RMS_input_windowsize))))
+    else:
+        all_emg_subjects_leftin = torch.from_numpy(standard_scalar.transform(all_emg_subjects_leftin)).view(len(all_emg_subjects_leftin), 64*window_size_in_timesteps)
+        emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*window_size_in_timesteps))))
+
+    # emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*RMS_input_windowsize))))
     del emg_subject_leftout
     
     # load validation zarr images if they exist
@@ -451,6 +462,7 @@ if leaveOut != 0:
         print("Validation images found. Validation images loaded for left out subject " + str(leaveOut))
     else:
         print("Generating validation images for left out subject " + str(leaveOut))
+        emg_scaled_subject_leftout = [emg_scaled_subject_leftout[i].unsqueeze(0).cpu().detach().to(torch.float16) for i in range(emg_scaled_subject_leftout.size(0))] 
         X_validation = torch.tensor(np.array(data_process.getImages_noAugment(emg_scaled_subject_leftout))).to(torch.float16)
         Y_validation = torch.from_numpy(np.array(labels_subject_leftout)).to(torch.float16)
         # Convert the PyTorch tensors to NumPy and ensure the type is compatible withf Zarr
@@ -484,7 +496,9 @@ if leaveOut != 0:
             print("Training images found. Training images loaded for subject", subject+1)
         else:
             print("Generating training images for subject", subject+1)
-            X_train_subject = torch.from_numpy(np.array(data_process.getImages(torch.from_numpy(standard_scalar.transform(np.array(emg[subject].view(len(emg[subject]), 64*RMS_input_windowsize))))))
+            emg_subject = torch.from_numpy(standard_scalar.transform(np.array(emg[subject].view(len(emg[subject]), 64*RMS_input_windowsize))))
+            emg_subject = [emg_subject[i].unsqueeze(0).cpu().detach().to(torch.float16) for i in range(emg_scaled_subject_leftout.size(0))] 
+            X_train_subject = torch.from_numpy(np.array(data_process.getImages_noAugment(emg_subject))
                                             .astype(np.float16)).to(torch.float16)
             Y_train_subject = torch.from_numpy(np.repeat(np.array(labels[subject]), data_process.dataCopies, axis=0)).to(torch.float16)
             X_train_np = X_train_subject.numpy().astype(np.float16)
@@ -561,7 +575,7 @@ else:
         Y_test = torch.from_numpy(zarr.load(foldername_zarr + 'test_labels.zarr')).to(torch.float16)
         print("Non-LOSO data loaded from Zarr files.")
 
-    else: 
+    else:  # X_train, Y_train, X_validation, Y_validation, X_test, Y_test are a list of [1, 64*windowsize] tensors which are each individual samples
         # Generate images (or your specific data processing) for training, validation, and test sets
         X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
         X_validation = torch.tensor(np.array(data_process.getImages_noAugment(val_emg_scaled[:debug_number]))).to(torch.float16)
