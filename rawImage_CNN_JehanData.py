@@ -444,10 +444,8 @@ if leaveOut != 0:
     standard_scalar = preprocessing.StandardScaler().fit(all_emg_subjects_leftin)
 
     if args.turn_on_rms:
-        all_emg_subjects_leftin = torch.from_numpy(standard_scalar.transform(all_emg_subjects_leftin)).view(len(all_emg_subjects_leftin), 64*RMS_input_windowsize)
         emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*RMS_input_windowsize))))
     else:
-        all_emg_subjects_leftin = torch.from_numpy(standard_scalar.transform(all_emg_subjects_leftin)).view(len(all_emg_subjects_leftin), 64*window_size_in_timesteps)
         emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*window_size_in_timesteps))))
 
     # emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*RMS_input_windowsize))))
