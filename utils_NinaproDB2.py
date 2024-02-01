@@ -16,7 +16,6 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from scipy import io
 
-numGestures = 18
 fs = 2000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
@@ -27,6 +26,22 @@ cmap = mpl.colormaps['viridis']
 gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction', 
                     'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 
                     'Ulnar Deviation', 'Wrist Extension Fist']
+
+gesture_labels_v2 = {}
+
+gesture_labels_v2['Rest'] = ['Rest'] # Shared between exercises
+
+gesture_labels_v2[1] = ['Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction',
+                    'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation',
+                    'Ulnar Deviation', 'Wrist Extension Fist'] # End exercise B
+
+gesture_labels_v2[2] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook Grasp', 'Index Finger Extension Grasp', 'Medium Wrap',
+                    'Ring Grasp', 'Prismatic Four Fingers Grasp', 'Stick Grasp', 'Writing Tripod Grasp', 'Power Sphere Grasp', 'Three Finger Sphere Grasp', 'Precision Sphere Grasp',
+                    'Tripod Grasp', 'Prismatic Pinch Grasp', 'Tip Pinch Grasp', 'Quadrupod Grasp', 'Lateral Grasp', 'Parallel Extension Grasp', 'Extension Type Grasp', 'Power Disk Grasp',
+                    'Open A Bottle With A Tripod Grasp', 'Turn A Screw', 'Cut Something'] # End exercise C
+
+gesture_labels_v2[2] = ['Flexion of the Little Finger', 'Flexion of the Ring Finger', 'Flexion of the Middle Finger', 'Flexion of the Index Finger', 'Abduction of the Thumb', 
+                        'Flexion of the Thumb', 'Flexion of Index and Little Finger', 'Flexion of Ring and Middle Finger', 'Flexion of Index Finger and Thumb'] # End exercise D
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
