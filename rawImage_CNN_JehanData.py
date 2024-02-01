@@ -497,7 +497,7 @@ if leaveOut != 0:
         else:
             print("Generating training images for subject", subject+1)
             emg_subject = torch.from_numpy(standard_scalar.transform(np.array(emg[subject].view(len(emg[subject]), 64*RMS_input_windowsize))))
-            emg_subject = [emg_subject[i].unsqueeze(0).cpu().detach().to(torch.float16) for i in range(emg_scaled_subject_leftout.size(0))] 
+            emg_subject = [emg_subject[i].unsqueeze(0).cpu().detach().to(torch.float16) for i in range(emg_subject.size(0))] 
             X_train_subject = torch.from_numpy(np.array(data_process.getImages_noAugment(emg_subject))
                                             .astype(np.float16)).to(torch.float16)
             Y_train_subject = torch.from_numpy(np.repeat(np.array(labels[subject]), data_process.dataCopies, axis=0)).to(torch.float16)
