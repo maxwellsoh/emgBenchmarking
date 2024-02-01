@@ -292,25 +292,33 @@ class DataProcessing:
         return combinedImages
 
     # curr = 0
-    def getImages(self, emg):
-        pbar = tqdm(total=len(emg), desc="Augmented Image Generation")
-        allImages = []
+    def getImages(self, emg_sample):
+        # pbar = tqdm(total=len(emg), desc="Augmented Image Generation")
+        # allImages = []
 
-        # Define a callback function to collect results and update the progress bar
-        def collect_result(result):
-            allImages.append(result)
-            pbar.update()
+        # # Define a callback function to collect results and update the progress bar
+        # def collect_result(result):
+        #     allImages.append(result)
+        #     pbar.update()
 
-        with multiprocessing.Pool() as pool:
-            for i in range(len(emg)):
-                # Use collect_result as the callback to append results
-                pool.apply_async(self.oneWindowImages, args=(emg[i],), callback=collect_result)
+        # with multiprocessing.Pool() as pool:
+        #     for i in range(len(emg)):
+        #         # Use collect_result as the callback to append results
+        #         pool.apply_async(self.oneWindowImages, args=(emg[i],), callback=collect_result)
                     
-            pool.close()  # Close the pool to any more tasks
-            pool.join()   # Wait for all worker processes to exit
+        #     pool.close()  # Close the pool to any more tasks
+        #     pool.join()   # Wait for all worker processes to exit
         
 
-        pbar.close()
+        # pbar.close()
+        
+        # Wrap emg_sample with tqdm for progress reporting
+        emg_sample_wrapped = tqdm(emg_sample, desc="Processing", total=len(emg_sample))
+
+        # Use Joblib to parallel process the data
+        results = Parallel(n_jobs=-1)(delayed(self.oneWindowImages)(sample) for sample in emg_sample_wrapped)
+
+        return results
 
         '''
         if i % 1000 == 0:
@@ -320,7 +328,7 @@ class DataProcessing:
             plt.axis('off')
             plt.show()
         '''
-        return allImages
+        # return allImages
 
     # no augmentation image generation
 
