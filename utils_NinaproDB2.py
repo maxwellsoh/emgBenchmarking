@@ -29,7 +29,7 @@ gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Fle
                     'Ulnar Deviation', 'Wrist Extension Fist']
 
 class CustomDataset(Dataset):
-    def __init__(self, data, labels, transform=None):
+    def __init__(self, data, labels=None, transform=None):
         self.data = data
         self.labels = labels
         self.transform = transform
@@ -39,13 +39,17 @@ class CustomDataset(Dataset):
 
     def __getitem__(self, idx):
         x = self.data[idx]
-        y = self.labels[idx]
-
         if self.transform:
-            x = self.transform(x)
-
-        return x, y
-
+            x_i = self.transform(x)
+            x_j = self.transform(x)
+        else:
+            x_i = x_j = x
+        
+        if self.labels is not None:
+            y = self.labels[idx]
+            return (x_i, x_j), y
+        return (x_i, x_j)
+    
 def str2bool(v):
     if isinstance(v, bool):
         return v

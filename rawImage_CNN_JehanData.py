@@ -41,6 +41,10 @@ from joblib import Parallel, delayed
 from collections import OrderedDict
 import copy
 
+from pl_bolts.models.self_supervised import SimCLR
+from pl_bolts.transforms.self_supervised.simclr_transforms import SimCLRTrainDataTransform
+from pytorch_lightning import Trainer
+
 logging.basicConfig(filename='error_log.log', level=logging.DEBUG, 
                     format='%(asctime)s:%(levelname)s:%(message)s')
 ## Argument parser with optional argumenets
@@ -64,6 +68,7 @@ parser.add_argument('--freeze_all_layers', type=ut_NDB2.str2bool, help='whether 
 parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
 parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
+parser.add_argument('--simclr_test', type=ut_NDB2.str2bool, help='whether to run simclr test. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -84,6 +89,7 @@ print(f"The value of --freeze_all_layers is {args.freeze_all_layers}")
 print(f"The value of --number_hidden_classifier_layers is {args.number_hidden_classifier_layers}")
 print(f"The value of --hidden_classifier_layer_size is {args.hidden_classifier_layer_size}")
 print(f"The value of --learning_rate is {args.learning_rate}")
+print(f"The value of --simclr_test is {args.simclr_test}")
 print("\n")
 
 # %%
@@ -798,20 +804,49 @@ class Data(Dataset):
 transform = transforms.Compose([
     transforms.Resize((224, 224)),  # Resizing the image
     # Add any other transformations you need here
+    transforms.Lambda(lambda x: x.type(torch.float32)),
+])
+
+transform_train_simclr = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resizing the image
+    # Add any other transformations you need here
+    transforms.Lambda(lambda x: x.type(torch.float32).cpu()),
+    transforms.ToPILImage(),
+    SimCLRTrainDataTransform(input_height=224, gaussian_blur=0.1, jitter_strength=1.0, normalize=None),
 ])
 
 # Apply the transform to your datasets
-train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
+if args.simclr_test:
+    train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform_train_simclr)
+else: 
+    train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
 val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
 test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
 
 batch_size = 64
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
 
 
 print("number of batches: ", len(train_loader))
+
+if args.simclr_test:
+    # Set up the SimCLR model
+    model = SimCLR(
+        gpus=1,
+        num_samples=len(train_dataset),
+        batch_size=batch_size,
+        dataset='stl10',  # You can ignore this since you're using a custom dataset
+        max_epochs=1
+    )
+
+    # Set up PyTorch Lightning trainer
+    trainer = Trainer(gpus=1, max_epochs=1)
+    # trainer.fit(model, train_loader)
+
+    classifier = nn.Linear(model.encoder.fc.out_features, numGestureTypes)  
+    model = nn.Sequential(model.encoder, classifier)
 
 # loss function and optimizer
 criterion = nn.CrossEntropyLoss()
@@ -836,6 +871,8 @@ if args.number_hidden_classifier_layers > 0:
 wandb_runname += '_lr-' + str(args.learning_rate)
 if args.turn_on_rms:
     wandb_runname += '_rms' + str(RMS_input_windowsize)
+if args.simclr_test:
+    wandb_runname += '_SimCLR-test'
     
 if leaveOut != 0:
     run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
