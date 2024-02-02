@@ -38,6 +38,8 @@ from sklearn.model_selection import train_test_split
 import logging
 from concurrent.futures import ProcessPoolExecutor
 from joblib import Parallel, delayed
+from collections import OrderedDict
+import copy
 
 logging.basicConfig(filename='error_log.log', level=logging.DEBUG, 
                     format='%(asctime)s:%(levelname)s:%(message)s')
@@ -56,9 +58,12 @@ parser.add_argument('--turn_on_rms', type=ut_NDB2.str2bool, help='whether to use
 parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
 parser.add_argument('--window_size_in_ms', type=int, help='window size in ms. Set to 250 by default.', default=250)
 parser.add_argument('--downsample_factor', type=int, help='downsample factor, should be multiple of 1. Set to 1 by default.', default=1)
-parser.add_argument('--freeze_model', type=ut_NDB2.str2bool, help='whether to freeze the model. Set to false by default.', default=False)
+parser.add_argument('--freeze_model', type=ut_NDB2.str2bool, help='whether to freeze the model. Set to False by default.', default=False)
+parser.add_argument('--number_sequential_layers_to_freeze', type=int, help='number of sequential layers to freeze (only active when --freeze_model=True). Set to -1 by default, meaning all sequential layers will freeze.', default=-1)
+parser.add_argument('--freeze_all_layers', type=ut_NDB2.str2bool, help='whether to freeze ALL layers. Set to False by default.', default=False)
 parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
 parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
+parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -74,6 +79,11 @@ print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
 print(f"The value of --window_size_in_ms is {args.window_size_in_ms}")
 print(f"The value of --downsample_factor is {args.downsample_factor}")
 print(f"The value of --freeze_model is {args.freeze_model}")
+print(f"The value of --number_sequential_layers_to_freeze is {args.number_sequential_layers_to_freeze}")
+print(f"The value of --freeze_all_layers is {args.freeze_all_layers}")
+print(f"The value of --number_hidden_classifier_layers is {args.number_hidden_classifier_layers}")
+print(f"The value of --hidden_classifier_layer_size is {args.hidden_classifier_layer_size}")
+print(f"The value of --learning_rate is {args.learning_rate}")
 print("\n")
 
 # %%
@@ -282,26 +292,33 @@ class DataProcessing:
         return combinedImages
 
     # curr = 0
-    def getImages(self, emg):
-        pbar = tqdm(total=len(emg), desc="Augmented Image Generation")
-        allImages = []
+    def getImages(self, emg_sample):
+        # pbar = tqdm(total=len(emg), desc="Augmented Image Generation")
+        # allImages = []
 
-        # Define a callback function to collect results and update the progress bar
-        def collect_result(result):
-            allImages.append(result)
-            pbar.update()
+        # # Define a callback function to collect results and update the progress bar
+        # def collect_result(result):
+        #     allImages.append(result)
+        #     pbar.update()
 
-        with multiprocessing.Pool() as pool:
-            for i in range(len(emg)):
-                # Use collect_result as the callback to append results
-                pool.apply_async(self.oneWindowImages, args=(emg[i],), callback=collect_result)
+        # with multiprocessing.Pool() as pool:
+        #     for i in range(len(emg)):
+        #         # Use collect_result as the callback to append results
+        #         pool.apply_async(self.oneWindowImages, args=(emg[i],), callback=collect_result)
                     
-            pool.close()  # Close the pool to any more tasks
-            pool.join()   # Wait for all worker processes to exit
-
+        #     pool.close()  # Close the pool to any more tasks
+        #     pool.join()   # Wait for all worker processes to exit
         
 
-        pbar.close()
+        # pbar.close()
+        
+        # Wrap emg_sample with tqdm for progress reporting
+        emg_sample_wrapped = tqdm(emg_sample, desc="Processing", total=len(emg_sample))
+
+        # Use Joblib to parallel process the data
+        results = Parallel(n_jobs=-1)(delayed(self.oneWindowImages)(sample) for sample in emg_sample_wrapped)
+
+        return results
 
         '''
         if i % 1000 == 0:
@@ -311,7 +328,7 @@ class DataProcessing:
             plt.axis('off')
             plt.show()
         '''
-        return allImages
+        # return allImages
 
     # no augmentation image generation
 
@@ -343,7 +360,7 @@ class DataProcessing:
         emg_sample_wrapped = tqdm(emg_sample, desc="Processing", total=len(emg_sample))
 
         # Use Joblib to parallel process the data
-        results = Parallel(n_jobs=-1)(delayed(self.dataToImage)(sample) for sample in emg_sample_wrapped)
+        results = Parallel(n_jobs=32)(delayed(self.dataToImage)(sample) for sample in emg_sample_wrapped)
 
         return results
     
@@ -412,20 +429,29 @@ data_process = DataProcessing()
 
 if leaveOut != 0:
     foldername_zarr = 'LOSOimages_zarr/JehanDataset/LOSO_subject' + str(leaveOut) + '/'
+    if args.turn_on_rms:
+        foldername_zarr += 'RMS_input_windowsize_' + str(RMS_input_windowsize) + '/'
+    else:
+        foldername_zarr += 'window_size_in_ms_' + str(window_length_in_milliseconds) + '/'
     
     emg_subject_leftout = emg[leaveOut-1]
     emg_leftin = emg.copy()
     emg_leftin.pop(leaveOut-1)
-    emg_scaling_subjects_leftin = np.concatenate([np.array(i.view(len(i), 64*RMS_input_windowsize)) for i in emg_leftin], axis=0, dtype=np.float16)
+    all_emg_subjects_leftin = np.concatenate([np.array(i.view(len(i), -1)) for i in emg_leftin], axis=0, dtype=np.float16)
     
     labels_subject_leftout = labels[leaveOut-1]
 
-    standard_scalar = preprocessing.StandardScaler().fit(emg_scaling_subjects_leftin )
-    emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*RMS_input_windowsize))))
-    del emg_scaling_subjects_leftin 
+    standard_scalar = preprocessing.StandardScaler().fit(all_emg_subjects_leftin)
+
+    if args.turn_on_rms:
+        emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*RMS_input_windowsize))))
+    else:
+        emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*window_size_in_timesteps))))
+
+    # emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*RMS_input_windowsize))))
     del emg_subject_leftout
     
-    # load zarr images if they exist
+    # load validation zarr images if they exist
     if (os.path.exists(foldername_zarr + 'val_data_LOSO' + str(leaveOut) + '.zarr')):
         X_validation_np = zarr.load(foldername_zarr + 'val_data_LOSO' + str(leaveOut) + '.zarr')
         Y_validation_np = zarr.load(foldername_zarr + 'val_labels_LOSO' + str(leaveOut) + '.zarr')
@@ -434,6 +460,7 @@ if leaveOut != 0:
         print("Validation images found. Validation images loaded for left out subject " + str(leaveOut))
     else:
         print("Generating validation images for left out subject " + str(leaveOut))
+        emg_scaled_subject_leftout = [emg_scaled_subject_leftout[i].unsqueeze(0).cpu().detach().to(torch.float16) for i in range(emg_scaled_subject_leftout.size(0))] 
         X_validation = torch.tensor(np.array(data_process.getImages_noAugment(emg_scaled_subject_leftout))).to(torch.float16)
         Y_validation = torch.from_numpy(np.array(labels_subject_leftout)).to(torch.float16)
         # Convert the PyTorch tensors to NumPy and ensure the type is compatible withf Zarr
@@ -456,7 +483,7 @@ if leaveOut != 0:
     X_train_all = []
     Y_train_all = []
     
-    # load zarr images if they exist
+    # load training zarr images if they exist
     for subject in range(len(emg)):
         if subject + 1 == leaveOut:
             continue
@@ -467,7 +494,9 @@ if leaveOut != 0:
             print("Training images found. Training images loaded for subject", subject+1)
         else:
             print("Generating training images for subject", subject+1)
-            X_train_subject = torch.from_numpy(np.array(data_process.getImages(torch.from_numpy(standard_scalar.transform(np.array(emg[subject].view(len(emg[subject]), 64*RMS_input_windowsize))))))
+            emg_subject = torch.from_numpy(standard_scalar.transform(np.array(emg[subject].view(len(emg[subject]), 64*RMS_input_windowsize))))
+            emg_subject = [emg_subject[i].unsqueeze(0).cpu().detach().to(torch.float16) for i in range(emg_subject.size(0))] 
+            X_train_subject = torch.from_numpy(np.array(data_process.getImages_noAugment(emg_subject))
                                             .astype(np.float16)).to(torch.float16)
             Y_train_subject = torch.from_numpy(np.repeat(np.array(labels[subject]), data_process.dataCopies, axis=0)).to(torch.float16)
             X_train_np = X_train_subject.numpy().astype(np.float16)
@@ -501,8 +530,7 @@ if leaveOut != 0:
 else:
     # emg is of dimensions [SUBJECT, SAMPLE, CHANNEL, TIME]
     # Split the dataset into training, validation, and test sets
-    # You'll need to define your own splitting logic here based on your dataset
-    test_split_ratio = 0.2  # For example, 20% for testing
+    test_split_ratio = 0.2  
 
     # Flatten and concatenate all EMG data
     all_emg = np.concatenate([np.array(i.view(len(i), -1)) for i in emg], axis=0)
@@ -519,34 +547,53 @@ else:
     
     # Apply the scaler to training, validation, and test sets
     if args.turn_on_rms:
-        train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))) for subject in train_emg]
-        val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))) for subject in val_emg]
-        test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize)))for subject in test_emg]
+        train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))).to(torch.float16) for subject in train_emg]
+        val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))).to(torch.float16) for subject in val_emg]
+        test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))).to(torch.float16) for subject in test_emg]
     else:
-        train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))) for subject in train_emg]
-        val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))) for subject in val_emg]
-        test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps)))for subject in test_emg]
+        train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))).to(torch.float16) for subject in train_emg]
+        val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))).to(torch.float16) for subject in val_emg]
+        test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))).to(torch.float16) for subject in test_emg]
     
-    debug_number = int(1e2)
+    debug_number = int(1e7)
 
-    # Generate images (or your specific data processing) for training, validation, and test sets
-    X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
-    X_validation = torch.tensor(np.array(data_process.getImages_noAugment(val_emg_scaled[:debug_number]))).to(torch.float16)
-    X_test = torch.tensor(np.array(data_process.getImages_noAugment(test_emg_scaled[:debug_number]))).to(torch.float16)
+    # Define folder names for Zarr file saving based on the seed and train-test proportions
+    train_test_ratio = str(int((1 - test_split_ratio) * 100)) + '_' + str(int(test_split_ratio * 100))
+    foldername_zarr = f'NonLOSOimages_zarr/JehanDataset/seed_{args.seed}_split_{train_test_ratio}/'
 
-    # Convert labels to tensors and possibly perform additional processing
-    Y_train = torch.stack([torch.tensor(labels) for labels in train_labels[:debug_number]])
-    Y_validation = torch.stack([torch.tensor(labels) for labels in val_labels[:debug_number]])
-    Y_test = torch.stack([torch.tensor(labels) for labels in test_labels[:debug_number]])
+    # Check if Zarr files exist and load them if they do
+    if (os.path.exists(foldername_zarr + 'train_data.zarr') and
+        os.path.exists(foldername_zarr + 'val_data.zarr') and
+        os.path.exists(foldername_zarr + 'test_data.zarr')):
+        X_train = torch.from_numpy(zarr.load(foldername_zarr + 'train_data.zarr')).to(torch.float16)
+        Y_train = torch.from_numpy(zarr.load(foldername_zarr + 'train_labels.zarr')).to(torch.float16)
+        X_validation = torch.from_numpy(zarr.load(foldername_zarr + 'val_data.zarr')).to(torch.float16)
+        Y_validation = torch.from_numpy(zarr.load(foldername_zarr + 'val_labels.zarr')).to(torch.float16)
+        X_test = torch.from_numpy(zarr.load(foldername_zarr + 'test_data.zarr')).to(torch.float16)
+        Y_test = torch.from_numpy(zarr.load(foldername_zarr + 'test_labels.zarr')).to(torch.float16)
+        print("Non-LOSO data loaded from Zarr files.")
 
-    # Concatenate data for each set if necessary
-    # This step depends on how you want to structure your data for training
-    # X_train = torch.concat(X_train).to(torch.float16).squeeze()
-    # Y_train = torch.concat(Y_train).to(torch.float16).squeeze()
-    # X_val = torch.concat(X_val).to(torch.float16).squeeze()
-    # Y_val = torch.concat(Y_val).to(torch.float16).squeeze()
-    # X_test = torch.concat(X_test).to(torch.float16).squeeze()
-    # Y_test = torch.concat(Y_test).to(torch.float16).squeeze()
+    else:  # X_train, Y_train, X_validation, Y_validation, X_test, Y_test are a list of [1, 64*windowsize] tensors which are each individual samples
+        # Generate images (or your specific data processing) for training, validation, and test sets
+        X_train = torch.tensor(np.array(data_process.getImages_noAugment(train_emg_scaled[:debug_number]))).to(torch.float16)
+        X_validation = torch.tensor(np.array(data_process.getImages_noAugment(val_emg_scaled[:debug_number]))).to(torch.float16)
+        X_test = torch.tensor(np.array(data_process.getImages_noAugment(test_emg_scaled[:debug_number]))).to(torch.float16)
+
+        # Convert labels to tensors and possibly perform additional processing
+        Y_train = torch.stack([torch.tensor(labels) for labels in train_labels[:debug_number]])
+        Y_validation = torch.stack([torch.tensor(labels) for labels in val_labels[:debug_number]])
+        Y_test = torch.stack([torch.tensor(labels) for labels in test_labels[:debug_number]])
+
+        # Convert the PyTorch tensors to NumPy and save using Zarr
+        if args.save_images:
+            os.makedirs(foldername_zarr, exist_ok=True)
+            zarr.save(foldername_zarr + 'train_data.zarr', X_train.numpy().astype(np.float16))
+            zarr.save(foldername_zarr + 'train_labels.zarr', Y_train.numpy().astype(np.float16))
+            zarr.save(foldername_zarr + 'val_data.zarr', X_validation.numpy().astype(np.float16))
+            zarr.save(foldername_zarr + 'val_labels.zarr', Y_validation.numpy().astype(np.float16))
+            zarr.save(foldername_zarr + 'test_data.zarr', X_test.numpy().astype(np.float16))
+            zarr.save(foldername_zarr + 'test_labels.zarr', Y_test.numpy().astype(np.float16))
+            print("Non-LOSO data processed and saved in Zarr files.")
 
     # At this point, you have your data ready for a standard training/validation/test procedure.
 
@@ -657,34 +704,70 @@ def find_last_layer(module):
 
 last_layer = find_last_layer(model)
 if args.freeze_model:
-    for param in model.parameters():
-        param.requires_grad = False
+    layer_count = 0
+    print("************Freezing Layers**************************************************************************************************")
+    number_sequential_layers_to_freeze = 1e9 if args.number_sequential_layers_to_freeze == -1 else args.number_sequential_layers_to_freeze
+    
+    for child in model.children():
+        if isinstance(child, nn.Sequential):   
+            for grandchild in child.children():
+                if layer_count < number_sequential_layers_to_freeze:
+                    print("Freezing layer ", layer_count)
+                    print("Layer:", grandchild)
+                    for param in grandchild.parameters():
+                        param.requires_grad = False
+                    print(f"***********Freezing Layer {layer_count} Info End***************")
+                else:
+                    break
+                layer_count += 1
+        else:
+            continue
     
     print("Last layer: ", last_layer)
+    print("*****************************************************************************************************************************")
+    
+    if args.freeze_all_layers:
+        for param in model.parameters():
+            param.requires_grad = False
 
     # Unfreeze the last layer if it has parameters
     if hasattr(last_layer, 'parameters'):
         for param in last_layer.parameters():
             param.requires_grad = True
             
-if args.number_hidden_classifier_layers > 0:
+if args.number_hidden_classifier_layers >= 0:
     # Determine in_features for the last layer
     if isinstance(last_layer, nn.Linear):
         in_features = last_layer.in_features
     else:
         raise Exception("Last layer is not a linear layer. Please check the model architecture.")
-                
-    # Function to remove the last layer
-    def remove_last_layer(model):
-        # Convert model to a list of its children
-        model_children = list(model.children())
-        # Remove the last layer
-        model_children = model_children[:-1]
-        # Create a new Sequential container
-        return nn.Sequential(*model_children)
+    
+    def replace_last_leaf_layer(module, new_module):
+        # Convert the module's children into a list
+        children = list(module.named_children())
 
-    # Remove the last layer
-    model = remove_last_layer(model)
+        if not children:
+            # Base case: the module is a leaf node
+            return None
+        else:
+            name, last_child = children[-1]
+            # If the last child is a leaf node, replace it
+            if not list(last_child.children()):
+                setattr(module, name, new_module)
+            else:
+                # Otherwise, recursively continue
+                replace_last_leaf_layer(last_child, new_module)
+            return module
+
+    def replace_last_layer(original_model, new_module):
+        # Create a deep copy of the original model
+        model_copy = copy.deepcopy(original_model)
+
+        # Recursively replace the last leaf layer
+        replace_last_leaf_layer(model_copy, new_module)
+
+        # Return the modified copy of the model
+        return model_copy
 
     layers = []
     for hidden_size in range(args.number_hidden_classifier_layers):
@@ -696,8 +779,8 @@ if args.number_hidden_classifier_layers > 0:
     layers.append(nn.Linear(in_features, numGestureTypes))
     
     new_layers = nn.Sequential(*layers)
-        
-    model.add_module('classifier_layers', new_layers)
+    
+    model = replace_last_layer(model, new_layers)
     
     print(model)
     
@@ -732,7 +815,7 @@ print("number of batches: ", len(train_loader))
 
 # loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-learn = 1e-4
+learn = args.learning_rate
 optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
 
 # %%
@@ -745,9 +828,14 @@ if leaveOut != 0:
     wandb_runname += '_LOSO-' + str(args.leftout_subject)     
 wandb_runname += '_' + args.model
 if args.freeze_model:
-    wandb_runname += '_freeze'
+    wandb_runname += '_freeze' + str(args.number_sequential_layers_to_freeze)
+    if args.freeze_all_layers:
+        wandb_runname += '_all'
 if args.number_hidden_classifier_layers > 0:
     wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
+wandb_runname += '_lr-' + str(args.learning_rate)
+if args.turn_on_rms:
+    wandb_runname += '_rms' + str(RMS_input_windowsize)
     
 if leaveOut != 0:
     run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
@@ -768,7 +856,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     train_loss = 0.0
     for X_batch, Y_batch in train_loader:
         X_batch = X_batch.to(device).to(torch.float32)
-        Y_batch = Y_batch.to(device).to(torch.long)
+        Y_batch = Y_batch.to(device).to(torch.float32)
 
         optimizer.zero_grad()
         #output = model(X_batch).logits
@@ -776,8 +864,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
         loss = criterion(output, Y_batch)
         train_loss += loss.item()
 
-        train_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(),
-                                       axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+        train_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
         loss.backward()
         optimizer.step()
@@ -792,13 +879,13 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     with torch.no_grad():
         for X_batch, Y_batch in val_loader:
             X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.long)
+            Y_batch = Y_batch.to(device).to(torch.float32)
 
             #output = model(X_batch).logits
             output = model(X_batch)
             val_loss += criterion(output, Y_batch).item()
 
-            val_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(), axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            val_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
             del X_batch, Y_batch
             torch.cuda.empty_cache()
@@ -831,12 +918,12 @@ if (leaveOut == 0):
     with torch.no_grad():
         for X_batch, Y_batch in test_loader:
             X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.long)
+            Y_batch = Y_batch.to(device).to(torch.float32)
 
             output = model(X_batch)
             test_loss += criterion(output, Y_batch).item()
 
-            test_acc += np.mean(np.argmax(np.argmax(output.cpu().detach().numpy(), axis=1), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
             output = np.argmax(output.cpu().detach().numpy(), axis=1)
             pred.extend(output)
@@ -850,7 +937,7 @@ if (leaveOut == 0):
         "Test Loss": test_loss,
         "Test Acc": test_acc, })
 
-    cf_matrix = confusion_matrix(true, np.argmax(pred, axis=-1))
+    cf_matrix = confusion_matrix(true, pred) 
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index = np.arange(1, 11, 1),
                         columns = np.arange(1, 11, 1))
     plt.figure(figsize = (12,7))
