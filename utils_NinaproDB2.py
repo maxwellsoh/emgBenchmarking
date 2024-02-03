@@ -28,7 +28,7 @@ gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Fle
                     'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 
                     'Ulnar Deviation', 'Wrist Extension Fist']
 
-class CustomDataset(Dataset):
+class CustomDataset_Simclr(Dataset):
     def __init__(self, data, labels=None, transform=None):
         self.data = data
         self.labels = labels
@@ -50,6 +50,24 @@ class CustomDataset(Dataset):
             return (x_i, x_j), y
         return (x_i, x_j)
     
+class CustomDataset(Dataset):
+    def __init__(self, data, labels=None, transform=None):
+        self.data = data
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        x = self.data[idx]
+        y = self.labels[idx]
+        
+        if self.transform:
+            x = self.transform(x)
+        
+        return x, y
+        
 def str2bool(v):
     if isinstance(v, bool):
         return v

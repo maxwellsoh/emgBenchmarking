@@ -695,7 +695,6 @@ elif args.model == 'convnext_tiny_custom':
 
 else: 
     # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
-    # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
     model = timm.create_model(args.model, pretrained=True, num_classes=numGestureTypes)
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
@@ -810,23 +809,25 @@ transform = transforms.Compose([
 transform_train_simclr = transforms.Compose([
     transforms.Resize((224, 224)),  # Resizing the image
     # Add any other transformations you need here
-    transforms.Lambda(lambda x: x.type(torch.float32).cpu()),
+    transforms.Lambda(lambda x: x.type(torch.float32)),
     transforms.ToPILImage(),
     SimCLRTrainDataTransform(input_height=224, gaussian_blur=0.1, jitter_strength=1.0, normalize=None),
 ])
 
 # Apply the transform to your datasets
 if args.simclr_test:
-    train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform_train_simclr)
+    train_dataset = ut_NDB2.CustomDataset_Simclr(X_train, Y_train, transform=transform_train_simclr)
+    val_dataset = ut_NDB2.CustomDataset_Simclr(X_validation, Y_validation, transform=transform_train_simclr)
+    test_dataset = ut_NDB2.CustomDataset_Simclr(X_test, Y_test, transform=transform_train_simclr) if leaveOut == 0 else None
 else: 
     train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
-val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
-test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
+    val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
+    test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
 
 batch_size = 64
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
 
 
 print("number of batches: ", len(train_loader))
@@ -840,18 +841,48 @@ if args.simclr_test:
         dataset='stl10',  # You can ignore this since you're using a custom dataset
         max_epochs=1
     )
-
+    model.to('cuda:0')
     # Set up PyTorch Lightning trainer
-    trainer = Trainer(gpus=1, max_epochs=1)
+    trainer = Trainer(accelerator='gpu', gpus=1, max_epochs=1)
     # trainer.fit(model, train_loader)
 
-    classifier = nn.Linear(model.encoder.fc.out_features, numGestureTypes)  
-    model = nn.Sequential(model.encoder, classifier)
+    class SimCLR_EncoderWrapper(nn.Module):
+        def __init__(self, pretrained_model, numGestureTypes):
+            super(SimCLR_EncoderWrapper, self).__init__()
+            self.pretrained_model = pretrained_model
+            in_features = self.pretrained_model.encoder.fc.in_features
+            self.classifier_custom = nn.Linear(in_features, numGestureTypes)
 
+        def forward(self, x):
+            features = self.pretrained_model.encoder(x)
+            if isinstance(features, (list, tuple)):
+                features = features[0]
+            output = self.classifier_custom(features)
+            return output
+        
+        def __getattr__(self, name):
+            """Delegate attribute access to the pretrained_model when not found in this wrapper."""
+            try:
+                # Try to access attribute in the current class
+                return super().__getattr__(name)
+            except AttributeError:
+                # Delegate to the pretrained_model
+                return getattr(self.pretrained_model, name)
+    
+    model = SimCLR_EncoderWrapper(model, numGestureTypes)
+        
 # loss function and optimizer
 criterion = nn.CrossEntropyLoss()
 learn = args.learning_rate
 optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
+
+train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
+val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
+test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
 
 # %%
 # Training loop
