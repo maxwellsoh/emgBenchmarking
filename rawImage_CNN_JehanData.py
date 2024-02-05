@@ -64,6 +64,7 @@ parser.add_argument('--freeze_all_layers', type=ut_NDB2.str2bool, help='whether 
 parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
 parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
+parser.add_argument('--random_initialization', type=ut_NDB2.str2bool, help='whether to use random initialization. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -84,6 +85,7 @@ print(f"The value of --freeze_all_layers is {args.freeze_all_layers}")
 print(f"The value of --number_hidden_classifier_layers is {args.number_hidden_classifier_layers}")
 print(f"The value of --hidden_classifier_layer_size is {args.hidden_classifier_layer_size}")
 print(f"The value of --learning_rate is {args.learning_rate}")
+print(f"The value of --random_initialization is {args.random_initialization}")
 print("\n")
 
 # %%
@@ -645,7 +647,10 @@ if args.model == 'resnet50_custom':
     model.add_module('softmax', nn.Softmax(dim=1))
 elif args.model == 'resnet50':
     # Load the pre-trained ResNet50 model
-    model = resnet50(weights=ResNet50_Weights.DEFAULT)
+    if args.random_initialization:
+        model = resnet50()
+    else:
+        model = resnet50(weights=ResNet50_Weights.DEFAULT)
 
     # Replace the last fully connected layer
     num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
@@ -690,7 +695,10 @@ elif args.model == 'convnext_tiny_custom':
 else: 
     # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
     # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-    model = timm.create_model(args.model, pretrained=True, num_classes=numGestureTypes)
+    if args.random_initialization:
+        model = timm.create_model(args.model, pretrained=False, num_classes=numGestureTypes)
+    else: 
+        model = timm.create_model(args.model, pretrained=True, num_classes=numGestureTypes)
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
     # model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB2.numGestures)
