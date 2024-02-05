@@ -709,90 +709,7 @@ def find_last_layer(module):
     if len(children) == 0:
         return module
     else: 
-        return find_last_layer(children[-1])
-
-last_layer = find_last_layer(model)
-if args.freeze_model:
-    layer_count = 0
-    print("************Freezing Layers**************************************************************************************************")
-    number_sequential_layers_to_freeze = 1e9 if args.number_sequential_layers_to_freeze == -1 else args.number_sequential_layers_to_freeze
-    
-    for child in model.children():
-        if isinstance(child, nn.Sequential):   
-            for grandchild in child.children():
-                if layer_count < number_sequential_layers_to_freeze:
-                    print("Freezing layer ", layer_count)
-                    print("Layer:", grandchild)
-                    for param in grandchild.parameters():
-                        param.requires_grad = False
-                    print(f"***********Freezing Layer {layer_count} Info End***************")
-                else:
-                    break
-                layer_count += 1
-        else:
-            continue
-    
-    print("Last layer: ", last_layer)
-    print("*****************************************************************************************************************************")
-    
-    if args.freeze_all_layers:
-        for param in model.parameters():
-            param.requires_grad = False
-
-    # Unfreeze the last layer if it has parameters
-    if hasattr(last_layer, 'parameters'):
-        for param in last_layer.parameters():
-            param.requires_grad = True
-            
-if args.number_hidden_classifier_layers >= 0:
-    # Determine in_features for the last layer
-    if isinstance(last_layer, nn.Linear):
-        in_features = last_layer.in_features
-    else:
-        raise Exception("Last layer is not a linear layer. Please check the model architecture.")
-    
-    def replace_last_leaf_layer(module, new_module):
-        # Convert the module's children into a list
-        children = list(module.named_children())
-
-        if not children:
-            # Base case: the module is a leaf node
-            return None
-        else:
-            name, last_child = children[-1]
-            # If the last child is a leaf node, replace it
-            if not list(last_child.children()):
-                setattr(module, name, new_module)
-            else:
-                # Otherwise, recursively continue
-                replace_last_leaf_layer(last_child, new_module)
-            return module
-
-    def replace_last_layer(original_model, new_module):
-        # Create a deep copy of the original model
-        model_copy = copy.deepcopy(original_model)
-
-        # Recursively replace the last leaf layer
-        replace_last_leaf_layer(model_copy, new_module)
-
-        # Return the modified copy of the model
-        return model_copy
-
-    layers = []
-    for hidden_size in range(args.number_hidden_classifier_layers):
-        layers.append(nn.Linear(in_features, args.hidden_classifier_layer_size))
-        layers.append(nn.ReLU())
-        in_features = args.hidden_classifier_layer_size
-        
-    # Add the last layer
-    layers.append(nn.Linear(in_features, numGestureTypes))
-    
-    new_layers = nn.Sequential(*layers)
-    
-    model = replace_last_layer(model, new_layers)
-    
-    print(model)
-    
+        return find_last_layer(children[-1])    
 class Data(Dataset):
     def __init__(self, data):
         self.data = data
@@ -890,6 +807,87 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, wo
 criterion = nn.CrossEntropyLoss()
 learn = args.learning_rate
 optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
+
+last_layer = find_last_layer(model)
+if args.freeze_model:
+    layer_count = 0
+    print("************Freezing Layers**************************************************************************************************")
+    number_sequential_layers_to_freeze = 1e9 if args.number_sequential_layers_to_freeze == -1 else args.number_sequential_layers_to_freeze
+    
+    for child in model.children():
+        if isinstance(child, nn.Sequential):   
+            for grandchild in child.children():
+                if layer_count < number_sequential_layers_to_freeze:
+                    print("Freezing layer ", layer_count)
+                    print("Layer:", grandchild)
+                    for param in grandchild.parameters():
+                        param.requires_grad = False
+                    print(f"***********Freezing Layer {layer_count} Info End***************")
+                else:
+                    break
+                layer_count += 1
+        else:
+            continue
+    
+    print("Last layer: ", last_layer)
+    print("*****************************************************************************************************************************")
+    
+    if args.freeze_all_layers:
+        for param in model.parameters():
+            param.requires_grad = False
+
+    # Unfreeze the last layer if it has parameters
+    if hasattr(last_layer, 'parameters'):
+        for param in last_layer.parameters():
+            param.requires_grad = True
+            
+if args.number_hidden_classifier_layers >= 0:
+    # Determine in_features for the last layer
+    if isinstance(last_layer, nn.Linear):
+        in_features = last_layer.in_features
+    else:
+        raise Exception("Last layer is not a linear layer. Please check the model architecture.")
+    
+    def replace_last_leaf_layer(module, new_module):
+        # Convert the module's children into a list
+        children = list(module.named_children())
+
+        if not children:
+            # Base case: the module is a leaf node
+            return None
+        else:
+            name, last_child = children[-1]
+            # If the last child is a leaf node, replace it
+            if not list(last_child.children()):
+                setattr(module, name, new_module)
+            else:
+                # Otherwise, recursively continue
+                replace_last_leaf_layer(last_child, new_module)
+            return module
+
+    def replace_last_layer(original_model, new_module):
+        # Create a deep copy of the original model
+        model_copy = copy.deepcopy(original_model)
+
+        # Recursively replace the last leaf layer
+        replace_last_leaf_layer(model_copy, new_module)
+
+        # Return the modified copy of the model
+        return model_copy
+
+    layers = []
+    for hidden_size in range(args.number_hidden_classifier_layers):
+        layers.append(nn.Linear(in_features, args.hidden_classifier_layer_size))
+        layers.append(nn.ReLU())
+        in_features = args.hidden_classifier_layer_size
+        
+    # Add the last layer
+    layers.append(nn.Linear(in_features, numGestureTypes))
+    
+    new_layers = nn.Sequential(*layers)
+    
+    model = replace_last_layer(model, new_layers)
+    
 
 # %%
 # Training loop
