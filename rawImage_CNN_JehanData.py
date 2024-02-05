@@ -44,6 +44,7 @@ import copy
 from pl_bolts.models.self_supervised import SimCLR
 from pl_bolts.transforms.self_supervised.simclr_transforms import SimCLRTrainDataTransform
 from pytorch_lightning import Trainer
+from lightning.pytorch import seed_everything
 
 logging.basicConfig(filename='error_log.log', level=logging.DEBUG, 
                     format='%(asctime)s:%(levelname)s:%(message)s')
@@ -126,6 +127,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
+seed_everything(args.seed, workers=True)
 
 milliseconds_in_second = 1000
 window_size_in_timesteps = int(window_length_in_milliseconds/milliseconds_in_second*sampling_frequency)
@@ -847,7 +849,7 @@ if args.simclr_test:
     )
     model.to('cuda:0')
     # Set up PyTorch Lightning trainer
-    trainer = Trainer(accelerator='gpu', devices=1, max_epochs=args.simclr_epochs, precision=16)
+    trainer = Trainer(accelerator='gpu', devices=1, max_epochs=args.simclr_epochs, precision=16, deterministic=True)
     trainer.fit(model, train_loader)
 
     class SimCLR_EncoderWrapper(nn.Module):
