@@ -44,7 +44,7 @@ import copy
 from pl_bolts.models.self_supervised import SimCLR
 from pl_bolts.transforms.self_supervised.simclr_transforms import SimCLRTrainDataTransform
 from pytorch_lightning import Trainer
-from lightning.pytorch import seed_everything
+from pytorch_lightning import seed_everything
 
 logging.basicConfig(filename='error_log.log', level=logging.DEBUG, 
                     format='%(asctime)s:%(levelname)s:%(message)s')
