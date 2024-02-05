@@ -915,6 +915,7 @@ if args.simclr_test:
     
     # TODO: Fix freezing after SIMClr training
     # TODO: Give error if SimClr is trained with non resnet50 or resnet18
+    # TODO: After fixes, change name from SimCLR-test to turn-on-simclr and wandbrunname to simclr-epochs-X
     
 if leaveOut != 0:
     run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
