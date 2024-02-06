@@ -65,9 +65,13 @@ parser.add_argument('--number_hidden_classifier_layers', type=int, help='number 
 parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
 parser.add_argument('--random_initialization', type=ut_NDB2.str2bool, help='whether to use random initialization. Set to False by default.', default=False)
+parser.add_argument('--project_name_suffix', type=str, help='project name suffix. Set to empty string by default.', default='')
 
 # Parse the arguments
 args = parser.parse_args()
+
+if args.project_name_suffix != '' and not args.project_name_suffix.startswith('_'):
+    args.project_name_suffix = '_' + args.project_name_suffix
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
@@ -86,6 +90,7 @@ print(f"The value of --number_hidden_classifier_layers is {args.number_hidden_cl
 print(f"The value of --hidden_classifier_layer_size is {args.hidden_classifier_layer_size}")
 print(f"The value of --learning_rate is {args.learning_rate}")
 print(f"The value of --random_initialization is {args.random_initialization}")
+print(f"The value of --project_name_suffix is {args.project_name_suffix}")
 print("\n")
 
 # %%
@@ -848,9 +853,9 @@ if args.random_initialization:
     wandb_runname += '_random-initialization'
     
 if leaveOut != 0:
-    run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
+    run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset' + args.project_name_suffix, entity='jehanyang')
 else:
-    run = wandb.init(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset', entity='jehanyang')
+    run = wandb.init(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset' + args.project_name_suffix, entity='jehanyang')
 wandb.config.lr = learn
 
 num_epochs = args.epochs
