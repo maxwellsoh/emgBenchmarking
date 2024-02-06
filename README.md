@@ -4,6 +4,12 @@ EMG gesture classification benchmarking study
 # Installation
 Install a version of Miniforge distribution `>= Miniforge3-22.3.1-0`, which will give you access to `mamba`. This is a faster and more verbose version of `conda`. 
 
+To save the virtual environment, run
+```console
+$ mamba env export > environment.yml
+$ pip list --format=freeze > requirements.txt
+```
+
 To install the virtual environment, run 
 ```console
 $ mamba env create -n emgbench -f environment.yml
