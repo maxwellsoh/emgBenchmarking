@@ -15,6 +15,13 @@ To install the virtual environment, run
 $ mamba env create -n emgbench -f environment.yml
 $ pip install -r requirements.txt
 ```
+
+To install the forked version of lightning bolts that allows for a pretrained model to be trained with SimCLR:
+```console
+$ conda remove --force lightning-bolts
+$ pip install git+https://github.com/jehanyang/lightning-bolts.git@v0.7
+```
+
 # Benchmarking
 Currently, to download the datasets, you will have to go to the website that hosts the datasets, download each individuals data (for Ninapro DB2, DB5, and Capgmyo), download the whole dataset (for Ozdemir's open dataset), or request the dataset (for Jehan's dataset). 
 
