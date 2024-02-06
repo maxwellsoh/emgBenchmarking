@@ -1,4 +1,4 @@
-# emgBenchmarking
+# :fireworks: EMG Benchmarking
 EMG gesture classification benchmarking study
 
 # Installation
