@@ -45,6 +45,7 @@ from pl_bolts.models.self_supervised import SimCLR
 from pl_bolts.transforms.self_supervised.simclr_transforms import SimCLRTrainDataTransform
 from pytorch_lightning import Trainer
 from pytorch_lightning import seed_everything
+from pytorch_lightning.loggers import WandbLogger
 
 logging.basicConfig(filename='error_log.log', level=logging.DEBUG, 
                     format='%(asctime)s:%(levelname)s:%(message)s')
@@ -76,6 +77,9 @@ parser.add_argument('--simclr_epochs', type=int, help='number of epochs to train
 
 # Parse the arguments
 args = parser.parse_args()
+
+if (args.simclr_test and args.model != 'resnet50') and (args.simclr_test and args.model != 'resnet18'):
+    raise ValueError("SimCLR can only be used with resnet50 or resnet18 as the base model.")
 
 if args.project_name_suffix != '' and not args.project_name_suffix.startswith('_'):
     args.project_name_suffix = '_' + args.project_name_suffix
@@ -810,7 +814,6 @@ if args.number_hidden_classifier_layers >= 0:
 class Data(Dataset):
     def __init__(self, data):
         self.data = data
-
     def __getitem__(self, index):
         return self.data[index]
 
@@ -823,6 +826,30 @@ transform = transforms.Compose([
     # Add any other transformations you need here
     transforms.Lambda(lambda x: x.type(torch.float16)),
 ])
+
+wandb_runname = 'CNN_seed-' + str(args.seed)
+if leaveOut != 0:
+    wandb_runname += '_LOSO-' + str(args.leftout_subject)     
+wandb_runname += '_' + args.model
+if args.freeze_model:
+    wandb_runname += '_freeze' + str(args.number_sequential_layers_to_freeze)
+    if args.freeze_all_layers:
+        wandb_runname += '_all'
+if args.number_hidden_classifier_layers > 0:
+    wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
+wandb_runname += '_lr-' + str(args.learning_rate)
+if args.turn_on_rms:
+    wandb_runname += '_rms' + str(RMS_input_windowsize)
+if args.random_initialization:
+    wandb_runname += '_random-initialization'
+if args.simclr_test:
+    wandb_runname += '_SimCLR-test'
+    wandb_runname += '-epochs-' + str(args.simclr_epochs)
+
+if leaveOut != 0:
+    wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset_simclr-pretraining' + args.project_name_suffix, entity='jehanyang')
+else: 
+    wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset_simclr-pretraining' + args.project_name_suffix, entity='jehanyang')
 
 transform_train_simclr = transforms.Compose([
     transforms.Resize((224, 224)),  # Resizing the image
@@ -854,14 +881,26 @@ print("number of batches: ", len(train_loader))
 
 if args.simclr_test:
     # Set up the SimCLR model
-    model = SimCLR(
-        gpus=1,
-        num_samples=len(train_dataset),
-        batch_size=batch_size,
-        dataset='stl10',  # You can ignore this since you're using a custom dataset
-        max_epochs=args.simclr_epochs,
-        
-    )
+    if args.random_initialization:
+        model = SimCLR(
+            gpus=1,
+            num_samples=len(train_dataset),
+            batch_size=batch_size,
+            dataset='stl10',  # You can ignore this since you're using a custom dataset
+            max_epochs=args.simclr_epochs,
+            logger = wandb_logger_pretrain
+        )
+    else:
+        model = SimCLR(
+            gpus=1,
+            num_samples=len(train_dataset),
+            batch_size=batch_size,
+            dataset='stl10',  # You can ignore this since you're using a custom dataset
+            max_epochs=args.simclr_epochs,
+            pretrained=True,
+            logger = wandb_logger_pretrain
+        )
+
     model.to('cuda:0')
     # Set up PyTorch Lightning trainer
     trainer = Trainer(accelerator='gpu', devices=1, max_epochs=args.simclr_epochs, precision=16, deterministic=True)
@@ -909,28 +948,8 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
 # Training loop
 gc.collect()
 torch.cuda.empty_cache()
-
-wandb_runname = 'CNN_seed-' + str(args.seed)
-if leaveOut != 0:
-    wandb_runname += '_LOSO-' + str(args.leftout_subject)     
-wandb_runname += '_' + args.model
-if args.freeze_model:
-    wandb_runname += '_freeze' + str(args.number_sequential_layers_to_freeze)
-    if args.freeze_all_layers:
-        wandb_runname += '_all'
-if args.number_hidden_classifier_layers > 0:
-    wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
-wandb_runname += '_lr-' + str(args.learning_rate)
-if args.turn_on_rms:
-    wandb_runname += '_rms' + str(RMS_input_windowsize)
-if args.random_initialization:
-    wandb_runname += '_random-initialization'
-if args.simclr_test:
-    wandb_runname += '_SimCLR-test'
-    wandb_runname += '-epochs-' + str(args.simclr_epochs)
     
     # TODO: Fix freezing after SIMClr training
-    # TODO: Give error if SimClr is trained with non resnet50 or resnet18
     # TODO: After fixes, change name from SimCLR-test to turn-on-simclr and wandbrunname to simclr-epochs-X
     
 if leaveOut != 0:
