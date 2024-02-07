@@ -69,6 +69,8 @@ parser.add_argument('--number_sequential_layers_to_freeze', type=int, help='numb
 parser.add_argument('--freeze_all_layers', type=ut_NDB2.str2bool, help='whether to freeze ALL layers. Set to False by default.', default=False)
 parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
 parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
+parser.add_argument('--classifier_head_dropout', type=float, help='classifier head dropout. Set to 0.0 by default.', default=0.0)
+parser.add_argument('--classifier_head_batchnorm', type=ut_NDB2.str2bool, help='whether to use batchnorm in classifier head. Set to False by default.', default=False)
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
 parser.add_argument('--random_initialization', type=ut_NDB2.str2bool, help='whether to use random initialization. Set to False by default.', default=False)
 parser.add_argument('--project_name_suffix', type=str, help='project name suffix. Set to empty string by default.', default='')
@@ -752,6 +754,10 @@ if args.freeze_model:
         wandb_runname += '_all'
 if args.number_hidden_classifier_layers > 0:
     wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
+    if args.hidden_classifier_dropout > 0:
+        wandb_runname += '_dropout-' + str(args.hidden_classifier_dropout)
+    if args.hidden_classifier_batchnorm:
+        wandb_runname += '_batchnorm'
 wandb_runname += '_lr-' + str(args.learning_rate)
 if args.turn_on_rms:
     wandb_runname += '_rms' + str(RMS_input_windowsize)
@@ -941,7 +947,11 @@ if args.number_hidden_classifier_layers >= 0:
     layers = []
     for hidden_size in range(args.number_hidden_classifier_layers):
         layers.append(nn.Linear(in_features, args.hidden_classifier_layer_size))
+        if args.batch_norm:
+            layers.append(nn.BatchNorm1d(args.hidden_classifier_layer_size))
         layers.append(nn.ReLU())
+        if args.dropout > 0:
+            layers.append(nn.Dropout(args.dropout))
         in_features = args.hidden_classifier_layer_size
         
     # Add the last layer
@@ -958,8 +968,6 @@ if args.number_hidden_classifier_layers >= 0:
 gc.collect()
 torch.cuda.empty_cache()
     
-    # TODO: Add dropout between hidden layers with argument to set dropout rate
-    # TODO: Add batch norm between hidden layers with argument to set batch norm
     # TODO: After fixes, change name from SimCLR-test to turn-on-simclr and wandbrunname to simclr-epochs-X
     
 if leaveOut != 0:
