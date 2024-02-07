@@ -951,7 +951,8 @@ if args.number_hidden_classifier_layers >= 0:
 gc.collect()
 torch.cuda.empty_cache()
     
-    # TODO: Fix freezing after SimCLR training
+    # TODO: Add dropout between hidden layers with argument to set dropout rate
+    # TODO: Add batch norm between hidden layers with argument to set batch norm
     # TODO: After fixes, change name from SimCLR-test to turn-on-simclr and wandbrunname to simclr-epochs-X
     
 if leaveOut != 0:
