@@ -888,7 +888,6 @@ if args.simclr_test:
             batch_size=batch_size,
             dataset='stl10',  # You can ignore this since you're using a custom dataset
             max_epochs=args.simclr_epochs,
-            logger = wandb_logger_pretrain
         )
     else:
         model = SimCLR(
@@ -898,12 +897,11 @@ if args.simclr_test:
             dataset='stl10',  # You can ignore this since you're using a custom dataset
             max_epochs=args.simclr_epochs,
             pretrained=True,
-            logger = wandb_logger_pretrain
         )
 
     model.to('cuda:0')
     # Set up PyTorch Lightning trainer
-    trainer = Trainer(accelerator='gpu', devices=1, max_epochs=args.simclr_epochs, precision=16, deterministic=True)
+    trainer = Trainer(accelerator='gpu', devices=1, max_epochs=args.simclr_epochs, precision=16, deterministic=True, logger=wandb_logger_pretrain, log_every_n_steps=1)
     trainer.fit(model, train_loader)
 
     class SimCLR_EncoderWrapper(nn.Module):
@@ -931,6 +929,8 @@ if args.simclr_test:
     
     model = SimCLR_EncoderWrapper(model, numGestureTypes)
 
+wandb.finish()
+
 train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
 val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
 test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
@@ -949,7 +949,7 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
 gc.collect()
 torch.cuda.empty_cache()
     
-    # TODO: Fix freezing after SIMClr training
+    # TODO: Fix freezing after SimCLR training
     # TODO: After fixes, change name from SimCLR-test to turn-on-simclr and wandbrunname to simclr-epochs-X
     
 if leaveOut != 0:
@@ -1060,4 +1060,4 @@ if (leaveOut == 0):
     plt.savefig('output.png')
     wandb.log({"Confusion Matrix": wandb.Image(plt)})
 
-
+wandb.finish()
