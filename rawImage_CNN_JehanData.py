@@ -41,6 +41,12 @@ from joblib import Parallel, delayed
 from collections import OrderedDict
 import copy
 
+from pl_bolts.models.self_supervised import SimCLR
+from pl_bolts.transforms.self_supervised.simclr_transforms import SimCLRTrainDataTransform
+from pytorch_lightning import Trainer
+from pytorch_lightning import seed_everything
+from pytorch_lightning.loggers import WandbLogger
+
 logging.basicConfig(filename='error_log.log', level=logging.DEBUG, 
                     format='%(asctime)s:%(levelname)s:%(message)s')
 ## Argument parser with optional argumenets
@@ -63,10 +69,24 @@ parser.add_argument('--number_sequential_layers_to_freeze', type=int, help='numb
 parser.add_argument('--freeze_all_layers', type=ut_NDB2.str2bool, help='whether to freeze ALL layers. Set to False by default.', default=False)
 parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
 parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
+parser.add_argument('--classifier_head_dropout', type=float, help='classifier head dropout. Set to 0.0 by default.', default=0.0)
+parser.add_argument('--classifier_head_batchnorm', type=ut_NDB2.str2bool, help='whether to use batchnorm in classifier head. Set to False by default.', default=False)
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
+parser.add_argument('--random_initialization', type=ut_NDB2.str2bool, help='whether to use random initialization. Set to False by default.', default=False)
+parser.add_argument('--project_name_suffix', type=str, help='project name suffix. Set to empty string by default.', default='')
+parser.add_argument('--simclr_test', type=ut_NDB2.str2bool, help='whether to run simclr test. Set to False by default.', default=False)
+parser.add_argument('--simclr_epochs', type=int, help='number of epochs to train for simclr. Set to 5 by default.', default=5)    
+parser.add_argument('--simclr_batch_size', type=int, help='batch size for simclr. Set to 256 by default.', default=256)
+parser.add_argument('--simclr_accumulate_grad_batches', type=int, help='accumulate grad batches for simclr. Set to 1 by default.', default=1)
 
 # Parse the arguments
 args = parser.parse_args()
+
+if (args.simclr_test and args.model != 'resnet50') and (args.simclr_test and args.model != 'resnet18'):
+    raise ValueError("SimCLR can only be used with resnet50 or resnet18 as the base model.")
+
+if args.project_name_suffix != '' and not args.project_name_suffix.startswith('_'):
+    args.project_name_suffix = '_' + args.project_name_suffix
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
@@ -84,6 +104,12 @@ print(f"The value of --freeze_all_layers is {args.freeze_all_layers}")
 print(f"The value of --number_hidden_classifier_layers is {args.number_hidden_classifier_layers}")
 print(f"The value of --hidden_classifier_layer_size is {args.hidden_classifier_layer_size}")
 print(f"The value of --learning_rate is {args.learning_rate}")
+print(f"The value of --random_initialization is {args.random_initialization}")
+print(f"The value of --project_name_suffix is {args.project_name_suffix}")
+print(f"The value of --simclr_test is {args.simclr_test}")
+print(f"The value of --simclr_epochs is {args.simclr_epochs}")
+print(f"The value of --simclr_batch_size is {args.simclr_batch_size}")
+print(f"The value of --simclr_accumulate_grad_batches is {args.simclr_accumulate_grad_batches}")
 print("\n")
 
 # %%
@@ -118,6 +144,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
+seed_everything(args.seed)
 
 milliseconds_in_second = 1000
 window_size_in_timesteps = int(window_length_in_milliseconds/milliseconds_in_second*sampling_frequency)
@@ -645,7 +672,10 @@ if args.model == 'resnet50_custom':
     model.add_module('softmax', nn.Softmax(dim=1))
 elif args.model == 'resnet50':
     # Load the pre-trained ResNet50 model
-    model = resnet50(weights=ResNet50_Weights.DEFAULT)
+    if args.random_initialization:
+        model = resnet50()
+    else:
+        model = resnet50(weights=ResNet50_Weights.DEFAULT)
 
     # Replace the last fully connected layer
     num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
@@ -690,11 +720,154 @@ elif args.model == 'convnext_tiny_custom':
 else: 
     # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
     # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-    model = timm.create_model(args.model, pretrained=True, num_classes=numGestureTypes)
+    if args.random_initialization:
+        model = timm.create_model(args.model, pretrained=False, num_classes=numGestureTypes)
+    else: 
+        model = timm.create_model(args.model, pretrained=True, num_classes=numGestureTypes)
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
     # model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB2.numGestures)
     
+class Data(Dataset):
+    def __init__(self, data):
+        self.data = data
+    def __getitem__(self, index):
+        return self.data[index]
+
+    def __len__(self):
+        return len(self.data)
+    
+# Define the transform
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resizing the image
+    # Add any other transformations you need here
+    transforms.Lambda(lambda x: x.type(torch.float16)),
+])
+
+wandb_runname = 'CNN_seed-' + str(args.seed)
+if leaveOut != 0:
+    wandb_runname += '_LOSO-' + str(args.leftout_subject)     
+wandb_runname += '_' + args.model
+if args.freeze_model:
+    wandb_runname += '_freeze' + str(args.number_sequential_layers_to_freeze)
+    if args.freeze_all_layers:
+        wandb_runname += '_all'
+if args.number_hidden_classifier_layers > 0:
+    wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
+    if args.hidden_classifier_dropout > 0:
+        wandb_runname += '_dropout-' + str(args.hidden_classifier_dropout)
+    if args.hidden_classifier_batchnorm:
+        wandb_runname += '_batchnorm'
+wandb_runname += '_lr-' + str(args.learning_rate)
+if args.turn_on_rms:
+    wandb_runname += '_rms' + str(RMS_input_windowsize)
+if args.random_initialization:
+    wandb_runname += '_random-initialization'
+if args.simclr_test:
+    wandb_runname += '_SimCLR-test'
+    wandb_runname += '-epochs-' + str(args.simclr_epochs)
+    wandb_runname += '-batch-size-' + str(args.simclr_batch_size)
+    wandb_runname += '-accumulate-grad-batches-' + str(args.simclr_accumulate_grad_batches)
+
+if leaveOut != 0:
+    wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset_simclr-pretraining' + args.project_name_suffix, entity='jehanyang')
+else: 
+    wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset_simclr-pretraining' + args.project_name_suffix, entity='jehanyang')
+
+transform_train_simclr = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resizing the image
+    # Add any other transformations you need here
+    transforms.Lambda(lambda x: x.type(torch.float32)),
+    transforms.ToPILImage(),
+    SimCLRTrainDataTransform(input_height=224, gaussian_blur=0.1, jitter_strength=1.0, normalize=None),
+])
+
+torch.set_float32_matmul_precision('medium')
+
+# Apply the transform to your datasets
+if args.simclr_test:
+    train_dataset = ut_NDB2.CustomDataset_Simclr(X_train, Y_train, transform=transform_train_simclr)
+    val_dataset = ut_NDB2.CustomDataset_Simclr(X_validation, Y_validation, transform=transform_train_simclr)
+    test_dataset = ut_NDB2.CustomDataset_Simclr(X_test, Y_test, transform=transform_train_simclr) if leaveOut == 0 else None
+else: 
+    train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
+    val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
+    test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
+
+batch_size = args.simclr_batch_size
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+
+print("number of batches: ", len(train_loader))
+
+if args.simclr_test:
+    # Set up the SimCLR model
+    if args.random_initialization:
+        model = SimCLR(
+            gpus=1,
+            num_samples=len(train_dataset),
+            batch_size=batch_size,
+            dataset='stl10',  # You can ignore this since you're using a custom dataset
+            max_epochs=args.simclr_epochs,
+        )
+    else:
+        model = SimCLR(
+            gpus=1,
+            num_samples=len(train_dataset),
+            batch_size=batch_size,
+            dataset='stl10',  # You can ignore this since you're using a custom dataset
+            max_epochs=args.simclr_epochs,
+            pretrained=True,
+        )
+
+    model.to('cuda:0')
+    # Set up PyTorch Lightning trainer
+    trainer = Trainer(accelerator='gpu', devices=1, max_epochs=args.simclr_epochs, precision=16, deterministic=True, logger=wandb_logger_pretrain, log_every_n_steps=1, accumulate_grad_batches=args.simclr_accumulate_grad_batches)
+    trainer.fit(model, train_loader)
+
+    class SimCLR_EncoderWrapper(nn.Module):
+        def __init__(self, pretrained_model, numGestureTypes):
+            super(SimCLR_EncoderWrapper, self).__init__()
+            self.pretrained_model = pretrained_model
+            in_features = self.pretrained_model.encoder.fc.in_features
+            self.classifier_custom = nn.Linear(in_features, numGestureTypes)
+
+        def forward(self, x):
+            features = self.pretrained_model.encoder(x)
+            if isinstance(features, (list, tuple)):
+                features = features[0]
+            output = self.classifier_custom(features)
+            return output
+        
+        def __getattr__(self, name):
+            """Delegate attribute access to the pretrained_model when not found in this wrapper."""
+            try:
+                # Try to access attribute in the current class
+                return super().__getattr__(name)
+            except AttributeError:
+                # Delegate to the pretrained_model
+                return getattr(self.pretrained_model, name)
+    
+    model = SimCLR_EncoderWrapper(model, numGestureTypes)
+
+wandb.finish()
+
+batch_size = 64
+
+train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
+val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
+test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+
+# loss function and optimizer
+criterion = nn.CrossEntropyLoss()
+learn = args.learning_rate
+optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
+
 def find_last_layer(module):
     children = list(module.children())
     if len(children) == 0:
@@ -761,18 +934,24 @@ if args.number_hidden_classifier_layers >= 0:
 
     def replace_last_layer(original_model, new_module):
         # Create a deep copy of the original model
-        model_copy = copy.deepcopy(original_model)
+        # model_copy = copy.deepcopy(original_model)
 
         # Recursively replace the last leaf layer
-        replace_last_leaf_layer(model_copy, new_module)
+        # replace_last_leaf_layer(model_copy, new_module)
+        replace_last_leaf_layer(original_model, new_module)
 
         # Return the modified copy of the model
-        return model_copy
+        # return model_copy
+        return original_model
 
     layers = []
     for hidden_size in range(args.number_hidden_classifier_layers):
         layers.append(nn.Linear(in_features, args.hidden_classifier_layer_size))
+        if args.batch_norm:
+            layers.append(nn.BatchNorm1d(args.hidden_classifier_layer_size))
         layers.append(nn.ReLU())
+        if args.dropout > 0:
+            layers.append(nn.Dropout(args.dropout))
         in_features = args.hidden_classifier_layer_size
         
     # Add the last layer
@@ -783,64 +962,18 @@ if args.number_hidden_classifier_layers >= 0:
     model = replace_last_layer(model, new_layers)
     
     print(model)
-    
-class Data(Dataset):
-    def __init__(self, data):
-        self.data = data
-
-    def __getitem__(self, index):
-        return self.data[index]
-
-    def __len__(self):
-        return len(self.data)
-    
-# Define the transform
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),  # Resizing the image
-    # Add any other transformations you need here
-])
-
-# Apply the transform to your datasets
-train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
-val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
-test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
-
-batch_size = 64
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-
-
-print("number of batches: ", len(train_loader))
-
-# loss function and optimizer
-criterion = nn.CrossEntropyLoss()
-learn = args.learning_rate
-optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
 
 # %%
 # Training loop
 gc.collect()
 torch.cuda.empty_cache()
-
-wandb_runname = 'CNN_seed-' + str(args.seed)
-if leaveOut != 0:
-    wandb_runname += '_LOSO-' + str(args.leftout_subject)     
-wandb_runname += '_' + args.model
-if args.freeze_model:
-    wandb_runname += '_freeze' + str(args.number_sequential_layers_to_freeze)
-    if args.freeze_all_layers:
-        wandb_runname += '_all'
-if args.number_hidden_classifier_layers > 0:
-    wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
-wandb_runname += '_lr-' + str(args.learning_rate)
-if args.turn_on_rms:
-    wandb_runname += '_rms' + str(RMS_input_windowsize)
+    
+    # TODO: After fixes, change name from SimCLR-test to turn-on-simclr and wandbrunname to simclr-epochs-X
     
 if leaveOut != 0:
-    run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset', entity='jehanyang')
+    run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset' + args.project_name_suffix, entity='jehanyang')
 else:
-    run = wandb.init(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset', entity='jehanyang')
+    run = wandb.init(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset' + args.project_name_suffix, entity='jehanyang')
 wandb.config.lr = learn
 
 num_epochs = args.epochs
@@ -945,4 +1078,4 @@ if (leaveOut == 0):
     plt.savefig('output.png')
     wandb.log({"Confusion Matrix": wandb.Image(plt)})
 
-
+wandb.finish()
