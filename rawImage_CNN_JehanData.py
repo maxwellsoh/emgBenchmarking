@@ -78,8 +78,8 @@ parser.add_argument('--simclr_epochs', type=int, help='number of epochs to train
 # Parse the arguments
 args = parser.parse_args()
 
-if (args.simclr_test and args.model != 'resnet50') and (args.simclr_test and args.model != 'resnet18'):
-    raise ValueError("SimCLR can only be used with resnet50 or resnet18 as the base model.")
+# if (args.simclr_test and args.model != 'resnet50') and (args.simclr_test and args.model != 'resnet18'):
+#     raise ValueError("SimCLR can only be used with resnet50 or resnet18 as the base model.")
 
 if args.project_name_suffix != '' and not args.project_name_suffix.startswith('_'):
     args.project_name_suffix = '_' + args.project_name_suffix
