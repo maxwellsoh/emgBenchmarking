@@ -853,23 +853,6 @@ if args.simclr_test:
     
     model = SimCLR_EncoderWrapper(model, numGestureTypes)
 
-wandb.finish()
-
-batch_size = 64
-
-train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
-val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
-test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
-
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-
-# loss function and optimizer
-criterion = nn.CrossEntropyLoss()
-learn = args.learning_rate
-optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
-
 def find_last_layer(module):
     children = list(module.children())
     if len(children) == 0:
@@ -878,6 +861,7 @@ def find_last_layer(module):
         return find_last_layer(children[-1])
 
 last_layer = find_last_layer(model)
+
 if args.freeze_model:
     layer_count = 0
     print("************Freezing Layers**************************************************************************************************")
@@ -965,6 +949,25 @@ if args.number_hidden_classifier_layers >= 0:
     
     print(model)
 
+wandb.finish()
+
+batch_size = 64
+
+train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
+val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
+test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+
+# loss function and optimizer
+criterion = nn.CrossEntropyLoss()
+learn = args.learning_rate
+optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
+
+
+
 # %%
 # Training loop
 gc.collect()
@@ -987,24 +990,30 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     model.train()
     train_acc = 0.0
     train_loss = 0.0
-    for X_batch, Y_batch in train_loader:
-        X_batch = X_batch.to(device).to(torch.float32)
-        Y_batch = Y_batch.to(device).to(torch.float32)
+    # Wrap your batch loop with tqdm for real-time feedback
+    with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+        for X_batch, Y_batch in t:
+            X_batch = X_batch.to(device).to(torch.float32)
+            Y_batch = Y_batch.to(device).to(torch.float32)
 
-        optimizer.zero_grad()
-        #output = model(X_batch).logits
-        output = model(X_batch)
-        loss = criterion(output, Y_batch)
-        train_loss += loss.item()
+            optimizer.zero_grad()
+            output = model(X_batch)
+            loss = criterion(output, Y_batch)
+            loss.backward()
+            optimizer.step()
 
-        train_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            train_loss += loss.item()
+            preds = torch.argmax(output, dim=1)
+            Y_batch_long = torch.argmax(Y_batch, dim=1)
+            train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
 
-        loss.backward()
-        optimizer.step()
+            # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
+            # Update the inner tqdm loop with metrics
+            t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
 
-        del X_batch, Y_batch
-        torch.cuda.empty_cache()
-
+            del X_batch, Y_batch, output, preds
+            torch.cuda.empty_cache()
+        
     # Validation
     model.eval()
     val_loss = 0.0
@@ -1017,8 +1026,10 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
             #output = model(X_batch).logits
             output = model(X_batch)
             val_loss += criterion(output, Y_batch).item()
+            preds = torch.argmax(output, dim=1)
+            Y_batch_long = torch.argmax(Y_batch, dim=1)
 
-            val_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
 
             del X_batch, Y_batch
             torch.cuda.empty_cache()
