@@ -69,11 +69,15 @@ parser.add_argument('--number_sequential_layers_to_freeze', type=int, help='numb
 parser.add_argument('--freeze_all_layers', type=ut_NDB2.str2bool, help='whether to freeze ALL layers. Set to False by default.', default=False)
 parser.add_argument('--number_hidden_classifier_layers', type=int, help='number of hidden classifier layers. Set to 0 by default.', default=0)
 parser.add_argument('--hidden_classifier_layer_size', type=int, help='size of hidden classifier layer. Set to 256 by default.', default=256)
+parser.add_argument('--classifier_head_dropout', type=float, help='classifier head dropout. Set to 0.0 by default.', default=0.0)
+parser.add_argument('--classifier_head_batchnorm', type=ut_NDB2.str2bool, help='whether to use batchnorm in classifier head. Set to False by default.', default=False)
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
 parser.add_argument('--random_initialization', type=ut_NDB2.str2bool, help='whether to use random initialization. Set to False by default.', default=False)
 parser.add_argument('--project_name_suffix', type=str, help='project name suffix. Set to empty string by default.', default='')
 parser.add_argument('--simclr_test', type=ut_NDB2.str2bool, help='whether to run simclr test. Set to False by default.', default=False)
 parser.add_argument('--simclr_epochs', type=int, help='number of epochs to train for simclr. Set to 5 by default.', default=5)    
+parser.add_argument('--simclr_batch_size', type=int, help='batch size for simclr. Set to 256 by default.', default=256)
+parser.add_argument('--simclr_accumulate_grad_batches', type=int, help='accumulate grad batches for simclr. Set to 1 by default.', default=1)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -104,6 +108,8 @@ print(f"The value of --random_initialization is {args.random_initialization}")
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
 print(f"The value of --simclr_test is {args.simclr_test}")
 print(f"The value of --simclr_epochs is {args.simclr_epochs}")
+print(f"The value of --simclr_batch_size is {args.simclr_batch_size}")
+print(f"The value of --simclr_accumulate_grad_batches is {args.simclr_accumulate_grad_batches}")
 print("\n")
 
 # %%
@@ -748,6 +754,10 @@ if args.freeze_model:
         wandb_runname += '_all'
 if args.number_hidden_classifier_layers > 0:
     wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
+    if args.hidden_classifier_dropout > 0:
+        wandb_runname += '_dropout-' + str(args.hidden_classifier_dropout)
+    if args.hidden_classifier_batchnorm:
+        wandb_runname += '_batchnorm'
 wandb_runname += '_lr-' + str(args.learning_rate)
 if args.turn_on_rms:
     wandb_runname += '_rms' + str(RMS_input_windowsize)
@@ -756,6 +766,8 @@ if args.random_initialization:
 if args.simclr_test:
     wandb_runname += '_SimCLR-test'
     wandb_runname += '-epochs-' + str(args.simclr_epochs)
+    wandb_runname += '-batch-size-' + str(args.simclr_batch_size)
+    wandb_runname += '-accumulate-grad-batches-' + str(args.simclr_accumulate_grad_batches)
 
 if leaveOut != 0:
     wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset_simclr-pretraining' + args.project_name_suffix, entity='jehanyang')
@@ -782,11 +794,10 @@ else:
     val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
     test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
 
-batch_size = 64
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=8, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=8, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-
+batch_size = args.simclr_batch_size
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
 
 print("number of batches: ", len(train_loader))
 
@@ -812,7 +823,7 @@ if args.simclr_test:
 
     model.to('cuda:0')
     # Set up PyTorch Lightning trainer
-    trainer = Trainer(accelerator='gpu', devices=1, max_epochs=args.simclr_epochs, precision=16, deterministic=True, logger=wandb_logger_pretrain, log_every_n_steps=1)
+    trainer = Trainer(accelerator='gpu', devices=1, max_epochs=args.simclr_epochs, precision=16, deterministic=True, logger=wandb_logger_pretrain, log_every_n_steps=1, accumulate_grad_batches=args.simclr_accumulate_grad_batches)
     trainer.fit(model, train_loader)
 
     class SimCLR_EncoderWrapper(nn.Module):
@@ -841,6 +852,8 @@ if args.simclr_test:
     model = SimCLR_EncoderWrapper(model, numGestureTypes)
 
 wandb.finish()
+
+batch_size = 64
 
 train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
 val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
@@ -934,7 +947,11 @@ if args.number_hidden_classifier_layers >= 0:
     layers = []
     for hidden_size in range(args.number_hidden_classifier_layers):
         layers.append(nn.Linear(in_features, args.hidden_classifier_layer_size))
+        if args.batch_norm:
+            layers.append(nn.BatchNorm1d(args.hidden_classifier_layer_size))
         layers.append(nn.ReLU())
+        if args.dropout > 0:
+            layers.append(nn.Dropout(args.dropout))
         in_features = args.hidden_classifier_layer_size
         
     # Add the last layer
@@ -951,8 +968,6 @@ if args.number_hidden_classifier_layers >= 0:
 gc.collect()
 torch.cuda.empty_cache()
     
-    # TODO: Add dropout between hidden layers with argument to set dropout rate
-    # TODO: Add batch norm between hidden layers with argument to set batch norm
     # TODO: After fixes, change name from SimCLR-test to turn-on-simclr and wandbrunname to simclr-epochs-X
     
 if leaveOut != 0:
