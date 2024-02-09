@@ -14,20 +14,19 @@ from sklearn.metrics import confusion_matrix
 import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from scipy import io
+import h5py
+import os
 
-numGestures = 18
-fs = 2000 #Hz
+numGestures = 7
+fs = 1000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 100 #50 ms
-numElectrodes = 12
-num_subjects = 40
+stepLen = 50 #50 ms
+numElectrodes = 8
+num_subjects = 36
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
-gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction', 
-                    'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 
-                    'Ulnar Deviation', 'Wrist Extension Fist']
+gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations","extended palm"]
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -62,51 +61,50 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
+# not needed for Ozdemir
 def balance (restimulus):
     numZero = 0
     indices = []
-    #print(restimulus.shape)
     for x in range (len(restimulus)):
-        L = torch.chunk(restimulus[x], 2, dim=1)
+        L = torch.chunk(restimulus[x], 2, dim=0)
         if torch.equal(L[0], L[1]):
-            if L[0][0][0] == 0:
-                if (numZero < 550):
-                    #print("working")
-                    indices += [x]
-                numZero += 1
-            else:
-                indices += [x]
+            if (L[0][0] != 0):
+                indices.append(x)
     return indices
 
 def contract(R):
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
     for x in range(len(R)):
-        labels[x][int(R[x][0][0])] = 1.0
+        labels[x][int(R[x][0]) - 1] = 1.0
     return labels
 
 def filter(emg):
     # sixth-order Butterworth highpass filter
-    b, a = butter(N=1, Wn=999.0, btype='lowpass', analog=False, fs=2000.0)
-    return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
+    b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=2000.0)
+    emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 
+    #second-order notch filter at 50 Hz
+    b, a = iirnotch(w0=50.0, Q=0.0001, fs=2000.0)
+    return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
+
+# not needed for Ozdemir
 def getRestim (n):
-    # read hdf5 file 
-    #restim = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/restimulusS{n}_E2.hdf5')
-    #restim = torch.tensor(restim.values)
-    restim = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E1_A1.mat')['restimulus'])
-    return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+    restim = []
+    for file in os.listdir(f"uciEMG/{n}/"):
+        data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+        restim.append(data[:, -1][balance(data[:, -1])])
+    return torch.cat(restim, dim=0)
 
 def getEMG (n):
-    restim = getRestim(n)
-    #emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
-    #emg = torch.tensor(emg.values)
-    emg = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E1_A1.mat')['emg'])
-    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+    emg = []
+    for file in os.listdir(f"uciEMG/{n}/"):
+        data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+        emg.append(data[:, :-1][balance(data[:, -1])])
+    return torch.cat(emg, dim=0)
 
 def getLabels (n):
-    restim = getRestim(n)
-    return contract(restim[balance(restim)])
+    return contract(getRestim(n))
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
@@ -118,10 +116,9 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
     
     # Split image and resize
     imageL, imageR = np.split(image, 2, axis=2)
-    #resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-    #                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    #imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
-    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
     
     # Clamp between 0 and 1 using torch.clamp
     imageL, imageR = map(lambda img: torch.clamp(img, 0, 1), (imageL, imageR))
@@ -143,10 +140,9 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     
     # Split image and resize
     imageL, imageR = np.split(image, 2, axis=2)
-    #resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-    #                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    #imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
-    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
     
     # Get max and min values after interpolation
     max_val = max(imageL.max(), imageR.max())

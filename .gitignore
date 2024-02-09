@@ -11,4 +11,5 @@ test/
 LOSOimages_zarr/
 .gitignore
 OzdemirEMG/
+uciEMG/
 *.zip
