@@ -16,7 +16,7 @@ import multiprocessing
 from tqdm import tqdm
 import argparse
 import random 
-import utils_OzdemirEMG as ut_NDB5
+import utils_OzdemirEMG as utils
 from sklearn.model_selection import StratifiedKFold
 import os
 import datetime
@@ -33,6 +33,8 @@ from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 # Create the parser
 parser = argparse.ArgumentParser(description="Include arguments for running different trials")
 
+# Add argument for dataset
+parser.add_argument('--dataset', help='dataset to test. Set to OzdemirEMG by default', default="OzdemirEMG")
 # Add argument for leftout subject
 parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
 # Add parser for seed
@@ -40,26 +42,45 @@ parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0
 # Add number of epochs to train for
 parser.add_argument('--epochs', type=int, help='number of epochs to train for. Set to 25 by default.', default=25)
 # Add whether or not to use k folds (leftout_subject must be 0)
-parser.add_argument('--turn_on_kfold', type=ut_NDB5.str2bool, help='whether or not to use k folds cross validation. Set to False by default.', default=False)
+parser.add_argument('--turn_on_kfold', type=utils.str2bool, help='whether or not to use k folds cross validation. Set to False by default.', default=False)
 # Add argument for stratified k folds cross validation
 parser.add_argument('--kfold', type=int, help='number of folds for stratified k-folds cross-validation. Set to 5 by default.', default=5)
 # Add argument for checking the index of the fold
 parser.add_argument('--fold_index', type=int, help='index of the fold to use for cross validation (should be from 1 to --kfold). Set to 1 by default.', default=1)
 # Add argument for whether or not to use cyclical learning rate
-parser.add_argument('--turn_on_cyclical_lr', type=ut_NDB5.str2bool, help='whether or not to use cyclical learning rate. Set to False by default.', default=False)
+parser.add_argument('--turn_on_cyclical_lr', type=utils.str2bool, help='whether or not to use cyclical learning rate. Set to False by default.', default=False)
 # Add argument for whether or not to use cosine annealing with warm restartfs
-parser.add_argument('--turn_on_cosine_annealing', type=ut_NDB5.str2bool, help='whether or not to use cosine annealing with warm restarts. Set to False by default.', default=False)
+parser.add_argument('--turn_on_cosine_annealing', type=utils.str2bool, help='whether or not to use cosine annealing with warm restarts. Set to False by default.', default=False)
 # Add argument for whether or not to use RMS
-parser.add_argument('--turn_on_rms', type=ut_NDB5.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
+parser.add_argument('--turn_on_rms', type=utils.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
 # Add argument for number of RMS windows
 parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows to use. Set to 10 by default.', default=10)
 # Add argument for whether or not to concatenate magnitude image
-parser.add_argument('--turn_on_magnitude', type=ut_NDB5.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
+parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 # Add argument for model to use
 parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
 
 # Parse the arguments
 args = parser.parse_args()
+
+if (args.dataset == "uciEMG"):
+    import utils_UCI as utils
+    print(f"The dataset being tested is uciEMG")
+    project_name = 'emg_benchmarking_uci'
+
+elif (args.dataset == "ninapro-db2"):
+    import utils_NinaproDB2 as utils
+    print(f"The dataset being tested is ninapro-db2")
+    project_name = 'emg_benchmarking_ninapro-db2'
+
+elif (args.dataset == "ninapro-db5"):
+    import utils_NinaproDB5 as utils
+    print(f"The dataset being tested is ninapro-db5")
+    project_name = 'emg_benchmarking_ninapro-db5'
+
+else:
+    print(f"The dataset being tested is OzdemirEMG")
+    project_name = 'emg_benchmarking_ozdemir'
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
@@ -111,10 +132,10 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 with  multiprocessing.Pool() as pool:
-    emg_async = pool.map_async(ut_NDB5.getEMG, [(i+1) for i in range(40)])
+    emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
     emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
     
-    labels_async = pool.map_async(ut_NDB5.getLabels, [(i+1) for i in range(40)])
+    labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
     labels = labels_async.get()
 
 length = len(emg[0][0])
@@ -162,7 +183,7 @@ if (leaveOut == 0):
 
         # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
         # Reshape data to (SAMPLES*50, 16)
-        emg_reshaped = emg_in_by_electrode.reshape(-1, ut_NDB5.numElectrodes)
+        emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
 
         # Initialize and fit the scaler on the reshaped data
         # This will compute the mean and std dev for each electrode across all samples and features
@@ -173,7 +194,7 @@ if (leaveOut == 0):
         scaler.mean_ = np.repeat(scaler.mean_, width)
         scaler.scale_ = np.repeat(scaler.scale_, width)
         scaler.var_ = np.repeat(scaler.var_, width)
-        scaler.n_features_in_ = width*ut_NDB5.numElectrodes
+        scaler.n_features_in_ = width*utils.numElectrodes
 
         del emg_in
         del labels_in
@@ -199,7 +220,7 @@ if (leaveOut == 0):
 
         # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
         # Reshape data to (SAMPLES*50, 16)
-        emg_reshaped = emg_in_by_electrode.reshape(-1, ut_NDB5.numElectrodes)
+        emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
 
         # Initialize and fit the scaler on the reshaped data
         # This will compute the mean and std dev for each electrode across all samples and features
@@ -210,7 +231,7 @@ if (leaveOut == 0):
         scaler.mean_ = np.repeat(scaler.mean_, width)
         scaler.scale_ = np.repeat(scaler.scale_, width)
         scaler.var_ = np.repeat(scaler.var_, width)
-        scaler.n_features_in_ = width*ut_NDB5.numElectrodes
+        scaler.n_features_in_ = width*utils.numElectrodes
 
         del emg_in
         del labels_in
@@ -232,7 +253,7 @@ else: # Running LOSO
 
     # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
     # Reshape data to (SAMPLES*50, 16)
-    emg_reshaped = emg_in_by_electrode.reshape(-1, ut_NDB5.numElectrodes)
+    emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
 
     # Initialize and fit the scaler on the reshaped data
     # This will compute the mean and std dev for each electrode across all samples and features
@@ -243,7 +264,7 @@ else: # Running LOSO
     scaler.mean_ = np.repeat(scaler.mean_, width)
     scaler.scale_ = np.repeat(scaler.scale_, width)
     scaler.var_ = np.repeat(scaler.var_, width)
-    scaler.n_features_in_ = width*ut_NDB5.numElectrodes
+    scaler.n_features_in_ = width*utils.numElectrodes
 
     del emg_in
     del emg_in_by_electrode
@@ -254,7 +275,7 @@ data = []
 
 # add tqdm to show progress bar
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    data += [ut_NDB5.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.num_rms_windows, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
+    data += [utils.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.num_rms_windows, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
 
 print("------------------------------------------------------------------------------------------------------------------------")
 print("NOTE: The width 224 is natively used in Resnet50, height is currently integer  multiples of number of electrode channels")
@@ -308,19 +329,10 @@ if args.model == 'resnet50':
     dropout = 0.5
     model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
     model.add_module('flatten', nn.Flatten())
-    '''
-    model.add_module('fc1', nn.Linear(num_features, 1024))
-    model.add_module('relu', nn.ReLU())
-    model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc2', nn.Linear(1024, 1024))
-    model.add_module('relu2', nn.ReLU())
-    model.add_module('dropout2', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(1024, ut_NDB5.numGestures))
-    '''
     model.add_module('fc1', nn.Linear(num_features, 512))
     model.add_module('relu', nn.ReLU())
     model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(512, ut_NDB5.numGestures))
+    model.add_module('fc3', nn.Linear(512, utils.numGestures))
     model.add_module('softmax', nn.Softmax(dim=1))
 elif args.model == 'convnext_tiny_custom':
     # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
@@ -333,7 +345,7 @@ elif args.model == 'convnext_tiny_custom':
 
     n_inputs = 768
     hidden_size = 128 # default is 2048
-    n_outputs = ut_NDB5.numGestures
+    n_outputs = utils.numGestures
 
     # model = timm.create_model(model_name, pretrained=True, num_classes=10)
     model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
@@ -361,10 +373,10 @@ elif args.model == 'convnext_tiny_custom':
 else: 
     # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
     # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-    model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB5.numGestures)
+    model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
-    # model = timm.create_model(model_name, pretrained=True, num_classes=ut_NDB5.numGestures)
+    # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
 
 num = 0
 for name, param in model.named_parameters():
@@ -377,10 +389,10 @@ for name, param in model.named_parameters():
         param.requires_grad = False
 
 batch_size = 64
-train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
-val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
+train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 if (leaveOut == 0):
-    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=ut_NDB5.seed_worker, pin_memory=True)
+    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 
 # Define the loss function and optimizer
 criterion = nn.CrossEntropyLoss()
@@ -391,7 +403,7 @@ num_epochs = args.epochs
 if args.turn_on_cosine_annealing:
     number_cycles = 5
     annealing_multiplier = 2
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=ut_NDB5.periodLengthForAnnealing(num_epochs, annealing_multiplier, number_cycles),
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=utils.periodLengthForAnnealing(num_epochs, annealing_multiplier, number_cycles),
                                                                         T_mult=annealing_multiplier, eta_min=1e-5, last_epoch=-1)
 elif args.turn_on_cyclical_lr:
     # Define the cyclical learning rate scheduler
@@ -421,7 +433,6 @@ if args.leftout_subject != 0:
     wandb_runname += '_LOSO-'+str(args.leftout_subject)
 wandb_runname += '_' + model_name
 
-project_name = 'emg_benchmarking_ozdemir'
 if (leaveOut == 0):
     if args.turn_on_kfold:
         project_name += '_k-fold-'+str(args.kfold)
@@ -448,14 +459,14 @@ model_filename = f'{testrun_foldername}model_{formatted_datetime}.pth'
 
 if leaveOut == 0:
     # Plot and log images
-    ut_NDB5.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-    ut_NDB5.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
-ut_NDB5.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
-ut_NDB5.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+utils.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
 
-ut_NDB5.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-ut_NDB5.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+utils.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
 
 for epoch in tqdm(range(num_epochs), desc="Epoch"):
     model.train()
@@ -548,7 +559,7 @@ if (leaveOut == 0):
     
     # %% Confusion Matrix
     # Plot and log confusion matrix in wandb
-    ut_NDB5.plot_confusion_matrix(true, pred, ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    utils.plot_confusion_matrix(true, pred, utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
 # Load validation in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
@@ -562,7 +573,7 @@ with torch.no_grad():
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         validation_predictions.extend(preds)
 
-ut_NDB5.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
 
 # Load training in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
@@ -570,12 +581,12 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     train_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/40))), desc="Training Batch Loading"):  # Or some other number that fits in memory
+    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/utils.num_subjects))), desc="Training Batch Loading"):  # Or some other number that fits in memory
         batch = batch.to(device)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         train_predictions.extend(preds)
 
-ut_NDB5.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), ut_NDB5.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
     
 run.finish()

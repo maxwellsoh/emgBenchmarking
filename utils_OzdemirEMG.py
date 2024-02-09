@@ -22,6 +22,7 @@ wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 100 #50 ms
 numElectrodes = 4
+num_subjects = 40
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
 gesture_labels = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
@@ -100,7 +101,7 @@ def getRestim (n):
     return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
 def getEMG (n):
-    file = h5py.File('DatasetsProcessed_hdf5/OzdemirEMG/p40/flattened_participant_40.hdf5', 'r')
+    file = h5py.File('DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     emg = []
     for gesture in gesture_labels:
         data = filter(torch.from_numpy(np.array(file["Gesture" + gesture]))).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
