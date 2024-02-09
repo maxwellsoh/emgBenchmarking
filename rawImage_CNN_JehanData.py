@@ -41,8 +41,10 @@ from joblib import Parallel, delayed
 from collections import OrderedDict
 import copy
 
-from pl_bolts.models.self_supervised import SimCLR
+from pl_bolts.models.self_supervised import SimCLR, Moco_v2, SimSiam, SwAV  
 from pl_bolts.transforms.self_supervised.simclr_transforms import SimCLRTrainDataTransform
+from pl_bolts.transforms.self_supervised.moco_transforms import MoCo2TrainSTL10Transforms
+from pl_bolts.transforms.self_supervised.swav_transforms import SwAVTrainDataTransform
 from pytorch_lightning import Trainer
 from pytorch_lightning import seed_everything
 from pytorch_lightning.loggers import WandbLogger
@@ -76,14 +78,18 @@ parser.add_argument('--random_initialization', type=ut_NDB2.str2bool, help='whet
 parser.add_argument('--project_name_suffix', type=str, help='project name suffix. Set to empty string by default.', default='')
 parser.add_argument('--simclr_test', type=ut_NDB2.str2bool, help='whether to run simclr test. Set to False by default.', default=False)
 parser.add_argument('--simclr_epochs', type=int, help='number of epochs to train for simclr. Set to 5 by default.', default=5)    
-parser.add_argument('--simclr_batch_size', type=int, help='batch size for simclr. Set to 256 by default.', default=256)
+parser.add_argument('--simclr_batch_size', type=int, help='batch size for simclr. Set to 64 by default.', default=64)
 parser.add_argument('--simclr_accumulate_grad_batches', type=int, help='accumulate grad batches for simclr. Set to 1 by default.', default=1)
+parser.add_argument('--swav_test', type=ut_NDB2.str2bool, help='whether to run swav test. Set to False by default.', default=False)
+parser.add_argument('--swav_epochs', type=int, help='number of epochs to train for swav. Set to 5 by default.', default=5)
+parser.add_argument('--swav_batch_size', type=int, help='batch size for swav. Set to 64 by default.', default=64)
+parser.add_argument('--swav_accumulate_grad_batches', type=int, help='accumulate grad batches for swav. Set to 1 by default.', default=1)
 
 # Parse the arguments
 args = parser.parse_args()
 
-# if (args.simclr_test and args.model != 'resnet50') and (args.simclr_test and args.model != 'resnet18'):
-#     raise ValueError("SimCLR can only be used with resnet50 or resnet18 as the base model.")
+if (args.simclr_test and args.model != 'resnet50') and (args.simclr_test and args.model != 'resnet18'):
+    raise ValueError("SimCLR can only be used with resnet50 or resnet18 as the base model.")
 
 if args.project_name_suffix != '' and not args.project_name_suffix.startswith('_'):
     args.project_name_suffix = '_' + args.project_name_suffix
@@ -103,8 +109,6 @@ print(f"The value of --number_sequential_layers_to_freeze is {args.number_sequen
 print(f"The value of --freeze_all_layers is {args.freeze_all_layers}")
 print(f"The value of --number_hidden_classifier_layers is {args.number_hidden_classifier_layers}")
 print(f"The value of --hidden_classifier_layer_size is {args.hidden_classifier_layer_size}")
-print(f"The value of --classifier_head_dropout is {args.classifier_head_dropout}")
-print(f"The value of --classifier_head_batchnorm is {args.classifier_head_batchnorm}")
 print(f"The value of --learning_rate is {args.learning_rate}")
 print(f"The value of --random_initialization is {args.random_initialization}")
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
@@ -112,6 +116,10 @@ print(f"The value of --simclr_test is {args.simclr_test}")
 print(f"The value of --simclr_epochs is {args.simclr_epochs}")
 print(f"The value of --simclr_batch_size is {args.simclr_batch_size}")
 print(f"The value of --simclr_accumulate_grad_batches is {args.simclr_accumulate_grad_batches}")
+print(f"The value of --swav_test is {args.swav_test}")
+print(f"The value of --swav_epochs is {args.swav_epochs}")
+print(f"The value of --swav_batch_size is {args.swav_batch_size}")
+print(f"The value of --swav_accumulate_grad_batches is {args.swav_accumulate_grad_batches}")
 print("\n")
 
 # %%
@@ -756,9 +764,9 @@ if args.freeze_model:
         wandb_runname += '_all'
 if args.number_hidden_classifier_layers > 0:
     wandb_runname += '_hidden-' + str(args.number_hidden_classifier_layers) + '-' + str(args.hidden_classifier_layer_size)
-    if args.classifier_head_dropout > 0:
-        wandb_runname += '_dropout-' + str(args.classifier_head_dropout)
-    if args.classifier_head_batchnorm:
+    if args.hidden_classifier_dropout > 0:
+        wandb_runname += '_dropout-' + str(args.hidden_classifier_dropout)
+    if args.hidden_classifier_batchnorm:
         wandb_runname += '_batchnorm'
 wandb_runname += '_lr-' + str(args.learning_rate)
 if args.turn_on_rms:
@@ -770,11 +778,22 @@ if args.simclr_test:
     wandb_runname += '-epochs-' + str(args.simclr_epochs)
     wandb_runname += '-batch-size-' + str(args.simclr_batch_size)
     wandb_runname += '-accumulate-grad-batches-' + str(args.simclr_accumulate_grad_batches)
+if args.swav_test:
+    wandb_runname += '_swav-test'
+    wandb_runname += '-epochs-' + str(args.swav_epochs)
+    wandb_runname += '-batch-size-' + str(args.swav_batch_size)
+    wandb_runname += '-accumulate-grad-batches-' + str(args.swav_accumulate_grad_batches)
 
-if leaveOut != 0:
-    wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset_simclr-pretraining' + args.project_name_suffix, entity='jehanyang')
-else: 
-    wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset_simclr-pretraining' + args.project_name_suffix, entity='jehanyang')
+if args.simclr_test:
+    if leaveOut != 0:
+        wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset_simclr-pretraining' + args.project_name_suffix, entity='jehanyang')
+    else: 
+        wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset_simclr-pretraining' + args.project_name_suffix, entity='jehanyang')
+if args.swav_test:
+    if leaveOut != 0:
+        wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset_swav-pretraining' + args.project_name_suffix, entity='jehanyang')
+    else:
+        wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset_swav-pretraining' + args.project_name_suffix, entity='jehanyang')
 
 transform_train_simclr = transforms.Compose([
     transforms.Resize((224, 224)),  # Resizing the image
@@ -784,6 +803,14 @@ transform_train_simclr = transforms.Compose([
     SimCLRTrainDataTransform(input_height=224, gaussian_blur=0.1, jitter_strength=1.0, normalize=None),
 ])
 
+transform_train_swav = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resizing the image
+    # Add any other transformations you need here
+    transforms.Lambda(lambda x: x.type(torch.float32)),
+    transforms.ToPILImage(),
+    SwAVTrainDataTransform(num_crops=[2,6]),
+])
+
 torch.set_float32_matmul_precision('medium')
 
 # Apply the transform to your datasets
@@ -791,12 +818,22 @@ if args.simclr_test:
     train_dataset = ut_NDB2.CustomDataset_Simclr(X_train, Y_train, transform=transform_train_simclr)
     val_dataset = ut_NDB2.CustomDataset_Simclr(X_validation, Y_validation, transform=transform_train_simclr)
     test_dataset = ut_NDB2.CustomDataset_Simclr(X_test, Y_test, transform=transform_train_simclr) if leaveOut == 0 else None
+elif args.swav_test:
+    train_dataset = ut_NDB2.CustomDataset_swav(X_train, Y_train, transform=transform_train_swav)
+    val_dataset = ut_NDB2.CustomDataset_swav(X_validation, Y_validation, transform=transform_train_swav)
+    test_dataset = ut_NDB2.CustomDataset_swav(X_test, Y_test, transform=transform_train_swav) if leaveOut == 0 else None
 else: 
     train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
     val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
     test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
 
-batch_size = args.simclr_batch_size
+if args.simclr_test:
+    batch_size = args.simclr_batch_size
+elif args.swav_test:
+    batch_size = args.swav_batch_size
+else:
+    batch_size = 64
+    
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
@@ -852,6 +889,73 @@ if args.simclr_test:
                 return getattr(self.pretrained_model, name)
     
     model = SimCLR_EncoderWrapper(model, numGestureTypes)
+    
+if args.swav_test:
+    # Set up the SimCLR model
+    if args.random_initialization:
+        model = SwAV(
+            gpus=1,
+            num_samples=len(train_dataset),
+            batch_size=batch_size,
+            dataset='cifar10',  # You can ignore this since you're using a custom dataset
+            max_epochs=args.swav_epochs,
+        )
+    else:
+        model = SwAV(
+            gpus=1,
+            num_samples=len(train_dataset),
+            batch_size=batch_size,
+            dataset='cifar10',  # You can ignore this since you're using a custom dataset
+            max_epochs=args.swav_epochs,
+            pretrained=True,
+        )
+
+    model.to('cuda:0')
+    # Set up PyTorch Lightning trainer
+    trainer = Trainer(accelerator='gpu', devices=1, max_epochs=args.swav_epochs, precision=16, deterministic=True, logger=wandb_logger_pretrain, log_every_n_steps=1, accumulate_grad_batches=args.swav_accumulate_grad_batches)
+    trainer.fit(model, train_loader)
+
+    class Swav_EncoderWrapper(nn.Module):
+        def __init__(self, pretrained_model, numGestureTypes):
+            super(Swav_EncoderWrapper, self).__init__()
+            self.pretrained_model = pretrained_model
+            in_features = self.pretrained_model.encoder.fc.in_features
+            self.classifier_custom = nn.Linear(in_features, numGestureTypes)
+
+        def forward(self, x):
+            features = self.pretrained_model.encoder(x)
+            if isinstance(features, (list, tuple)):
+                features = features[0]
+            output = self.classifier_custom(features)
+            return output
+        
+        def __getattr__(self, name):
+            """Delegate attribute access to the pretrained_model when not found in this wrapper."""
+            try:
+                # Try to access attribute in the current class
+                return super().__getattr__(name)
+            except AttributeError:
+                # Delegate to the pretrained_model
+                return getattr(self.pretrained_model, name)
+    
+    model = Swav_EncoderWrapper(model, numGestureTypes)
+
+wandb.finish()
+
+batch_size = 64
+
+train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
+val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
+test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+
+# loss function and optimizer
+criterion = nn.CrossEntropyLoss()
+learn = args.learning_rate
+optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
 
 def find_last_layer(module):
     children = list(module.children())
@@ -861,7 +965,6 @@ def find_last_layer(module):
         return find_last_layer(children[-1])
 
 last_layer = find_last_layer(model)
-
 if args.freeze_model:
     layer_count = 0
     print("************Freezing Layers**************************************************************************************************")
@@ -933,10 +1036,10 @@ if args.number_hidden_classifier_layers >= 0:
     layers = []
     for hidden_size in range(args.number_hidden_classifier_layers):
         layers.append(nn.Linear(in_features, args.hidden_classifier_layer_size))
-        if args.classifier_head_batchnorm:
+        if args.batch_norm:
             layers.append(nn.BatchNorm1d(args.hidden_classifier_layer_size))
         layers.append(nn.ReLU())
-        if args.classifier_head_dropout > 0:
+        if args.dropout > 0:
             layers.append(nn.Dropout(args.dropout))
         in_features = args.hidden_classifier_layer_size
         
@@ -949,30 +1052,13 @@ if args.number_hidden_classifier_layers >= 0:
     
     print(model)
 
-wandb.finish()
-
-batch_size = 64
-
-train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
-val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
-test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
-
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-
-# loss function and optimizer
-criterion = nn.CrossEntropyLoss()
-learn = args.learning_rate
-optimizer = torch.optim.AdamW(model.parameters(), lr=learn)
-
-
-
 # %%
 # Training loop
 gc.collect()
 torch.cuda.empty_cache()
-        
+    
+    # TODO: After fixes, change name from SimCLR-test to turn-on-simclr and wandbrunname to simclr-epochs-X
+    
 if leaveOut != 0:
     run = wandb.init(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset' + args.project_name_suffix, entity='jehanyang')
 else:
@@ -990,30 +1076,24 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     model.train()
     train_acc = 0.0
     train_loss = 0.0
-    # Wrap your batch loop with tqdm for real-time feedback
-    with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
-        for X_batch, Y_batch in t:
-            X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.float32)
+    for X_batch, Y_batch in train_loader:
+        X_batch = X_batch.to(device).to(torch.float32)
+        Y_batch = Y_batch.to(device).to(torch.float32)
 
-            optimizer.zero_grad()
-            output = model(X_batch)
-            loss = criterion(output, Y_batch)
-            loss.backward()
-            optimizer.step()
+        optimizer.zero_grad()
+        #output = model(X_batch).logits
+        output = model(X_batch)
+        loss = criterion(output, Y_batch)
+        train_loss += loss.item()
 
-            train_loss += loss.item()
-            preds = torch.argmax(output, dim=1)
-            Y_batch_long = torch.argmax(Y_batch, dim=1)
-            train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+        train_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
-            # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
-            # Update the inner tqdm loop with metrics
-            t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
+        loss.backward()
+        optimizer.step()
 
-            del X_batch, Y_batch, output, preds
-            torch.cuda.empty_cache()
-        
+        del X_batch, Y_batch
+        torch.cuda.empty_cache()
+
     # Validation
     model.eval()
     val_loss = 0.0
@@ -1026,10 +1106,8 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
             #output = model(X_batch).logits
             output = model(X_batch)
             val_loss += criterion(output, Y_batch).item()
-            preds = torch.argmax(output, dim=1)
-            Y_batch_long = torch.argmax(Y_batch, dim=1)
 
-            val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+            val_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
 
             del X_batch, Y_batch
             torch.cuda.empty_cache()
