@@ -22,6 +22,12 @@ $ conda remove --force lightning-bolts
 $ pip install git+https://github.com/jehanyang/lightning-bolts.git@v0.7
 ```
 
+If the forked lightning-bolts is updated, then you may need to uninstall and reinstall with:
+```console
+$ pip uninstall lightning-bolts
+$ pip install git+https://github.com/jehanyang/lightning-bolts.git@v0.7
+```
+
 # Benchmarking
 Currently, to download the datasets, you will have to go to the website that hosts the datasets, download each individuals data (for Ninapro DB2, DB5, and Capgmyo), download the whole dataset (for Ozdemir's open dataset), or request the dataset (for Jehan's dataset). 
 
