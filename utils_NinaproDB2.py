@@ -22,6 +22,7 @@ wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 100 #50 ms
 numElectrodes = 12
+num_subjects = 40
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
 gesture_labels = ['Rest', 'Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction', 
