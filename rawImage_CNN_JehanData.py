@@ -42,9 +42,9 @@ from collections import OrderedDict
 import copy
 
 from pl_bolts.models.self_supervised import SimCLR, Moco_v2, SimSiam, SwAV  
-from pl_bolts.transforms.self_supervised.simclr_transforms import SimCLRTrainDataTransform
+from pl_bolts.transforms.self_supervised.simclr_transforms import SimCLRTrainDataTransform, SimCLREvalDataTransform
 from pl_bolts.transforms.self_supervised.moco_transforms import MoCo2TrainSTL10Transforms
-from pl_bolts.transforms.self_supervised.swav_transforms import SwAVTrainDataTransform
+from pl_bolts.transforms.self_supervised.swav_transforms import SwAVTrainDataTransform, SwAVEvalDataTransform
 from pytorch_lightning import Trainer
 from pytorch_lightning import seed_everything
 from pytorch_lightning.loggers import WandbLogger
@@ -76,14 +76,21 @@ parser.add_argument('--classifier_head_batchnorm', type=ut_NDB2.str2bool, help='
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
 parser.add_argument('--random_initialization', type=ut_NDB2.str2bool, help='whether to use random initialization. Set to False by default.', default=False)
 parser.add_argument('--project_name_suffix', type=str, help='project name suffix. Set to empty string by default.', default='')
+
 parser.add_argument('--simclr_test', type=ut_NDB2.str2bool, help='whether to run simclr test. Set to False by default.', default=False)
 parser.add_argument('--simclr_epochs', type=int, help='number of epochs to train for simclr. Set to 5 by default.', default=5)    
 parser.add_argument('--simclr_batch_size', type=int, help='batch size for simclr. Set to 64 by default.', default=64)
 parser.add_argument('--simclr_accumulate_grad_batches', type=int, help='accumulate grad batches for simclr. Set to 1 by default.', default=1)
+
 parser.add_argument('--swav_test', type=ut_NDB2.str2bool, help='whether to run swav test. Set to False by default.', default=False)
 parser.add_argument('--swav_epochs', type=int, help='number of epochs to train for swav. Set to 5 by default.', default=5)
 parser.add_argument('--swav_batch_size', type=int, help='batch size for swav. Set to 64 by default.', default=64)
 parser.add_argument('--swav_accumulate_grad_batches', type=int, help='accumulate grad batches for swav. Set to 1 by default.', default=1)
+
+parser.add_argument('--simsiam_test', type=ut_NDB2.str2bool, help='whether to run simsiam test. Set to False by default.', default=False)
+parser.add_argument('--simsiam_epochs', type=int, help='number of epochs to train for simsiam. Set to 5 by default.', default=5)
+parser.add_argument('--simsiam_batch_size', type=int, help='batch size for simsiam. Set to 64 by default.', default=64)
+parser.add_argument('--simsiam_accumulate_grad_batches', type=int, help='accumulate grad batches for simsiam. Set to 1 by default.', default=1)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -114,14 +121,21 @@ print(f"The value of --classifier_head_batchnorm is {args.classifier_head_batchn
 print(f"The value of --learning_rate is {args.learning_rate}")
 print(f"The value of --random_initialization is {args.random_initialization}")
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
+
 print(f"The value of --simclr_test is {args.simclr_test}")
 print(f"The value of --simclr_epochs is {args.simclr_epochs}")
 print(f"The value of --simclr_batch_size is {args.simclr_batch_size}")
 print(f"The value of --simclr_accumulate_grad_batches is {args.simclr_accumulate_grad_batches}")
+
 print(f"The value of --swav_test is {args.swav_test}")
 print(f"The value of --swav_epochs is {args.swav_epochs}")
 print(f"The value of --swav_batch_size is {args.swav_batch_size}")
 print(f"The value of --swav_accumulate_grad_batches is {args.swav_accumulate_grad_batches}")
+
+print(f"The value of --simsiam_test is {args.simsiam_test}")
+print(f"The value of --simsiam_epochs is {args.simsiam_epochs}")
+print(f"The value of --simsiam_batch_size is {args.simsiam_batch_size}")
+print(f"The value of --simsiam_accumulate_grad_batches is {args.simsiam_accumulate_grad_batches}")
 print("\n")
 
 # %%
@@ -796,6 +810,11 @@ if args.swav_test:
         wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset_swav-pretraining' + args.project_name_suffix, entity='jehanyang')
     else:
         wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset_swav-pretraining' + args.project_name_suffix, entity='jehanyang')
+if args.simsiam_test:
+    if leaveOut != 0:
+        wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_LOSO_JehanDataset_simsiam-pretraining' + args.project_name_suffix, entity='jehanyang')
+    else:
+        wandb_logger_pretrain = WandbLogger(name=wandb_runname, project='emg_benchmarking_heldout_JehanDataset_simsiam-pretraining' + args.project_name_suffix, entity='jehanyang')
 
 transform_train_simclr = transforms.Compose([
     transforms.Resize((224, 224)),  # Resizing the image
@@ -803,6 +822,14 @@ transform_train_simclr = transforms.Compose([
     transforms.Lambda(lambda x: x.type(torch.float32)),
     transforms.ToPILImage(),
     SimCLRTrainDataTransform(input_height=224, gaussian_blur=0.1, jitter_strength=1.0, normalize=None),
+])
+
+transform_eval_simclr = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resizing the image
+    # Add any other transformations you need here
+    transforms.Lambda(lambda x: x.type(torch.float32)),
+    transforms.ToPILImage(),
+    SimCLREvalDataTransform(input_height=224, gaussian_blur=0.1, jitter_strength=1.0, normalize=None),
 ])
 
 transform_train_swav = transforms.Compose([
@@ -813,26 +840,36 @@ transform_train_swav = transforms.Compose([
     SwAVTrainDataTransform(num_crops=[2,6]),
 ])
 
+transform_eval_swav = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resizing the image
+    # Add any other transformations you need here
+    transforms.Lambda(lambda x: x.type(torch.float32)),
+    transforms.ToPILImage(),
+    SwAVEvalDataTransform(num_crops=[2,6]),
+])
+
 torch.set_float32_matmul_precision('medium')
 
 # Apply the transform to your datasets
 if args.simclr_test:
     train_dataset = ut_NDB2.CustomDataset_Simclr(X_train, Y_train, transform=transform_train_simclr)
-    val_dataset = ut_NDB2.CustomDataset_Simclr(X_validation, Y_validation, transform=transform_train_simclr)
-    test_dataset = ut_NDB2.CustomDataset_Simclr(X_test, Y_test, transform=transform_train_simclr) if leaveOut == 0 else None
+    val_dataset = ut_NDB2.CustomDataset_Simclr(X_validation, Y_validation, transform=transform_eval_simclr)
+    test_dataset = ut_NDB2.CustomDataset_Simclr(X_test, Y_test, transform=transform_eval_simclr) if leaveOut == 0 else None
 elif args.swav_test:
     train_dataset = ut_NDB2.CustomDataset_swav(X_train, Y_train, transform=transform_train_swav)
-    val_dataset = ut_NDB2.CustomDataset_swav(X_validation, Y_validation, transform=transform_train_swav)
-    test_dataset = ut_NDB2.CustomDataset_swav(X_test, Y_test, transform=transform_train_swav) if leaveOut == 0 else None
-else: 
-    train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform)
-    val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform)
-    test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform) if leaveOut == 0 else None
+    val_dataset = ut_NDB2.CustomDataset_swav(X_validation, Y_validation, transform=transform_eval_swav)
+    test_dataset = ut_NDB2.CustomDataset_swav(X_test, Y_test, transform=transform_eval_swav) if leaveOut == 0 else None
+elif args.simsiam_test: 
+    train_dataset = ut_NDB2.CustomDataset(X_train, Y_train, transform=transform_train_simclr)
+    val_dataset = ut_NDB2.CustomDataset(X_validation, Y_validation, transform=transform_eval_simclr)
+    test_dataset = ut_NDB2.CustomDataset(X_test, Y_test, transform=transform_eval_simclr) if leaveOut == 0 else None
 
 if args.simclr_test:
     batch_size = args.simclr_batch_size
 elif args.swav_test:
     batch_size = args.swav_batch_size
+elif args.simsiam_test:
+    batch_size = args.simsiam_batch_size
 else:
     batch_size = 64
     
@@ -944,6 +981,59 @@ if args.swav_test:
     
     model = Swav_EncoderWrapper(model, numGestureTypes)
 
+if args.simsiam_test:
+    # Set up the SimCLR model
+    if args.random_initialization:
+        model = SimSiam(
+            gpus=1,
+            num_samples=len(train_dataset),
+            batch_size=batch_size,
+            dataset='cifar10',  # You can ignore this since you're using a custom dataset
+            max_epochs=args.simsiam_epochs,
+        )
+    else:
+        model = SimSiam(
+            gpus=1,
+            num_samples=len(train_dataset),
+            batch_size=batch_size,
+            dataset='cifar10',  # You can ignore this since you're using a custom dataset
+            max_epochs=args.simsiam_epochs,
+            pretrained=True,
+        )
+
+    model.to('cuda:0')
+    # Set up PyTorch Lightning trainer
+    trainer = Trainer(accelerator='gpu', devices=1, max_epochs=args.simsiam_epochs, precision=16, deterministic=True, logger=wandb_logger_pretrain, log_every_n_steps=1, accumulate_grad_batches=args.simsiam_accumulate_grad_batches)
+    trainer.fit(model, train_loader)
+
+    class Simsiam_EncoderWrapper(nn.Module):
+        def __init__(self, pretrained_model, numGestureTypes):
+            super(Simsiam_EncoderWrapper, self).__init__()
+            self.pretrained_model = pretrained_model
+            in_features = self.pretrained_model.online_network.projector.model[0].in_features
+            self.classifier_custom = nn.Linear(in_features, numGestureTypes)
+            self.pretrained_model.online_network.projector = nn.Identity()
+            self.pretrained_model.predictor = nn.Identity()
+
+        def forward(self, x):
+            features = self.pretrained_model(x)
+            if isinstance(features, (list, tuple)):
+                features = features[0]
+            output = self.classifier_custom(features)
+            return output
+        
+        def __getattr__(self, name):
+            """Delegate attribute access to the pretrained_model when not found in this wrapper."""
+            try:
+                # Try to access attribute in the current class
+                return super().__getattr__(name)
+            except AttributeError:
+                # Delegate to the pretrained_model
+                return getattr(self.pretrained_model, name)
+    
+    model = Simsiam_EncoderWrapper(model, numGestureTypes)
+
+
 def find_last_layer(module):
     children = list(module.children())
     if len(children) == 0:
@@ -1027,7 +1117,7 @@ if args.number_hidden_classifier_layers >= 0:
             layers.append(nn.BatchNorm1d(args.hidden_classifier_layer_size))
         layers.append(nn.ReLU())
         if args.classifier_head_dropout > 0:
-            layers.append(nn.Dropout(args.dropout))
+            layers.append(nn.Dropout(args.classifier_head_dropout))
         in_features = args.hidden_classifier_layer_size
         
     # Add the last layer
