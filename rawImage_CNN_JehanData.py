@@ -799,6 +799,11 @@ if args.swav_test:
     wandb_runname += '-epochs-' + str(args.swav_epochs)
     wandb_runname += '-batch-size-' + str(args.swav_batch_size)
     wandb_runname += '-accumulate-grad-batches-' + str(args.swav_accumulate_grad_batches)
+if args.simsiam_test:
+    wandb_runname += '_SimSiam-test'
+    wandb_runname += '-epochs-' + str(args.simsiam_epochs)
+    wandb_runname += '-batch-size-' + str(args.simsiam_batch_size)
+    wandb_runname += '-accumulate-grad-batches-' + str(args.simsiam_accumulate_grad_batches)
 
 if args.simclr_test:
     if leaveOut != 0:
