@@ -873,11 +873,12 @@ elif args.simsiam_test:
 else:
     batch_size = 64
     
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+if args.simclr_test or args.swav_test or args.simsiam_test:
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=32, worker_init_fn=ut_NDB2.seed_worker, pin_memory=True)
 
-print("number of batches: ", len(train_loader))
+    print("number of batches: ", len(train_loader))
 
 if args.simclr_test:
     # Set up the SimCLR model
