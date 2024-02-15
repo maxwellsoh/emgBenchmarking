@@ -1293,9 +1293,9 @@ if args.log_heatmap_images:
         plt.subplot(5, 2, i+1)
         plt.imshow(np.float32(np.mean(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
-    plt.suptitle("Average Heatmap of Training Set")
+    plt.suptitle("Average Heatmap of Subset of Training Set")
     plt.savefig('output.png')
-    wandb.log({"Average Heatmap of Training Set": wandb.Image(plt)})
+    wandb.log({"Average Heatmap of Subset of Training Set": wandb.Image(plt)})
     
     # Training set variance
     plt.figure(figsize=(15, 15))
@@ -1303,9 +1303,9 @@ if args.log_heatmap_images:
         plt.subplot(5, 2, i+1)
         plt.imshow(np.float32(np.var(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
-    plt.suptitle("Variance Heatmap of Training Set")
+    plt.suptitle("Variance Heatmap of Subset of Training Set")
     plt.savefig('output.png')
-    wandb.log({"Variance Heatmap of Training Set": wandb.Image(plt)})
+    wandb.log({"Variance Heatmap of Subset of Training Set": wandb.Image(plt)})
     
     # Training set skew
     plt.figure(figsize=(15, 15))
@@ -1313,9 +1313,9 @@ if args.log_heatmap_images:
         plt.subplot(5, 2, i+1)
         plt.imshow(np.float32(scipy.stats.skew(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
-    plt.suptitle("Skewness Heatmap of Training Set")
+    plt.suptitle("Skewness Heatmap of Subset of Training Set")
     plt.savefig('output.png')
-    wandb.log({"Skewness Heatmap of Training Set": wandb.Image(plt)})
+    wandb.log({"Skewness Heatmap of Subset of Training Set": wandb.Image(plt)})
     
     # Training set kurtosis
     plt.figure(figsize=(15, 15))
@@ -1323,9 +1323,9 @@ if args.log_heatmap_images:
         plt.subplot(5, 2, i+1)
         plt.imshow(np.float32(scipy.stats.kurtosis(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
-    plt.suptitle("Kurtosis Heatmap of Training Set")
+    plt.suptitle("Kurtosis Heatmap of Subset of Training Set")
     plt.savefig('output.png')
-    wandb.log({"Kurtosis Heatmap of Training Set": wandb.Image(plt)})
+    wandb.log({"Kurtosis Heatmap of Subset of Training Set": wandb.Image(plt)})
     
     # Validation set
     plt.figure(figsize=(15, 15))
