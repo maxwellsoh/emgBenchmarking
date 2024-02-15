@@ -76,6 +76,8 @@ parser.add_argument('--classifier_head_batchnorm', type=ut_NDB2.str2bool, help='
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 0.0001 by default.', default=0.0001)
 parser.add_argument('--random_initialization', type=ut_NDB2.str2bool, help='whether to use random initialization. Set to False by default.', default=False)
 parser.add_argument('--project_name_suffix', type=str, help='project name suffix. Set to empty string by default.', default='')
+parser.add_argument('--log_heatmap_images', type=ut_NDB2.str2bool, help='whether to and log the heatmaps. Set to False by default.', default=False)
+parser.add_argument('--turn_on_spatial_heatmap', type=ut_NDB2.str2bool, help='whether to turn on spatial heatmap, may only work for HDEMG. Set to False by default.', default=False)
 
 parser.add_argument('--simclr_test', type=ut_NDB2.str2bool, help='whether to run simclr test. Set to False by default.', default=False)
 parser.add_argument('--simclr_epochs', type=int, help='number of epochs to train for simclr. Set to 5 by default.', default=5)    
@@ -121,6 +123,8 @@ print(f"The value of --classifier_head_batchnorm is {args.classifier_head_batchn
 print(f"The value of --learning_rate is {args.learning_rate}")
 print(f"The value of --random_initialization is {args.random_initialization}")
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
+print(f"The value of --log_heatmap_images is {args.log_heatmap_images}")
+print(f"The value of --turn_on_spatial_heatmap is {args.turn_on_spatial_heatmap}")
 
 print(f"The value of --simclr_test is {args.simclr_test}")
 print(f"The value of --simclr_epochs is {args.simclr_epochs}")
@@ -804,6 +808,8 @@ if args.simsiam_test:
     wandb_runname += '-epochs-' + str(args.simsiam_epochs)
     wandb_runname += '-batch-size-' + str(args.simsiam_batch_size)
     wandb_runname += '-accumulate-grad-batches-' + str(args.simsiam_accumulate_grad_batches)
+if args.turn_on_spatial_heatmap:
+    wandb_runname += '_spatial-heatmap'
 
 if args.simclr_test:
     if leaveOut != 0:
@@ -1277,5 +1283,105 @@ if (leaveOut == 0):
     sn.heatmap(df_cm, annot=True, fmt=".3f")
     plt.savefig('output.png')
     wandb.log({"Confusion Matrix": wandb.Image(plt)})
+    
+if args.log_heatmap_images:
+    # Plot the average heatmap of the first 15 images of the training, validation, and test sets for each gesture
+    number_of_images_to_average = 15
+    # Training set
+    plt.figure(figsize=(15, 15))
+    for i in range(10):
+        plt.subplot(5, 2, i+1)
+        plt.imshow(np.float32(np.mean(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+        plt.title(f"Gesture {i+1}")
+    plt.suptitle("Average Heatmap of Training Set")
+    plt.savefig('output.png')
+    wandb.log({"Average Heatmap of Training Set": wandb.Image(plt)})
+    
+    # Training set variance
+    plt.figure(figsize=(15, 15))
+    for i in range(10):
+        plt.subplot(5, 2, i+1)
+        plt.imshow(np.float32(np.var(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+        plt.title(f"Gesture {i+1}")
+    plt.suptitle("Variance Heatmap of Training Set")
+    plt.savefig('output.png')
+    wandb.log({"Variance Heatmap of Training Set": wandb.Image(plt)})
+    
+    # Training set skew
+    plt.figure(figsize=(15, 15))
+    for i in range(10):
+        plt.subplot(5, 2, i+1)
+        plt.imshow(np.float32(scipy.stats.skew(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+        plt.title(f"Gesture {i+1}")
+    plt.suptitle("Skewness Heatmap of Training Set")
+    plt.savefig('output.png')
+    wandb.log({"Skewness Heatmap of Training Set": wandb.Image(plt)})
+    
+    # Training set kurtosis
+    plt.figure(figsize=(15, 15))
+    for i in range(10):
+        plt.subplot(5, 2, i+1)
+        plt.imshow(np.float32(scipy.stats.kurtosis(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+        plt.title(f"Gesture {i+1}")
+    plt.suptitle("Kurtosis Heatmap of Training Set")
+    plt.savefig('output.png')
+    wandb.log({"Kurtosis Heatmap of Training Set": wandb.Image(plt)})
+    
+    # Validation set
+    plt.figure(figsize=(15, 15))
+    for i in range(10):
+        plt.subplot(5, 2, i+1)
+        plt.imshow(np.float32(np.mean(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+        plt.title(f"Gesture {i+1}")
+    plt.suptitle("Kurtosis Heatmap of Validation Set")
+    plt.savefig('output.png')
+    wandb.log({"Kurtosis Heatmap of Validation Set": wandb.Image(plt)})
+    
+    if leaveOut == 0:
+        # Test set
+        plt.figure(figsize=(15, 15))
+        for i in range(10):
+            plt.subplot(5, 2, i+1)
+            plt.imshow(np.float32(np.mean(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+            plt.title(f"Gesture {i+1}")
+        plt.suptitle("Average Heatmap of Test Set")
+        plt.savefig('output.png')
+        wandb.log({"Average Heatmap of Test Set": wandb.Image(plt)})
+        
+    # Plot the first 3 images of each gesture as well
+    # Training set
+    plt.figure(figsize=(15, 15))
+    for i in range(10):
+        for j in range(3):
+            plt.subplot(10, 3, i*3+1+j)
+            plt.imshow(np.float32(X_train[torch.argmax(Y_train, axis=1) == i][j].numpy().transpose(1, 2, 0)))
+            plt.title(f"Gesture {i+1} - Image {j+1}")
+    plt.suptitle("First 3 Train Images of Each Gesture")
+    plt.savefig('output.png')
+    wandb.log({"First 3 Train Images of Each Gesture": wandb.Image(plt)})
+    
+    # Validation set
+    plt.figure(figsize=(15, 15))
+    for i in range(10):
+        for j in range(3):
+            plt.subplot(10, 3, i*3+1+j)
+            plt.imshow(np.float32(X_validation[torch.argmax(Y_validation, axis=1) == i][j].numpy().transpose(1, 2, 0)))
+            plt.title(f"Gesture {i+1} - Image {j+1}")
+    plt.suptitle("First 3 Validation Images of Each Gesture")
+    plt.savefig('output.png')
+    wandb.log({"First 3 Validation Images of Each Gesture": wandb.Image(plt)})
+    
+    if leaveOut == 0:
+    # Test set
+        plt.figure(figsize=(15, 15))
+        for i in range(10):
+            for j in range(3):
+                plt.subplot(10, 3, i*3+1+j)
+                plt.imshow(np.float32(X_test[torch.argmax(Y_test, axis=1) == i][j].numpy().transpose(1, 2, 0)))
+                plt.title(f"Gesture {i+1} - Image {j+1}")
+        plt.suptitle("First 3 Test Images of Each Gesture")
+        plt.savefig('output.png')
+        wandb.log({"First 3 Test Images of Each Gesture": wandb.Image(plt)})
+    
 
 wandb.finish()
