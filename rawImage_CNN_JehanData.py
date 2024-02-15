@@ -1335,7 +1335,7 @@ if args.log_heatmap_images:
         plt.title(f"Gesture {i+1}")
     plt.suptitle("Kurtosis Heatmap of Validation Set")
     plt.savefig('output.png')
-    wandb.log({"Kurtosis Heatmap of Validation Set": wandb.Image(plt)})
+    wandb.log({"Kurtosis Heatmap of Subset of Validation Set": wandb.Image(plt)})
     
     if leaveOut == 0:
         # Test set
@@ -1346,7 +1346,7 @@ if args.log_heatmap_images:
             plt.title(f"Gesture {i+1}")
         plt.suptitle("Average Heatmap of Test Set")
         plt.savefig('output.png')
-        wandb.log({"Average Heatmap of Test Set": wandb.Image(plt)})
+        wandb.log({"Average Heatmap of Subset of Test Set": wandb.Image(plt)})
         
     # Plot the first 3 images of each gesture as well
     # Training set
