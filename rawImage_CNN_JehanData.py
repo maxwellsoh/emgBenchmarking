@@ -78,6 +78,7 @@ parser.add_argument('--random_initialization', type=ut_NDB2.str2bool, help='whet
 parser.add_argument('--project_name_suffix', type=str, help='project name suffix. Set to empty string by default.', default='')
 parser.add_argument('--log_heatmap_images', type=ut_NDB2.str2bool, help='whether to and log the heatmaps. Set to False by default.', default=False)
 parser.add_argument('--turn_on_spatial_heatmap', type=ut_NDB2.str2bool, help='whether to turn on spatial heatmap, may only work for HDEMG. Set to False by default.', default=False)
+parser.add_argument('--colormap', type=str, help='colormap to use for the spatial heatmap. Set to viridis by default.', default='viridis')
 
 parser.add_argument('--simclr_test', type=ut_NDB2.str2bool, help='whether to run simclr test. Set to False by default.', default=False)
 parser.add_argument('--simclr_epochs', type=int, help='number of epochs to train for simclr. Set to 5 by default.', default=5)    
@@ -125,6 +126,7 @@ print(f"The value of --random_initialization is {args.random_initialization}")
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
 print(f"The value of --log_heatmap_images is {args.log_heatmap_images}")
 print(f"The value of --turn_on_spatial_heatmap is {args.turn_on_spatial_heatmap}")
+print(f"The value of --colormap is {args.colormap}")
 
 print(f"The value of --simclr_test is {args.simclr_test}")
 print(f"The value of --simclr_epochs is {args.simclr_epochs}")
@@ -305,7 +307,7 @@ class DataAugment:
 ### Data Processing
 class DataProcessing:
     # if turn_on_rms, raw emg data -> 64x(RMS_input_windowsize) image
-    cmap = mpl.colormaps['viridis']
+    cmap = mpl.colormaps[args.colormap]
     order = list(chain.from_iterable([[[k for k in range(64)][(i+j*16+32) % 64] for j in range(4)] for i in range(16)]))
     
     def dataToImage(self, emg_sample):
@@ -832,6 +834,8 @@ if args.simsiam_test:
     wandb_runname += '-accumulate-grad-batches-' + str(args.simsiam_accumulate_grad_batches)
 if args.turn_on_spatial_heatmap:
     wandb_runname += '_spatial-heatmap'
+if args.colormap != 'viridis':
+    wandb_runname += '_colormap-' + args.colormap
 
 if args.simclr_test:
     if leaveOut != 0:
