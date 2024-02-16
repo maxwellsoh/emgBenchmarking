@@ -508,6 +508,9 @@ if leaveOut != 0:
         foldername_zarr += 'spatial_heatmap/'
     else:
         foldername_zarr += 'window_size_in_ms_' + str(window_length_in_milliseconds) + '/'
+        
+    if args.colormap != 'viridis':
+        foldername_zarr += args.colormap + '/'
     
     emg_subject_leftout = emg[leaveOut-1]
     emg_leftin = emg.copy()
