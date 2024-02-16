@@ -208,8 +208,10 @@ class DataExtract:
         if (args.turn_on_rms):
             data = data.unfold(
                     dimension=-1, 
-                    size=int(window_length_in_milliseconds/(milliseconds_in_second*RMS_input_windowsize)*sampling_frequency), # RMS window length
-                    step=int(window_length_in_milliseconds/(milliseconds_in_second*RMS_input_windowsize)*sampling_frequency)) # [SAMPLE, CHANNEL, WINDOW, RMS_WINDOW, TIME]
+                    size=int(window_length_in_milliseconds/(milliseconds_in_second*RMS_input_windowsize)*sampling_frequency), # RMS window length (TIME)
+                    step=int(window_length_in_milliseconds/(milliseconds_in_second*RMS_input_windowsize)*sampling_frequency)) # Result: [SAMPLE, CHANNEL, WINDOW, RMS_WINDOW, TIME]
+        elif (args.turn_on_spatial_heatmap):
+            data = data.unsqueeze(3) # [SAMPLE, CHANNEL, WINDOW, 1, TIME], 1 shows that only one RMS window is used per window
         else: 
             data = data.unsqueeze(3) # [SAMPLE, CHANNEL, WINDOW, 1, TIME]
 
@@ -222,6 +224,8 @@ class DataExtract:
 
     def getEMG(self, n):
         if args.turn_on_rms:
+            return torch.cat([torch.sqrt(torch.mean(self.getData(n, name) ** 2, dim=3)) for name in self.gestures], axis=0)
+        elif args.turn_on_spatial_heatmap:
             return torch.cat([torch.sqrt(torch.mean(self.getData(n, name) ** 2, dim=3)) for name in self.gestures], axis=0)
         else: 
             return torch.cat([self.getData(n, name) for name in self.gestures], axis=0).squeeze()
@@ -243,6 +247,8 @@ class DataExtract:
                 data = data.unfold(dimension=-1,
                         size=int(window_length_in_milliseconds/(milliseconds_in_second*RMS_input_windowsize)*sampling_frequency), 
                         step=int(window_length_in_milliseconds/(milliseconds_in_second*RMS_input_windowsize)*sampling_frequency))
+            elif args.turn_on_spatial_heatmap:
+                data = data.unsqueeze(3)
             else:
                 data = data.unsqueeze(3)
             numGestures += [len(data)]
@@ -298,20 +304,28 @@ class DataAugment:
 
 ### Data Processing
 class DataProcessing:
-    # raw emg data -> 64x(RMS_input_windowsize) image
+    # if turn_on_rms, raw emg data -> 64x(RMS_input_windowsize) image
     cmap = mpl.colormaps['viridis']
     order = list(chain.from_iterable([[[k for k in range(64)][(i+j*16+32) % 64] for j in range(4)] for i in range(16)]))
     
     def dataToImage(self, emg_sample):
         try:
-            emg_sample = emg_sample.squeeze()
+            emg_sample = emg_sample#.squeeze()
             emg_sample -= torch.min(emg_sample)
             emg_sample /= torch.max(emg_sample)
-
-            window_size = RMS_input_windowsize if args.turn_on_rms else window_size_in_timesteps
+            
+            if args.turn_on_rms:
+                window_size = RMS_input_windowsize
+            elif args.turn_on_spatial_heatmap:
+                window_size = 1
+            else:
+                window_size = window_size_in_timesteps
 
             emg_sample = emg_sample.view(64, window_size)
             emg_sample = torch.stack([emg_sample[i] for i in self.order])
+            if args.turn_on_spatial_heatmap:
+                emg_sample = emg_sample.view(16, 4)
+                window_size = 4
 
             # Preallocate frames array for efficiency
             frames = [None] * window_size
@@ -488,6 +502,8 @@ if leaveOut != 0:
     foldername_zarr = 'LOSOimages_zarr/JehanDataset/LOSO_subject' + str(leaveOut) + '/'
     if args.turn_on_rms:
         foldername_zarr += 'RMS_input_windowsize_' + str(RMS_input_windowsize) + '/'
+    elif args.turn_on_spatial_heatmap:
+        foldername_zarr += 'spatial_heatmap/'
     else:
         foldername_zarr += 'window_size_in_ms_' + str(window_length_in_milliseconds) + '/'
     
@@ -502,6 +518,8 @@ if leaveOut != 0:
 
     if args.turn_on_rms:
         emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*RMS_input_windowsize))))
+    elif args.turn_on_spatial_heatmap:
+        emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*1))))
     else:
         emg_scaled_subject_leftout = torch.from_numpy(standard_scalar.transform(np.array(emg_subject_leftout.view(len(emg_subject_leftout), 64*window_size_in_timesteps))))
 
@@ -551,7 +569,7 @@ if leaveOut != 0:
             print("Training images found. Training images loaded for subject", subject+1)
         else:
             print("Generating training images for subject", subject+1)
-            emg_subject = torch.from_numpy(standard_scalar.transform(np.array(emg[subject].view(len(emg[subject]), 64*RMS_input_windowsize))))
+            emg_subject = torch.from_numpy(standard_scalar.transform(np.array(emg[subject].view(len(emg[subject]), -1))))
             emg_subject = [emg_subject[i].unsqueeze(0).cpu().detach().to(torch.float16) for i in range(emg_subject.size(0))] 
             X_train_subject = torch.from_numpy(np.array(data_process.getImages_noAugment(emg_subject))
                                             .astype(np.float16)).to(torch.float16)
@@ -574,8 +592,8 @@ if leaveOut != 0:
     Y_train = np.concatenate(Y_train_all, axis=0).astype(np.float16)
     
     # Optionally convert back to PyTorch tensors if you will continue processing with PyTorch
-    X_train = torch.from_numpy(X_train).to(torch.float16).squeeze()
-    Y_train = torch.from_numpy(Y_train).to(torch.float16).squeeze()
+    X_train = torch.from_numpy(X_train).to(torch.float16)#.squeeze()
+    Y_train = torch.from_numpy(Y_train).to(torch.float16)#.squeeze()
 
     del X_train_np
     del Y_train_np
@@ -607,6 +625,10 @@ else:
         train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))).to(torch.float16) for subject in train_emg]
         val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))).to(torch.float16) for subject in val_emg]
         test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*RMS_input_windowsize))).to(torch.float16) for subject in test_emg]
+    elif args.turn_on_spatial_heatmap:
+        train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*1))).to(torch.float16) for subject in train_emg]
+        val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*1))).to(torch.float16) for subject in val_emg]
+        test_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*1))).to(torch.float16) for subject in test_emg]
     else:
         train_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))).to(torch.float16) for subject in train_emg]
         val_emg_scaled = [torch.from_numpy(standard_scalar.transform(subject.reshape(-1, 64*window_size_in_timesteps))).to(torch.float16) for subject in val_emg]
@@ -1291,8 +1313,9 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(np.mean(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(np.mean(transforms.Resize([224,224])(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
+        plt.colorbar()
     plt.suptitle("Average Heatmap of Subset of Training Set")
     plt.savefig('output.png')
     wandb.log({"Average Heatmap of Subset of Training Set": wandb.Image(plt)})
@@ -1301,7 +1324,7 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(np.var(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(np.var(transforms.Resize([224,224])(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
     plt.suptitle("Variance Heatmap of Subset of Training Set")
     plt.savefig('output.png')
@@ -1311,7 +1334,7 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(scipy.stats.skew(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(scipy.stats.skew(transforms.Resize([224,224])(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
     plt.suptitle("Skewness Heatmap of Subset of Training Set")
     plt.savefig('output.png')
@@ -1321,7 +1344,7 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(scipy.stats.kurtosis(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(scipy.stats.kurtosis(transforms.Resize([224,224])(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
     plt.suptitle("Kurtosis Heatmap of Subset of Training Set")
     plt.savefig('output.png')
@@ -1331,9 +1354,40 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(np.mean(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(np.mean(transforms.Resize([224,224])(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
-    plt.suptitle("Kurtosis Heatmap of Validation Set")
+        plt.colorbar()
+    plt.suptitle("Average Heatmap of Validation Set")
+    plt.savefig('output.png')
+    wandb.log({"Average Heatmap of Subset of Validation Set": wandb.Image(plt)})
+    
+    # Validation set variance
+    plt.figure(figsize=(15, 15))
+    for i in range(10):
+        plt.subplot(5, 2, i+1)
+        plt.imshow(np.float32(np.var(transforms.Resize([224,224])(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.title(f"Gesture {i+1}")
+    plt.suptitle("Variance Heatmap of Subset of Validation Set")
+    plt.savefig('output.png')
+    wandb.log({"Variance Heatmap of Subset of Validation Set": wandb.Image(plt)})
+    
+    # Validation set skew
+    plt.figure(figsize=(15, 15))
+    for i in range(10):
+        plt.subplot(5, 2, i+1)
+        plt.imshow(np.float32(scipy.stats.skew(transforms.Resize([224,224])(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.title(f"Gesture {i+1}")
+    plt.suptitle("Skewness Heatmap of Subset of Validation Set")
+    plt.savefig('output.png')
+    wandb.log({"Skewness Heatmap of Subset of Validation Set": wandb.Image(plt)})
+    
+    # Validation set kurtosis
+    plt.figure(figsize=(15, 15))
+    for i in range(10):
+        plt.subplot(5, 2, i+1)
+        plt.imshow(np.float32(scipy.stats.kurtosis(transforms.Resize([224,224])(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.title(f"Gesture {i+1}")
+    plt.suptitle("Kurtosis Heatmap of Subset of Validation Set")
     plt.savefig('output.png')
     wandb.log({"Kurtosis Heatmap of Subset of Validation Set": wandb.Image(plt)})
     
@@ -1342,11 +1396,43 @@ if args.log_heatmap_images:
         plt.figure(figsize=(15, 15))
         for i in range(10):
             plt.subplot(5, 2, i+1)
-            plt.imshow(np.float32(np.mean(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average].numpy(), axis=0).transpose(1, 2, 0)))
+            plt.imshow(np.float32(np.mean(transforms.Resize([224,224])(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
             plt.title(f"Gesture {i+1}")
+            plt.colorbar()
         plt.suptitle("Average Heatmap of Test Set")
         plt.savefig('output.png')
         wandb.log({"Average Heatmap of Subset of Test Set": wandb.Image(plt)})
+        
+        # test set variance
+        plt.figure(figsize=(15, 15))
+        for i in range(10):
+            plt.subplot(5, 2, i+1)
+            plt.imshow(np.float32(np.var(transforms.Resize([224,224])(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+            plt.title(f"Gesture {i+1}")
+        plt.suptitle("Variance Heatmap of Subset of test Set")
+        plt.savefig('output.png')
+        wandb.log({"Variance Heatmap of Subset of test Set": wandb.Image(plt)})
+        
+        # test set skew
+        plt.figure(figsize=(15, 15))
+        for i in range(10):
+            plt.subplot(5, 2, i+1)
+            plt.imshow(np.float32(scipy.stats.skew(transforms.Resize([224,224])(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+            plt.title(f"Gesture {i+1}")
+            plt.colorbar()
+        plt.suptitle("Skewness Heatmap of Subset of test Set")
+        plt.savefig('output.png')
+        wandb.log({"Skewness Heatmap of Subset of test Set": wandb.Image(plt)})
+        
+        # test set kurtosis
+        plt.figure(figsize=(15, 15))
+        for i in range(10):
+            plt.subplot(5, 2, i+1)
+            plt.imshow(np.float32(scipy.stats.kurtosis(transforms.Resize([224,224])(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+            plt.title(f"Gesture {i+1}")
+        plt.suptitle("Kurtosis Heatmap of Subset of test Set")
+        plt.savefig('output.png')
+        wandb.log({"Kurtosis Heatmap of Subset of test Set": wandb.Image(plt)})
         
     # Plot the first 3 images of each gesture as well
     # Training set
@@ -1354,8 +1440,9 @@ if args.log_heatmap_images:
     for i in range(10):
         for j in range(3):
             plt.subplot(10, 3, i*3+1+j)
-            plt.imshow(np.float32(X_train[torch.argmax(Y_train, axis=1) == i][j].numpy().transpose(1, 2, 0)))
+            plt.imshow(np.float32(transforms.Resize([224,224])(X_train[torch.argmax(Y_train, axis=1) == i][j]).numpy().transpose(1, 2, 0)))
             plt.title(f"Gesture {i+1} - Image {j+1}")
+            plt.colorbar()
     plt.suptitle("First 3 Train Images of Each Gesture")
     plt.savefig('output.png')
     wandb.log({"First 3 Train Images of Each Gesture": wandb.Image(plt)})
@@ -1365,8 +1452,9 @@ if args.log_heatmap_images:
     for i in range(10):
         for j in range(3):
             plt.subplot(10, 3, i*3+1+j)
-            plt.imshow(np.float32(X_validation[torch.argmax(Y_validation, axis=1) == i][j].numpy().transpose(1, 2, 0)))
+            plt.imshow(np.float32(transforms.Resize([224,224])(X_validation[torch.argmax(Y_validation, axis=1) == i][j]).numpy().transpose(1, 2, 0)))
             plt.title(f"Gesture {i+1} - Image {j+1}")
+            plt.colorbar()
     plt.suptitle("First 3 Validation Images of Each Gesture")
     plt.savefig('output.png')
     wandb.log({"First 3 Validation Images of Each Gesture": wandb.Image(plt)})
@@ -1377,8 +1465,9 @@ if args.log_heatmap_images:
         for i in range(10):
             for j in range(3):
                 plt.subplot(10, 3, i*3+1+j)
-                plt.imshow(np.float32(X_test[torch.argmax(Y_test, axis=1) == i][j].numpy().transpose(1, 2, 0)))
+                plt.imshow(np.float32(transforms.Resize([224,224])(X_test[torch.argmax(Y_test, axis=1) == i][j]).numpy().transpose(1, 2, 0)))
                 plt.title(f"Gesture {i+1} - Image {j+1}")
+                plt.colorbar()
         plt.suptitle("First 3 Test Images of Each Gesture")
         plt.savefig('output.png')
         wandb.log({"First 3 Test Images of Each Gesture": wandb.Image(plt)})
