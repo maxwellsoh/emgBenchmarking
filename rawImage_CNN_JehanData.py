@@ -40,6 +40,7 @@ from concurrent.futures import ProcessPoolExecutor
 from joblib import Parallel, delayed
 from collections import OrderedDict
 import copy
+from scipy.signal import spectrogram
 
 from pl_bolts.models.self_supervised import SimCLR, Moco_v2, SimSiam, SwAV  
 from pl_bolts.transforms.self_supervised.simclr_transforms import SimCLRTrainDataTransform, SimCLREvalDataTransform
@@ -79,6 +80,7 @@ parser.add_argument('--project_name_suffix', type=str, help='project name suffix
 parser.add_argument('--log_heatmap_images', type=ut_NDB2.str2bool, help='whether to and log the heatmaps. Set to False by default.', default=False)
 parser.add_argument('--turn_on_spatial_heatmap', type=ut_NDB2.str2bool, help='whether to turn on spatial heatmap, may only work for HDEMG. Set to False by default.', default=False)
 parser.add_argument('--colormap', type=str, help='colormap to use for the spatial heatmap. Set to viridis by default.', default='viridis')
+parser.add_argument('--turn_on_spectrogram', type=ut_NDB2.str2bool, help='whether to turn on spectrogram. Set to False by default.', default=False)
 
 parser.add_argument('--simclr_test', type=ut_NDB2.str2bool, help='whether to run simclr test. Set to False by default.', default=False)
 parser.add_argument('--simclr_epochs', type=int, help='number of epochs to train for simclr. Set to 5 by default.', default=5)    
@@ -127,6 +129,7 @@ print(f"The value of --project_name_suffix is {args.project_name_suffix}")
 print(f"The value of --log_heatmap_images is {args.log_heatmap_images}")
 print(f"The value of --turn_on_spatial_heatmap is {args.turn_on_spatial_heatmap}")
 print(f"The value of --colormap is {args.colormap}")
+print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
 
 print(f"The value of --simclr_test is {args.simclr_test}")
 print(f"The value of --simclr_epochs is {args.simclr_epochs}")
@@ -328,16 +331,27 @@ class DataProcessing:
             if args.turn_on_spatial_heatmap:
                 emg_sample = emg_sample.view(16, 4)
                 window_size = 4
+                
+            elif args.turn_on_spectrogram:
+                spectrogram_window_size = 50
+                frequencies, times, Sxx = spectrogram(emg_sample.to(torch.float16), fs=sampling_frequency, nperseg=spectrogram_window_size, noverlap=0.5*spectrogram_window_size)
+                Sxx_dB = 10 * np.log10(Sxx + 1e-6) # small constant added to avoid log(0)
+                emg_sample = torch.tensor(Sxx_dB.reshape(-1, Sxx_dB.shape[2]))
+                window_size = emg_sample.shape[1]
+                emg_sample -= torch.min(emg_sample)
+                emg_sample /= torch.max(emg_sample)
 
             # Preallocate frames array for efficiency
             frames = [None] * window_size
             for i in range(window_size):
                 frame = np.array(list(map(lambda x: self.cmap(x[i]), emg_sample.numpy())), dtype=np.float32)
                 frames[i] = np.transpose(frame, axes=[1, 0])[:3]
+                
+            image_height = width if not args.turn_on_spectrogram else min(emg_sample.shape[0], 224)
 
             image = torch.from_numpy(np.transpose(np.stack(frames), axes=[1, 2, 0]))
             norm_transform = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            resize_transform = transforms.Resize(size=[width, window_size], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+            resize_transform = transforms.Resize(size=[image_height, window_size], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
 
             image = resize_transform(norm_transform(image))
 
@@ -506,6 +520,8 @@ if leaveOut != 0:
         foldername_zarr += 'RMS_input_windowsize_' + str(RMS_input_windowsize) + '/'
     elif args.turn_on_spatial_heatmap:
         foldername_zarr += 'spatial_heatmap/'
+    elif args.turn_on_spectrogram:
+        foldername_zarr += 'spectrogram/'
     else:
         foldername_zarr += 'window_size_in_ms_' + str(window_length_in_milliseconds) + '/'
         
@@ -837,6 +853,8 @@ if args.simsiam_test:
     wandb_runname += '-accumulate-grad-batches-' + str(args.simsiam_accumulate_grad_batches)
 if args.turn_on_spatial_heatmap:
     wandb_runname += '_spatial-heatmap'
+if args.turn_on_spectrogram:
+    wandb_runname += '_spectrogram'
 if args.colormap != 'viridis':
     wandb_runname += '_colormap-' + args.colormap
 
