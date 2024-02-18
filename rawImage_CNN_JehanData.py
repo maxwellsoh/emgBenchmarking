@@ -1331,14 +1331,47 @@ if (leaveOut == 0):
     plt.savefig('output.png')
     wandb.log({"Confusion Matrix": wandb.Image(plt)})
     
+# Custom transform to unnormalize an imageclass UnNormalize(object):
+class UnNormalize(object):
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, tensor):
+        """
+        Args:
+            tensor (Tensor): Tensor image of size (C, H, W) or (Samples, C, H, W) to be unnormalized.
+        Returns:
+            Tensor: UnNormalized image.
+        """
+        # Convert mean and std to tensors
+        mean = torch.as_tensor(self.mean, dtype=tensor.dtype, device=tensor.device)
+        std = torch.as_tensor(self.std, dtype=tensor.dtype, device=tensor.device)
+        
+        # Reshape mean and std to match tensor shape
+        if tensor.dim() == 4:  # Batch of images of shape (Samples, C, H, W)
+            mean = mean[:, None, None]
+            std = std[:, None, None]
+        elif tensor.dim() == 3:  # Single image of shape (C, H, W)
+            mean = mean[:, None, None]
+            std = std[:, None, None]
+        else:
+            raise ValueError("tensor is not of expected shape (C, H, W) or (Samples, C, H, W)")
+        
+        tensor.mul_(std).add_(mean)  # The inverse of normalization formula
+        return tensor
+
 if args.log_heatmap_images:
+    # imagenet means and stds
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
     # Plot the average heatmap of the first 15 images of the training, validation, and test sets for each gesture
     number_of_images_to_average = 15
     # Training set
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(np.mean(transforms.Resize([224,224])(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(np.mean(transforms.Resize([224,224])(UnNormalize(mean, std)(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
         plt.colorbar()
     plt.suptitle("Average Heatmap of Subset of Training Set")
@@ -1349,7 +1382,7 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(np.var(transforms.Resize([224,224])(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(np.var(transforms.Resize([224,224])(UnNormalize(mean, std)(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
     plt.suptitle("Variance Heatmap of Subset of Training Set")
     plt.savefig('output.png')
@@ -1359,7 +1392,7 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(scipy.stats.skew(transforms.Resize([224,224])(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(scipy.stats.skew(transforms.Resize([224,224])(UnNormalize(mean, std)(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
     plt.suptitle("Skewness Heatmap of Subset of Training Set")
     plt.savefig('output.png')
@@ -1369,7 +1402,7 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(scipy.stats.kurtosis(transforms.Resize([224,224])(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(scipy.stats.kurtosis(transforms.Resize([224,224])(UnNormalize(mean, std)(X_train[torch.argmax(Y_train, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
     plt.suptitle("Kurtosis Heatmap of Subset of Training Set")
     plt.savefig('output.png')
@@ -1379,7 +1412,7 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(np.mean(transforms.Resize([224,224])(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(np.mean(transforms.Resize([224,224])(UnNormalize(mean, std)(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
         plt.colorbar()
     plt.suptitle("Average Heatmap of Validation Set")
@@ -1390,7 +1423,7 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(np.var(transforms.Resize([224,224])(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(np.var(transforms.Resize([224,224])(UnNormalize(mean, std)(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
     plt.suptitle("Variance Heatmap of Subset of Validation Set")
     plt.savefig('output.png')
@@ -1400,7 +1433,7 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(scipy.stats.skew(transforms.Resize([224,224])(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(scipy.stats.skew(transforms.Resize([224,224])(UnNormalize(mean, std)(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
     plt.suptitle("Skewness Heatmap of Subset of Validation Set")
     plt.savefig('output.png')
@@ -1410,7 +1443,7 @@ if args.log_heatmap_images:
     plt.figure(figsize=(15, 15))
     for i in range(10):
         plt.subplot(5, 2, i+1)
-        plt.imshow(np.float32(scipy.stats.kurtosis(transforms.Resize([224,224])(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+        plt.imshow(np.float32(scipy.stats.kurtosis(transforms.Resize([224,224])(UnNormalize(mean, std)(X_validation[torch.argmax(Y_validation, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
         plt.title(f"Gesture {i+1}")
     plt.suptitle("Kurtosis Heatmap of Subset of Validation Set")
     plt.savefig('output.png')
@@ -1421,7 +1454,7 @@ if args.log_heatmap_images:
         plt.figure(figsize=(15, 15))
         for i in range(10):
             plt.subplot(5, 2, i+1)
-            plt.imshow(np.float32(np.mean(transforms.Resize([224,224])(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+            plt.imshow(np.float32(np.mean(transforms.Resize([224,224])(UnNormalize(mean, std)(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
             plt.title(f"Gesture {i+1}")
             plt.colorbar()
         plt.suptitle("Average Heatmap of Test Set")
@@ -1432,7 +1465,7 @@ if args.log_heatmap_images:
         plt.figure(figsize=(15, 15))
         for i in range(10):
             plt.subplot(5, 2, i+1)
-            plt.imshow(np.float32(np.var(transforms.Resize([224,224])(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+            plt.imshow(np.float32(np.var(transforms.Resize([224,224])(UnNormalize(mean, std)(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
             plt.title(f"Gesture {i+1}")
         plt.suptitle("Variance Heatmap of Subset of test Set")
         plt.savefig('output.png')
@@ -1442,7 +1475,7 @@ if args.log_heatmap_images:
         plt.figure(figsize=(15, 15))
         for i in range(10):
             plt.subplot(5, 2, i+1)
-            plt.imshow(np.float32(scipy.stats.skew(transforms.Resize([224,224])(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+            plt.imshow(np.float32(scipy.stats.skew(transforms.Resize([224,224])(UnNormalize(mean, std)(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
             plt.title(f"Gesture {i+1}")
             plt.colorbar()
         plt.suptitle("Skewness Heatmap of Subset of test Set")
@@ -1453,7 +1486,7 @@ if args.log_heatmap_images:
         plt.figure(figsize=(15, 15))
         for i in range(10):
             plt.subplot(5, 2, i+1)
-            plt.imshow(np.float32(scipy.stats.kurtosis(transforms.Resize([224,224])(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average]).numpy(), axis=0).transpose(1, 2, 0)))
+            plt.imshow(np.float32(scipy.stats.kurtosis(transforms.Resize([224,224])(UnNormalize(mean, std)(X_test[torch.argmax(Y_test, axis=1) == i][:number_of_images_to_average])).numpy(), axis=0).transpose(1, 2, 0)))
             plt.title(f"Gesture {i+1}")
         plt.suptitle("Kurtosis Heatmap of Subset of test Set")
         plt.savefig('output.png')
@@ -1465,7 +1498,7 @@ if args.log_heatmap_images:
     for i in range(10):
         for j in range(3):
             plt.subplot(10, 3, i*3+1+j)
-            plt.imshow(np.float32(transforms.Resize([224,224])(X_train[torch.argmax(Y_train, axis=1) == i][j]).numpy().transpose(1, 2, 0)))
+            plt.imshow(np.float32(transforms.Resize([224,224])(UnNormalize(mean, std)(X_train[torch.argmax(Y_train, axis=1) == i][j])).numpy().transpose(1, 2, 0)))
             plt.title(f"Gesture {i+1} - Image {j+1}")
             plt.colorbar()
     plt.suptitle("First 3 Train Images of Each Gesture")
@@ -1477,7 +1510,7 @@ if args.log_heatmap_images:
     for i in range(10):
         for j in range(3):
             plt.subplot(10, 3, i*3+1+j)
-            plt.imshow(np.float32(transforms.Resize([224,224])(X_validation[torch.argmax(Y_validation, axis=1) == i][j]).numpy().transpose(1, 2, 0)))
+            plt.imshow(np.float32(transforms.Resize([224,224])(UnNormalize(mean, std)(X_validation[torch.argmax(Y_validation, axis=1) == i][j])).numpy().transpose(1, 2, 0)))
             plt.title(f"Gesture {i+1} - Image {j+1}")
             plt.colorbar()
     plt.suptitle("First 3 Validation Images of Each Gesture")
@@ -1490,7 +1523,7 @@ if args.log_heatmap_images:
         for i in range(10):
             for j in range(3):
                 plt.subplot(10, 3, i*3+1+j)
-                plt.imshow(np.float32(transforms.Resize([224,224])(X_test[torch.argmax(Y_test, axis=1) == i][j]).numpy().transpose(1, 2, 0)))
+                plt.imshow(np.float32(transforms.Resize([224,224])(UnNormalize(mean, std)(X_test[torch.argmax(Y_test, axis=1) == i][j])).numpy().transpose(1, 2, 0)))
                 plt.title(f"Gesture {i+1} - Image {j+1}")
                 plt.colorbar()
         plt.suptitle("First 3 Test Images of Each Gesture")
