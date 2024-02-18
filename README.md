@@ -6,7 +6,7 @@ Install a version of Miniforge distribution `>= Miniforge3-22.3.1-0`, which will
 
 To save the virtual environment, run
 ```console
-$ mamba env export > environment.yml
+$ mamba env export --no-builds > environment.yml
 $ pip list --format=freeze > requirements.txt
 ```
 
