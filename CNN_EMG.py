@@ -59,6 +59,8 @@ parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows t
 parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 # Add argument for model to use
 parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
+# Add argument for project suffix
+parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -108,6 +110,7 @@ if args.turn_on_rms:
     print(f"The value of --num_rms_windows is {args.num_rms_windows}")
 if args.turn_on_magnitude:
     print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
+print(f"The value of --project_name_suffix is {args.project_name_suffix}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -320,7 +323,7 @@ else:
     print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
 
 model_name = args.model
-if args.model == 'resnet50':
+if args.model == 'resnet50_custom':
     model = resnet50(weights=ResNet50_Weights.DEFAULT)
     model = nn.Sequential(*list(model.children())[:-4])
     # #model = nn.Sequential(*list(model.children())[:-4])
@@ -334,6 +337,11 @@ if args.model == 'resnet50':
     model.add_module('dropout1', nn.Dropout(dropout))
     model.add_module('fc3', nn.Linear(512, utils.numGestures))
     model.add_module('softmax', nn.Softmax(dim=1))
+elif args.model == 'resnet50':
+    model = resnet50(weights=ResNet50_Weights.DEFAULT)
+    # Replace the last fully connected layer
+    num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
+    model.fc = nn.Linear(num_ftrs, utils.numGestures)  # Replace with a new linear layer
 elif args.model == 'convnext_tiny_custom':
     # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
     class LayerNorm2d(nn.LayerNorm):
@@ -440,8 +448,9 @@ if (leaveOut == 0):
         project_name += '_heldout'
 else:
     project_name += '_LOSO'
+project_name += args.project_name_suffix
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
+run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
 
 

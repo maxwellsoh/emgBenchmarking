@@ -95,15 +95,18 @@ def filter(emg):
 
 # not needed for Ozdemir
 def getRestim (n):
+    assert n >= 1 and n <= num_subjects
     # read hdf5 file 
     restim = pd.read_hdf(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}_E2.hdf5')
     restim = torch.tensor(restim.values)
     return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
 def getEMG (n):
-    file = h5py.File('DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
+    assert n >= 1 and n <= num_subjects
+    file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     emg = []
     for gesture in gesture_labels:
+        assert "Gesture" + gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
         data = filter(torch.from_numpy(np.array(file["Gesture" + gesture]))).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
         emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)))
     return torch.cat(emg, dim=0)
