@@ -53,9 +53,7 @@ parser.add_argument('--turn_on_cyclical_lr', type=utils.str2bool, help='whether 
 parser.add_argument('--turn_on_cosine_annealing', type=utils.str2bool, help='whether or not to use cosine annealing with warm restarts. Set to False by default.', default=False)
 # Add argument for whether or not to use RMS
 parser.add_argument('--turn_on_rms', type=utils.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
-# Add argument for number of RMS windows
-parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows to use. Set to 10 by default.', default=10)
-# Add argument for RMS input window size
+# Add argument for RMS input window size (resulting feature dimension to classifier)
 parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
 # Add argument for whether or not to concatenate magnitude image
 parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
@@ -119,7 +117,7 @@ if args.turn_on_cyclical_lr and args.turn_on_cosine_annealing:
     exit()
 if args.turn_on_rms:
     print(f"The value of --turn_on_rms is {args.turn_on_rms}")
-    print(f"The value of --num_rms_windows is {args.num_rms_windows}")
+    print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
 if args.turn_on_magnitude:
     print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
@@ -289,11 +287,14 @@ else: # Running LOSO
 data = []
 
 # add tqdm to show progress bar
+print("Width of EMG data: ", width)
+print("Length of EMG data: ", length)
+print("Width divided by rms_input_windowsize: ", width // args.rms_input_windowsize)
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    data += [utils.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.num_rms_windows, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
+    data += [utils.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=width // args.rms_input_windowsize, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
 
 print("------------------------------------------------------------------------------------------------------------------------")
-print("NOTE: The width 224 is natively used in Resnet50, height is currently integer  multiples of number of electrode channels")
+print("NOTE: The width 224 is natively used in Resnet50, height is currently integer multiples of number of electrode channels ")
 print("------------------------------------------------------------------------------------------------------------------------")
 if leaveOut == 0:
     combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
@@ -446,7 +447,7 @@ if args.turn_on_cyclical_lr:
 if args.turn_on_cosine_annealing: 
     wandb_runname += '_cosine-annealing'
 if args.turn_on_rms:
-    wandb_runname += '_rms-windows-'+str(args.num_rms_windows)
+    wandb_runname += '_rms-windows-'+str(args.rms_input_windowsize)
 if args.turn_on_magnitude:  
     wandb_runname += '_magnitude'
 if args.leftout_subject != 0:
