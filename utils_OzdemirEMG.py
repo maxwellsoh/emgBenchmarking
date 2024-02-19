@@ -16,7 +16,6 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import h5py
 
-numGestures = 10
 fs = 2000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
@@ -25,7 +24,10 @@ numElectrodes = 4
 num_subjects = 40
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
-gesture_labels = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
+gesture_labels_partial = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction'] 
+gesture_labels_full = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
+gesture_labels = gesture_labels_full
+numGestures = len(gesture_labels)
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -113,10 +115,11 @@ def getEMG (n):
 
 # size of 4800 assumes 250 ms window
 def getLabels (n):
-    labels = np.zeros((4800, numGestures))
-    for i in range(480):
+    timesteps_for_one_gesture = 480
+    labels = np.zeros((timesteps_for_one_gesture*numGestures, numGestures))
+    for i in range(timesteps_for_one_gesture):
         for j in range(numGestures):
-            labels[j * 480 + i][j] = 1.0
+            labels[j * timesteps_for_one_gesture + i][j] = 1.0
     return labels
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
