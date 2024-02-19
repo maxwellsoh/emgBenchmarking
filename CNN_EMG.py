@@ -61,6 +61,8 @@ parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or
 parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
 # Add argument for project suffix
 parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
+# Add argument for full or partial dataset for Ozdemir EMG dataset
+parser.add_argument('--full_dataset_ozdemir', type=utils.str2bool, help='whether or not to use the full dataset for Ozdemir EMG Dataset. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -83,6 +85,14 @@ elif (args.dataset == "ninapro-db5"):
 else:
     print(f"The dataset being tested is OzdemirEMG")
     project_name = 'emg_benchmarking_ozdemir'
+    if args.full_dataset_ozdemir:
+        print(f"Using the full dataset for Ozdemir EMG")
+        utils.gesture_labels = utils.gesture_labels_full
+        utils.numGestures = len(utils.gesture_labels)
+    else: 
+        print(f"Using the partial dataset for Ozdemir EMG")
+        utils.gesture_labels = utils.gesture_labels_partial
+        utils.numGestures = len(utils.gesture_labels)
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
@@ -440,6 +450,11 @@ if args.turn_on_magnitude:
 if args.leftout_subject != 0:
     wandb_runname += '_LOSO-'+str(args.leftout_subject)
 wandb_runname += '_' + model_name
+if args.dataset == "OzdemirEMG":
+    if args.full_dataset_ozdemir:
+        wandb_runname += '_full-dataset'
+    else:
+        wandb_runname += '_partial-dataset'
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
