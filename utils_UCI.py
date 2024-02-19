@@ -91,16 +91,24 @@ def filter(emg):
 # not needed for Ozdemir
 def getRestim (n):
     restim = []
+    n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
-        data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-        restim.append(data[:, -1][balance(data[:, -1])])
+        try:
+            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+            restim.append(data[:, -1][balance(data[:, -1])])
+        except:
+            print("Error reading file", file, "Subject", n)
     return torch.cat(restim, dim=0)
 
 def getEMG (n):
     emg = []
+    n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
-        data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-        emg.append(data[:, :-1][balance(data[:, -1])])
+        try: 
+            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+            emg.append(data[:, :-1][balance(data[:, -1])])
+        except:
+            print("Error reading file", file, "Subject", n)
     return torch.cat(emg, dim=0)
 
 def getLabels (n):

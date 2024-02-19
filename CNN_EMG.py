@@ -55,6 +55,8 @@ parser.add_argument('--turn_on_cosine_annealing', type=utils.str2bool, help='whe
 parser.add_argument('--turn_on_rms', type=utils.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
 # Add argument for number of RMS windows
 parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows to use. Set to 10 by default.', default=10)
+# Add argument for RMS input window size
+parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
 # Add argument for whether or not to concatenate magnitude image
 parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 # Add argument for model to use
