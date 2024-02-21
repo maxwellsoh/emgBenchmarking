@@ -289,9 +289,8 @@ data = []
 # add tqdm to show progress bar
 print("Width of EMG data: ", width)
 print("Length of EMG data: ", length)
-print("Width divided by rms_input_windowsize: ", width // args.rms_input_windowsize)
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    data += [utils.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=width // args.rms_input_windowsize, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
+    data += [utils.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
 
 print("------------------------------------------------------------------------------------------------------------------------")
 print("NOTE: The width 224 is natively used in Resnet50, height is currently integer multiples of number of electrode channels ")

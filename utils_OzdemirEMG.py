@@ -273,13 +273,13 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
         gesture_indices = np.where(true_np == i)[0]
 
         # Select and denormalize only the required images
-        gesture_images = denormalize(image_data[gesture_indices]).cpu().detach().numpy()
+        gesture_images = denormalize(transforms.Resize((224,224))(image_data[gesture_indices])).cpu().detach().numpy()
         average_images.append(np.mean(gesture_images, axis=0))
 
     average_images = np.array(average_images)
-
+                    
     # Plot average image of each gesture
-    fig, axs = plt.subplots(2, 9, figsize=(10, 5))
+    fig, axs = plt.subplots(2, 9, figsize=(10, 10))
     for i in range(numGestures):
         axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])
@@ -302,7 +302,7 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     total_gestures = numGestures  # Replace with the actual number of gestures
 
     # Create subplots
-    fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))
+    fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 20))
 
     print(f"Plotting first fifteen {partition_name} images...")
     for i in range(total_gestures):
@@ -310,7 +310,7 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
         gesture_indices = np.where(true_np == i)[0][:rows_per_gesture]
         
         # Select and denormalize only the required images
-        gesture_images = denormalize(image_data[gesture_indices]).cpu().detach().numpy()
+        gesture_images = denormalize(transforms.Resize((224,224))(image_data[gesture_indices])).cpu().detach().numpy()
 
         for j in range(len(gesture_images)):  # len(gesture_images) is no more than rows_per_gesture
             ax = axs[j, i]
