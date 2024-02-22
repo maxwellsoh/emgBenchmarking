@@ -15,6 +15,7 @@ import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import h5py
+from scipy.signal import spectrogram
 
 fs = 2000 #Hz
 wLen = 250 # ms
@@ -122,6 +123,37 @@ def getLabels (n):
             labels[j * timesteps_for_one_gesture + i][j] = 1.0
     return labels
 
+def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
+    spectrogram_window_size = 50
+    emg_sample_unflattened = data.reshape(numElectrodes, -1)
+    frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=0.5*spectrogram_window_size)
+    Sxx_dB = 10 * np.log10(Sxx + 1e-6) # small constant added to avoid log(0)
+    emg_sample = torch.from_numpy(Sxx_dB)
+    emg_sample -= torch.min(emg_sample)
+    emg_sample /= torch.max(emg_sample)
+    emg_sample = emg_sample.reshape(emg_sample.shape[0]*emg_sample.shape[1], emg_sample.shape[2])
+    data = emg_sample
+
+    data_converted = cmap(data)
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+    
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp between 0 and 1 using torch.clamp
+    image_clamped = torch.clamp(image_resized, 0, 1)
+
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    # Since no split occurs, we don't need to concatenate halves back together
+    final_image = image_normalized.numpy().astype(np.float32)
+
+    return final_image
+
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
     data = (data - global_min) / (global_max - global_min)
@@ -177,7 +209,8 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None):
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False,
+              global_min=None, global_max=None):
 
     emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
     # Use RMS preprocessing
@@ -209,6 +242,12 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
             images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
             images_magnitude = images_async.get()
         images = np.concatenate((images, images_magnitude), axis=2)
+
+    elif turn_on_spectrogram:
+        with multiprocessing.Pool(processes=5) as pool:
+            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+            images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
+            images_spectrogram = images_async.get()
     
     return images
 

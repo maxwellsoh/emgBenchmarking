@@ -63,6 +63,10 @@ parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tin
 parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
 # Add argument for full or partial dataset for Ozdemir EMG dataset
 parser.add_argument('--full_dataset_ozdemir', type=utils.str2bool, help='whether or not to use the full dataset for Ozdemir EMG Dataset. Set to False by default.', default=False)
+# Add argument for using spectrogram transform
+parser.add_argument('--turn_on_spectrogram', type=utils.str2bool, help='whether or not to use spectrogram transform. Set to False by default.', default=False)
+# Add argument for using cwt
+parser.add_argument('--turn_on_cwt', type=utils.str2bool, help='whether or not to use cwt. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -121,6 +125,8 @@ if args.turn_on_rms:
 if args.turn_on_magnitude:
     print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
+print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
+print(f"The value of --turn_on_cwt is {args.turn_on_cwt}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -290,7 +296,9 @@ data = []
 print("Width of EMG data: ", width)
 print("Length of EMG data: ", length)
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    data += [utils.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
+    data += [utils.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
+                             turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max, 
+                             turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt)]
 
 print("------------------------------------------------------------------------------------------------------------------------")
 print("NOTE: The width 224 is natively used in Resnet50, height is currently integer multiples of number of electrode channels ")
