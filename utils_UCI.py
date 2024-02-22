@@ -115,6 +115,53 @@ def getEMG (n):
 def getLabels (n):
     return contract(getRestim(n))
 
+def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
+    emg_sample = data
+    # Convert EMG sample to numpy array for CWT computation
+    emg_sample_np = emg_sample.astype(np.float16).flatten()
+    highest_cwt_scale = 31
+    downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
+    scales = np.arange(1, highest_cwt_scale)  
+    wavelet = 'cmor1.5-1.0'  # Complex Morlet wavelet; adjust as needed
+    # Perform Continuous Wavelet Transform (CWT)
+    # Note: PyWavelets returns scales and coeffs (coefficients)
+    coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs)
+    coefficients_dB = 10 * np.log10(np.abs(coefficients) + 1e-6)  # Adding a small constant to avoid log(0)
+    # Convert back to PyTorch tensor and reshape
+    emg_sample = torch.tensor(coefficients_dB).float().reshape(-1, coefficients_dB.shape[-1])
+    # Normalization
+    emg_sample -= torch.min(emg_sample)
+    emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
+    blocks = emg_sample.reshape(highest_cwt_scale-1, numElectrodes, -1)
+    emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale-1), -1)
+        
+    # Update 'window_size' if necessary
+    window_size = emg_sample.shape[1]
+
+    emg_sample -= torch.min(emg_sample)
+    emg_sample /= torch.max(emg_sample)
+    data = emg_sample
+
+    data_converted = cmap(data)
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+    
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp between 0 and 1 using torch.clamp
+    image_clamped = torch.clamp(image_resized, 0, 1)
+
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    # Since no split occurs, we don't need to concatenate halves back together
+    final_image = image_normalized.numpy().astype(np.float32)
+
+    return final_image
+
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
     spectrogram_window_size = 50
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
