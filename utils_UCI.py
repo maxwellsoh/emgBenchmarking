@@ -188,7 +188,6 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     image_normalized = normalize(image_clamped)
 
-    # Since no split occurs, we don't need to concatenate halves back together
     final_image = image_normalized.numpy().astype(np.float32)
 
     return final_image
@@ -285,6 +284,14 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
             args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
             images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
             images_spectrogram = images_async.get()
+        images = images_spectrogram
+    
+    elif turn_on_cwt:
+        with multiprocessing.Pool(processes=5) as pool:
+            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+            images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
+            images_cwt = images_async.get()
+        images = images_cwt
     
     return images
 

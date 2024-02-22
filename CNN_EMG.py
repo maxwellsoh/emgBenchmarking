@@ -465,6 +465,10 @@ if args.dataset == "OzdemirEMG":
         wandb_runname += '_full-dataset'
     else:
         wandb_runname += '_partial-dataset'
+if args.turn_on_spectrogram:
+    wandb_runname += '_spectrogram'
+if args.turn_on_cwt:
+    wandb_runname += '_cwt'
 
 if (leaveOut == 0):
     if args.turn_on_kfold:

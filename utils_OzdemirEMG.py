@@ -296,13 +296,15 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
             args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
             images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
             images_spectrogram = images_async.get()
+        images = images_spectrogram
 
     elif turn_on_cwt:
         with multiprocessing.Pool(processes=5) as pool:
             args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
             images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
             images_cwt = images_async.get()
-    
+        images = images_cwt
+        
     return images
 
 def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):
