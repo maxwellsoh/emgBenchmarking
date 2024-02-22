@@ -84,6 +84,7 @@ parser.add_argument('--turn_on_spatial_heatmap', type=ut_NDB2.str2bool, help='wh
 parser.add_argument('--colormap', type=str, help='colormap to use for the spatial heatmap. Set to viridis by default.', default='viridis')
 parser.add_argument('--turn_on_spectrogram', type=ut_NDB2.str2bool, help='whether to turn on spectrogram. Set to False by default.', default=False)
 parser.add_argument('--turn_on_cwt', type=ut_NDB2.str2bool, help='whether to turn on continuous wavelet transform. Set to False by default.', default=False)
+parser.add_argument('--turn_on_electrode_rows_for_time_frequency_transforms', type=ut_NDB2.str2bool, help='whether to turn on electrode rows for time-frequency transforms. Set to False by default.', default=False)
 
 parser.add_argument('--simclr_test', type=ut_NDB2.str2bool, help='whether to run simclr test. Set to False by default.', default=False)
 parser.add_argument('--simclr_epochs', type=int, help='number of epochs to train for simclr. Set to 5 by default.', default=5)    
@@ -134,6 +135,7 @@ print(f"The value of --turn_on_spatial_heatmap is {args.turn_on_spatial_heatmap}
 print(f"The value of --colormap is {args.colormap}")
 print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
 print(f"The value of --turn_on_cwt is {args.turn_on_cwt}")
+print(f"The value of --turn_on_electrode_rows_for_time_frequency_transforms is {args.turn_on_electrode_rows_for_time_frequency_transforms}")
 
 print(f"The value of --simclr_test is {args.simclr_test}")
 print(f"The value of --simclr_epochs is {args.simclr_epochs}")
@@ -338,16 +340,21 @@ class DataProcessing:
                 
             elif args.turn_on_spectrogram:
                 spectrogram_window_size = 50
-                frequencies, times, Sxx = spectrogram(emg_sample.to(torch.float16), fs=sampling_frequency, nperseg=spectrogram_window_size, noverlap=0.5*spectrogram_window_size)
+                emg_sample_flattened = emg_sample.flatten()
+                frequencies, times, Sxx = spectrogram(emg_sample_flattened.to(torch.float16), fs=sampling_frequency, nperseg=spectrogram_window_size, noverlap=0.5*spectrogram_window_size)
                 Sxx_dB = 10 * np.log10(Sxx + 1e-6) # small constant added to avoid log(0)
-                emg_sample = torch.tensor(Sxx_dB.reshape(-1, Sxx_dB.shape[2]))
+                if args.turn_on_electrode_rows_for_time_frequency_transforms:
+                    blocks = Sxx_dB.reshape(-1, 64, Sxx_dB.shape[2])
+                    emg_sample = blocks.transpose(1,0).reshape(64, -1)
+                else: 
+                    emg_sample = torch.tensor(Sxx_dB.reshape(-1, Sxx_dB.shape[2]))
                 window_size = emg_sample.shape[1]
                 emg_sample -= torch.min(emg_sample)
                 emg_sample /= torch.max(emg_sample)
                 
             elif args.turn_on_cwt:
                 # Convert EMG sample to numpy array for CWT computation
-                emg_sample_np = emg_sample.detach().cpu().numpy().astype(np.float32).flatten()
+                emg_sample_np = emg_sample.detach().cpu().numpy().astype(np.float16).flatten()
                 highest_cwt_scale = 31
                 downsample_factor_for_cwt_preprocessing = 8 # used to make image processing tractable
                 scales = np.arange(1, highest_cwt_scale)  
@@ -361,7 +368,12 @@ class DataProcessing:
                 # Normalization
                 emg_sample -= torch.min(emg_sample)
                 emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
-                emg_sample = emg_sample.reshape(64*(highest_cwt_scale-1), -1)
+                if args.turn_on_electrode_rows_for_time_frequency_transforms:
+                    blocks = emg_sample.reshape(highest_cwt_scale-1, 64, -1)
+                    emg_sample = blocks.transpose(1,0).reshape(64*(highest_cwt_scale-1), -1)
+                else:  # Default: reshape to 2D image with "interspersed" elecrodes
+                    emg_sample = emg_sample.reshape(64*(highest_cwt_scale-1), -1)
+                    
                 # Update 'window_size' if necessary
                 window_size = emg_sample.shape[1]
 
@@ -550,6 +562,8 @@ if leaveOut != 0:
         foldername_zarr += 'cwt/'
     else:
         foldername_zarr += 'window_size_in_ms_' + str(window_length_in_milliseconds) + '/'
+    if args.turn_on_electrode_rows_for_time_frequency_transforms:
+        foldername_zarr += 'electrode_rows/'
         
     if args.colormap != 'viridis':
         foldername_zarr += args.colormap + '/'
@@ -879,8 +893,12 @@ if args.simsiam_test:
     wandb_runname += '-accumulate-grad-batches-' + str(args.simsiam_accumulate_grad_batches)
 if args.turn_on_spatial_heatmap:
     wandb_runname += '_spatial-heatmap'
+    if args.turn_on_electrode_rows_for_time_frequency_transforms:
+        wandb_runname += '_electrode-rows'
 if args.turn_on_spectrogram:
     wandb_runname += '_spectrogram'
+    if args.turn_on_electrode_rows_for_time_frequency_transforms:
+        wandb_runname += '_electrode-rows'
 if args.turn_on_cwt:
     wandb_runname += '_cwt'
 if args.colormap != 'viridis':
