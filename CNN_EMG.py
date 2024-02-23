@@ -26,6 +26,7 @@ logging.getLogger('matplotlib').setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
+import zarr
 
 
 ## Argument parser with optional argumenets
@@ -53,12 +54,24 @@ parser.add_argument('--turn_on_cyclical_lr', type=utils.str2bool, help='whether 
 parser.add_argument('--turn_on_cosine_annealing', type=utils.str2bool, help='whether or not to use cosine annealing with warm restarts. Set to False by default.', default=False)
 # Add argument for whether or not to use RMS
 parser.add_argument('--turn_on_rms', type=utils.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
-# Add argument for number of RMS windows
-parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows to use. Set to 10 by default.', default=10)
+# Add argument for RMS input window size (resulting feature dimension to classifier)
+parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
 # Add argument for whether or not to concatenate magnitude image
 parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 # Add argument for model to use
 parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
+# Add argument for project suffix
+parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
+# Add argument for full or partial dataset for Ozdemir EMG dataset
+parser.add_argument('--full_dataset_ozdemir', type=utils.str2bool, help='whether or not to use the full dataset for Ozdemir EMG Dataset. Set to False by default.', default=False)
+# Add argument for using spectrogram transform
+parser.add_argument('--turn_on_spectrogram', type=utils.str2bool, help='whether or not to use spectrogram transform. Set to False by default.', default=False)
+# Add argument for using cwt
+parser.add_argument('--turn_on_cwt', type=utils.str2bool, help='whether or not to use cwt. Set to False by default.', default=False)
+# Add argument for saving images
+parser.add_argument('--save_images', type=utils.str2bool, help='whether or not to save images. Set to False by default.', default=False)
+# Add argument to turn off scaler normalization
+parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help='whether or not to turn off scaler normalization. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -81,6 +94,14 @@ elif (args.dataset == "ninapro-db5"):
 else:
     print(f"The dataset being tested is OzdemirEMG")
     project_name = 'emg_benchmarking_ozdemir'
+    if args.full_dataset_ozdemir:
+        print(f"Using the full dataset for Ozdemir EMG")
+        utils.gesture_labels = utils.gesture_labels_full
+        utils.numGestures = len(utils.gesture_labels)
+    else: 
+        print(f"Using the partial dataset for Ozdemir EMG")
+        utils.gesture_labels = utils.gesture_labels_partial
+        utils.numGestures = len(utils.gesture_labels)
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
@@ -105,9 +126,12 @@ if args.turn_on_cyclical_lr and args.turn_on_cosine_annealing:
     exit()
 if args.turn_on_rms:
     print(f"The value of --turn_on_rms is {args.turn_on_rms}")
-    print(f"The value of --num_rms_windows is {args.num_rms_windows}")
+    print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
 if args.turn_on_magnitude:
     print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
+print(f"The value of --project_name_suffix is {args.project_name_suffix}")
+print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
+print(f"The value of --turn_on_cwt is {args.turn_on_cwt}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -274,11 +298,55 @@ else: # Running LOSO
 data = []
 
 # add tqdm to show progress bar
+print("Width of EMG data: ", width)
+print("Length of EMG data: ", length)
+if args.save_images:
+    if args.turn_off_scaler_normalization:
+        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_no_scaler_normalization/'
+        scaler = None
+    else: 
+        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_subject' + str(leaveOut) + '/'
+    if args.turn_on_rms:
+        base_foldername_zarr += 'RMS_input_windowsize_' + str(args.RMS_input_windowsize) + '/'
+    elif args.turn_on_spectrogram:
+        base_foldername_zarr += 'spectrogram/'
+    elif args.turn_on_cwt:
+        base_foldername_zarr += 'cwt/'
+    if not os.path.exists(base_foldername_zarr):
+        os.makedirs(base_foldername_zarr)
+
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    data += [utils.getImages(emg[x], scaler, length, width, turn_on_rms=args.turn_on_rms, rms_windows=args.num_rms_windows, turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max)]
+    subject_folder = f'LOSO_subject{x}/'
+    foldername_zarr = base_foldername_zarr + subject_folder
+    
+    # Check if the folder (dataset) exists, load if yes, else create and save
+    if os.path.exists(foldername_zarr):
+        # Load the dataset
+        dataset = zarr.open(foldername_zarr, mode='r')
+        print(f"Loaded dataset for subject {x} from {foldername_zarr}")
+        data += [dataset[:]]
+    else:
+        # Get images and create the dataset
+        images = utils.getImages(emg[x], scaler, length, width, 
+                                 turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
+                                 turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max, 
+                                 turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt)
+        images = np.array(images, dtype=np.float16)
+        
+        # Save the dataset
+        if args.save_images:
+            os.makedirs(foldername_zarr, exist_ok=True)
+            dataset = zarr.open(foldername_zarr, mode='w', shape=images.shape, dtype=images.dtype, chunks=True)
+            dataset[:] = images
+            print(f"Saved dataset for subject {x} at {foldername_zarr}")
+        else:
+            print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
+        data += [images]
+
+print("Structure of data:", data)
 
 print("------------------------------------------------------------------------------------------------------------------------")
-print("NOTE: The width 224 is natively used in Resnet50, height is currently integer  multiples of number of electrode channels")
+print("NOTE: The width 224 is natively used in Resnet50, height is currently integer multiples of number of electrode channels ")
 print("------------------------------------------------------------------------------------------------------------------------")
 if leaveOut == 0:
     combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
@@ -306,6 +374,7 @@ if leaveOut == 0:
     print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
     print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
 else:
+        
     X_validation = np.array(data.pop(leaveOut-1))
     Y_validation = np.array(labels.pop(leaveOut-1))
     X_train = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float32)
@@ -320,7 +389,7 @@ else:
     print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
 
 model_name = args.model
-if args.model == 'resnet50':
+if args.model == 'resnet50_custom':
     model = resnet50(weights=ResNet50_Weights.DEFAULT)
     model = nn.Sequential(*list(model.children())[:-4])
     # #model = nn.Sequential(*list(model.children())[:-4])
@@ -334,6 +403,11 @@ if args.model == 'resnet50':
     model.add_module('dropout1', nn.Dropout(dropout))
     model.add_module('fc3', nn.Linear(512, utils.numGestures))
     model.add_module('softmax', nn.Softmax(dim=1))
+elif args.model == 'resnet50':
+    model = resnet50(weights=ResNet50_Weights.DEFAULT)
+    # Replace the last fully connected layer
+    num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
+    model.fc = nn.Linear(num_ftrs, utils.numGestures)  # Replace with a new linear layer
 elif args.model == 'convnext_tiny_custom':
     # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
     class LayerNorm2d(nn.LayerNorm):
@@ -426,12 +500,21 @@ if args.turn_on_cyclical_lr:
 if args.turn_on_cosine_annealing: 
     wandb_runname += '_cosine-annealing'
 if args.turn_on_rms:
-    wandb_runname += '_rms-windows-'+str(args.num_rms_windows)
+    wandb_runname += '_rms-windows-'+str(args.rms_input_windowsize)
 if args.turn_on_magnitude:  
     wandb_runname += '_magnitude'
 if args.leftout_subject != 0:
     wandb_runname += '_LOSO-'+str(args.leftout_subject)
 wandb_runname += '_' + model_name
+if args.dataset == "OzdemirEMG":
+    if args.full_dataset_ozdemir:
+        wandb_runname += '_full-dataset'
+    else:
+        wandb_runname += '_partial-dataset'
+if args.turn_on_spectrogram:
+    wandb_runname += '_spectrogram'
+if args.turn_on_cwt:
+    wandb_runname += '_cwt'
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
@@ -440,8 +523,9 @@ if (leaveOut == 0):
         project_name += '_heldout'
 else:
     project_name += '_LOSO'
+project_name += args.project_name_suffix
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
+run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
 
 
@@ -467,30 +551,34 @@ utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detac
 
 utils.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
 utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-
 for epoch in tqdm(range(num_epochs), desc="Epoch"):
     model.train()
     train_acc = 0.0
     train_loss = 0.0
-    for X_batch, Y_batch in train_loader:
-        X_batch = X_batch.to(device)
-        Y_batch = Y_batch.to(device)
+    with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+        for X_batch, Y_batch in t:
+            X_batch = X_batch.to(device).to(torch.float32)
+            Y_batch = Y_batch.to(device).to(torch.float32)
 
-        optimizer.zero_grad()
-        output = model(X_batch)
-        loss = criterion(output, Y_batch)
-        train_loss += loss.item()
+            optimizer.zero_grad()
+            output = model(X_batch)
+            loss = criterion(output, Y_batch)
+            loss.backward()
+            optimizer.step()
 
-        train_acc += np.mean(np.argmax(output.cpu().detach().numpy(), 
-                                       axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            train_loss += loss.item()
+            preds = torch.argmax(output, dim=1)
+            Y_batch_long = torch.argmax(Y_batch, dim=1)
+            train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
 
-        loss.backward()
-        optimizer.step()
-        if args.turn_on_cyclical_lr:
-            scheduler.step()
-            
-    if args.turn_on_cosine_annealing:
-        scheduler.step()
+            # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
+            # Update the inner tqdm loop with metrics
+            # Only set_postfix every 10 batches to avoid slowing down the loop
+            if t.n % 10 == 0:
+                t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
+
+            del X_batch, Y_batch, output, preds
+            torch.cuda.empty_cache()
 
     # Validation
     model.eval()
@@ -498,13 +586,19 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     val_acc = 0.0
     with torch.no_grad():
         for X_batch, Y_batch in val_loader:
-            X_batch = X_batch.to(device)
-            Y_batch = Y_batch.to(device)
+            X_batch = X_batch.to(device).to(torch.float32)
+            Y_batch = Y_batch.to(device).to(torch.float32)
 
+            #output = model(X_batch).logits
             output = model(X_batch)
             val_loss += criterion(output, Y_batch).item()
+            preds = torch.argmax(output, dim=1)
+            Y_batch_long = torch.argmax(Y_batch, dim=1)
 
-            val_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+            val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+
+            del X_batch, Y_batch
+            torch.cuda.empty_cache()
 
     train_loss /= len(train_loader)
     train_acc /= len(train_loader)
@@ -513,7 +607,7 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
 
     print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
     print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
-    
+    #print(f"{val_acc:.4f}")
     wandb.log({
         "Epoch": epoch,
         "Train Loss": train_loss,
