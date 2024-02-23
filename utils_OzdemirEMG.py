@@ -136,7 +136,7 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     wavelet = 'morl'
     # Perform Continuous Wavelet Transform (CWT)
     # Note: PyWavelets returns scales and coeffs (coefficients)
-    coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs)
+    coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
     coefficients_dB = 10 * np.log10(np.abs(coefficients) + 1e-6)  # Adding a small constant to avoid log(0)
     # Convert back to PyTorch tensor and reshape
     emg_sample = torch.tensor(coefficients_dB).float().reshape(-1, coefficients_dB.shape[-1])
@@ -324,7 +324,7 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
             images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
             images_cwt = images_async.get()
         images = images_cwt
-        
+
     return images
 
 def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):
