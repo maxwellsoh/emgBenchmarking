@@ -17,6 +17,7 @@ from tqdm import tqdm
 import h5py
 from scipy.signal import spectrogram
 import pywt
+import scipy
 
 fs = 2000 #Hz
 wLen = 250 # ms
@@ -24,7 +25,8 @@ wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 100 #50 ms
 numElectrodes = 4
 num_subjects = 40
-cmap = mpl.colormaps['viridis']
+normalize_for_colormap_benchmark = mpl.colors.Normalize(vmin=-60, vmax=-25)
+cmap = mpl.colormaps['jet']
 # Gesture Labels
 gesture_labels_partial = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction'] 
 gesture_labels_full = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
@@ -112,7 +114,7 @@ def getEMG (n):
     for gesture in gesture_labels:
         assert "Gesture" + gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
         data = filter(torch.from_numpy(np.array(file["Gesture" + gesture]))).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
-        emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)))
+        emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)).to(torch.float16))
     return torch.cat(emg, dim=0)
 
 # size of 4800 assumes 250 ms window
@@ -131,7 +133,7 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     highest_cwt_scale = 31
     downsample_factor_for_cwt_preprocessing = 2 # used to make image processing tractable
     scales = np.arange(1, highest_cwt_scale)  
-    wavelet = 'cmor1.5-1.0'  # Complex Morlet wavelet; adjust as needed
+    wavelet = 'morl'
     # Perform Continuous Wavelet Transform (CWT)
     # Note: PyWavelets returns scales and coeffs (coefficients)
     coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs)
@@ -172,17 +174,35 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = 50
-    emg_sample_unflattened = data.reshape(numElectrodes, -1)
-    frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=0.5*spectrogram_window_size)
-    Sxx_dB = 10 * np.log10(Sxx + 1e-6) # small constant added to avoid log(0)
-    emg_sample = torch.from_numpy(Sxx_dB)
-    emg_sample -= torch.min(emg_sample)
-    emg_sample /= torch.max(emg_sample)
-    emg_sample = emg_sample.reshape(emg_sample.shape[0]*emg_sample.shape[1], emg_sample.shape[2])
-    data = emg_sample
+    spectrogram_window_size = 32#128 
 
-    data_converted = cmap(data)
+    emg_sample_unflattened = data.reshape(numElectrodes, -1)
+    
+    benchmarking_window = scipy.signal.windows.hamming(spectrogram_window_size, sym=False) # https://www.sciencedirect.com/science/article/pii/S1746809422003093?via%3Dihub#f0020
+    benchmarking_number_fft_points = 32#1028
+    frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, window=benchmarking_window, nfft=benchmarking_number_fft_points)
+    Sxx_dB = 10 * np.log10(Sxx + 1e-6) # small constant added to avoid log(0)
+    print("Min and max of Sxx_dB: ", np.min(Sxx_dB), np.max(Sxx_dB))
+    # emg_sample = torch.from_numpy(Sxx_dB)
+    # emg_sample -= torch.min(emg_sample)
+    # emg_sample /= torch.max(emg_sample)
+    # emg_sample = emg_sample.reshape(emg_sample.shape[0]*emg_sample.shape[1], emg_sample.shape[2])
+    # data = emg_sample
+
+    e1, e2, e3, e4 = torch.from_numpy(Sxx_dB)
+
+    # Flip each part about the x-axis
+    e1_flipped = e1.flip(dims=[0])
+    e2_flipped = e2.flip(dims=[0])
+    e3_flipped = e3.flip(dims=[0])
+    e4_flipped = e4.flip(dims=[0])
+
+    # Combine the flipped parts into a 2x2 grid
+    top_row = torch.cat((e1_flipped, e2_flipped), dim=1)
+    bottom_row = torch.cat((e3_flipped, e4_flipped), dim=1)
+    combined_image = torch.cat((top_row, bottom_row), dim=0)
+
+    data_converted = cmap(normalize_for_colormap_benchmark(combined_image))
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
     
@@ -197,7 +217,6 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     image_normalized = normalize(image_clamped)
 
-    # Since no split occurs, we don't need to concatenate halves back together
     final_image = image_normalized.numpy().astype(np.float32)
 
     return final_image
@@ -260,7 +279,8 @@ def calculate_rms(array_2d):
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_cwt=False,
               global_min=None, global_max=None):
 
-    emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+    # emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+    emg = np.array(emg.view(len(emg), length*width))
     # Use RMS preprocessing
     if turn_on_rms:
         emg = emg.reshape(len(emg), length, width)

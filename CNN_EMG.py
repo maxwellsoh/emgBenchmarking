@@ -67,6 +67,8 @@ parser.add_argument('--full_dataset_ozdemir', type=utils.str2bool, help='whether
 parser.add_argument('--turn_on_spectrogram', type=utils.str2bool, help='whether or not to use spectrogram transform. Set to False by default.', default=False)
 # Add argument for using cwt
 parser.add_argument('--turn_on_cwt', type=utils.str2bool, help='whether or not to use cwt. Set to False by default.', default=False)
+# Add argument for saving images
+parser.add_argument('--save_images', type=utils.str2bool, help='whether or not to save images. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
