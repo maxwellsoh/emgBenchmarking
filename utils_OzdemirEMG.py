@@ -25,7 +25,7 @@ wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 100 #50 ms
 numElectrodes = 4
 num_subjects = 40
-normalize_for_colormap_benchmark = mpl.colors.Normalize(vmin=-60, vmax=-25)
+normalize_for_colormap_benchmark = mpl.colors.Normalize(vmin=-60, vmax=-20)
 cmap = mpl.colormaps['jet']
 # Gesture Labels
 gesture_labels_partial = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction'] 
@@ -174,15 +174,15 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = 32#128 
+    spectrogram_window_size = 128 
 
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
     
     benchmarking_window = scipy.signal.windows.hamming(spectrogram_window_size, sym=False) # https://www.sciencedirect.com/science/article/pii/S1746809422003093?via%3Dihub#f0020
-    benchmarking_number_fft_points = 32#1028
+    benchmarking_number_fft_points = 1024
     frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, window=benchmarking_window, nfft=benchmarking_number_fft_points)
     Sxx_dB = 10 * np.log10(Sxx + 1e-6) # small constant added to avoid log(0)
-    print("Min and max of Sxx_dB: ", np.min(Sxx_dB), np.max(Sxx_dB))
+    # print("Min and max of Sxx_dB: ", np.min(Sxx_dB), np.max(Sxx_dB))
     # emg_sample = torch.from_numpy(Sxx_dB)
     # emg_sample -= torch.min(emg_sample)
     # emg_sample /= torch.max(emg_sample)
@@ -279,8 +279,11 @@ def calculate_rms(array_2d):
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_cwt=False,
               global_min=None, global_max=None):
 
-    # emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
-    emg = np.array(emg.view(len(emg), length*width))
+    if standardScaler is not None:
+        emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+    else:
+        emg = np.array(emg.view(len(emg), length*width))
+        
     # Use RMS preprocessing
     if turn_on_rms:
         emg = emg.reshape(len(emg), length, width)
@@ -324,7 +327,7 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
             images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
             images_cwt = images_async.get()
         images = images_cwt
-
+        
     return images
 
 def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):
