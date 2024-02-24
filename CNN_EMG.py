@@ -343,8 +343,6 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
             print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
         data += [images]
 
-print("Structure of data:", data)
-
 print("------------------------------------------------------------------------------------------------------------------------")
 print("NOTE: The width 224 is natively used in Resnet50, height is currently integer multiples of number of electrode channels ")
 print("------------------------------------------------------------------------------------------------------------------------")

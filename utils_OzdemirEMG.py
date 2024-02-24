@@ -127,12 +127,13 @@ def getLabels (n):
     return labels
 
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
+    normalize_for_colormap_benchmark_cwt = mpl.colors.Normalize(vmin=-60, vmax=5)
     emg_sample = data
     # Convert EMG sample to numpy array for CWT computation
     emg_sample_np = emg_sample.astype(np.float16).flatten()
-    highest_cwt_scale = 31
-    downsample_factor_for_cwt_preprocessing = 2 # used to make image processing tractable
-    scales = np.arange(1, highest_cwt_scale)  
+    highest_cwt_scale = 1027
+    downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
+    scales = np.arange(1, highest_cwt_scale)
     wavelet = 'morl'
     # Perform Continuous Wavelet Transform (CWT)
     # Note: PyWavelets returns scales and coeffs (coefficients)
@@ -140,22 +141,35 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     coefficients_dB = 10 * np.log10(np.abs(coefficients) + 1e-6)  # Adding a small constant to avoid log(0)
     # Convert back to PyTorch tensor and reshape
     emg_sample = torch.tensor(coefficients_dB).float().reshape(-1, coefficients_dB.shape[-1])
-    # Normalization
-    emg_sample -= torch.min(emg_sample)
-    emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
     blocks = emg_sample.reshape(highest_cwt_scale-1, numElectrodes, -1)
-    emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale-1), -1)
+
+    e1, e2, e3, e4 = blocks.transpose(1,0)
+
+    # Flip each part about the x-axis
+    e1_flipped = e1.flip(dims=[0])
+    e2_flipped = e2.flip(dims=[0])
+    e3_flipped = e3.flip(dims=[0])
+    e4_flipped = e4.flip(dims=[0])
+    # emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale-1), -1)
         
-    # Update 'window_size' if necessary
-    window_size = emg_sample.shape[1]
+    # Combine the flipped parts into a 2x2 grid
+    top_row = torch.cat((e1_flipped, e2_flipped), dim=1)
+    bottom_row = torch.cat((e3_flipped, e4_flipped), dim=1)
+    combined_image = torch.cat((top_row, bottom_row), dim=0)
 
-    emg_sample -= torch.min(emg_sample)
-    emg_sample /= torch.max(emg_sample)
-    data = emg_sample
-
-    data_converted = cmap(data)
+    data_converted = cmap(normalize_for_colormap_benchmark_cwt(combined_image))
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
+    # Update 'window_size' if necessary
+    # window_size = emg_sample.shape[1]
+
+    # # emg_sample -= torch.min(emg_sample)t
+    # # emg_sample /= torch.max(emg_sample)
+    # data = emg_sample
+
+    # data_converted = cmap(normalize_for_colormap_benchmark_cwt(data))
+    # rgb_data = data_converted[:, :, :3]
+    # image = np.transpose(rgb_data, (2, 0, 1))
     
     resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
