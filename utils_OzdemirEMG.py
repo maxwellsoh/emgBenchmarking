@@ -18,6 +18,7 @@ import h5py
 from scipy.signal import spectrogram
 import pywt
 import scipy
+import emd
 
 fs = 2000 #Hz
 wLen = 250 # ms
@@ -125,6 +126,68 @@ def getLabels (n):
         for j in range(numGestures):
             labels[j * timesteps_for_one_gesture + i][j] = 1.0
     return labels
+
+def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
+    normalize_for_colormap_benchmark_hht = mpl.colors.Normalize(vmin=-30, vmax=0)   
+
+    emg_sample = data
+    # Perform Empirical Mode Decomposition (EMD)
+    intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=5)
+    instantaneous_phase, instantaneous_frequencies, instantaneous_amplitudes = \
+        emd.spectra.frequency_transform(intrinsic_mode_functions, fs, 'nht')
+    # Compute Hilbert-Huang Transform (HHT)
+    start_frequency = 1; end_frequency = fs # Hz
+    num_frequencies = 128
+    frequency_edges, frequency_centres = emd.spectra.define_hist_bins(start_frequency, end_frequency, num_frequencies, 'linear')
+    frequencies, hht = emd.spectra.hilberthuang(instantaneous_frequencies, instantaneous_amplitudes, frequency_edges, 
+                                                mode='amplitude',sum_time=False)
+
+    # Convert back to PyTorch tensor and reshape
+    emg_sample = np.array_split(hht, 4, axis=1)
+    # # Normalization
+    # emg_sample -= torch.min(emg_sample)
+    # emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
+        
+    # emg_sample -= torch.min(emg_sample)
+    # emg_sample /= torch.max(emg_sample)
+
+    e1, e2, e3, e4 = emg_sample
+
+    # Flip each part about the x-axis
+    e1_flipped = torch.tensor(np.flipud(e1).copy())
+    e2_flipped = torch.tensor(np.flipud(e2).copy())
+    e3_flipped = torch.tensor(np.flipud(e3).copy())
+    e4_flipped = torch.tensor(np.flipud(e4).copy())
+
+    # Combine the flipped parts into a 2x2 grid
+    top_row = torch.cat((e1_flipped, e2_flipped), dim=1)
+    bottom_row = torch.cat((e3_flipped, e4_flipped), dim=1)
+    combined_image = torch.cat((top_row, bottom_row), dim=0)
+
+    combined_image_dB = 10 * torch.log10(torch.abs(combined_image) + 1e-6)  # Adding a small constant to avoid log(0)
+
+    # print("Min and max of combined_image: ", torch.min(combined_image_dB), torch.max(combined_image_dB))
+
+    data_converted = cmap((normalize_for_colormap_benchmark_hht(combined_image_dB)))
+
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+    
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp between 0 and 1 using torch.clamp
+    image_clamped = torch.clamp(image_resized, 0, 1)
+
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    # Since no split occurs, we don't need to concatenate halves back together
+    final_image = image_normalized.numpy().astype(np.float32)
+
+    return final_image
 
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
     emg_sample = data
@@ -277,7 +340,7 @@ def calculate_rms(array_2d):
     return np.sqrt(np.mean(array_2d**2))
 
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_cwt=False,
-              global_min=None, global_max=None):
+              turn_on_hht=False, global_min=None, global_max=None):
 
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
@@ -327,6 +390,13 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
             images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
             images_cwt = images_async.get()
         images = images_cwt
+    
+    elif turn_on_hht:
+        with multiprocessing.Pool(processes=5) as pool:
+            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+            images_async = pool.starmap_async(optimized_makeOneHilbertHuangImage, args)
+            images_hilbert_huang = images_async.get()
+        images = images_hilbert_huang
         
     return images
 
