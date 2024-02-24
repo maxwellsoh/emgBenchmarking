@@ -190,7 +190,7 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     return final_image
 
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
-    normalize_for_colormap_benchmark_cwt = mpl.colors.Normalize(vmin=-60, vmax=5)
+    normalize_for_colormap_benchmark_cwt = mpl.colors.Normalize(vmin=0, vmax=25)
     emg_sample = data
     # Convert EMG sample to numpy array for CWT computation
     emg_sample_np = emg_sample.astype(np.float16).flatten()
@@ -201,23 +201,18 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     # Perform Continuous Wavelet Transform (CWT)
     # Note: PyWavelets returns scales and coeffs (coefficients)
     coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
-    coefficients_dB = 10 * np.log10(np.abs(coefficients) + 1e-6)  # Adding a small constant to avoid log(0)
+    coefficients_squared = coefficients ** 2  # Adding a small constant to avoid log(0)
     # Convert back to PyTorch tensor and reshape
-    emg_sample = torch.tensor(coefficients_dB).float().reshape(-1, coefficients_dB.shape[-1])
+    emg_sample = torch.tensor(coefficients_squared).float().reshape(-1, coefficients_squared.shape[-1])
     blocks = emg_sample.reshape(highest_cwt_scale-1, numElectrodes, -1)
 
     e1, e2, e3, e4 = blocks.transpose(1,0)
 
-    # Flip each part about the x-axis
-    e1_flipped = e1.flip(dims=[0])
-    e2_flipped = e2.flip(dims=[0])
-    e3_flipped = e3.flip(dims=[0])
-    e4_flipped = e4.flip(dims=[0])
     # emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale-1), -1)
         
     # Combine the flipped parts into a 2x2 grid
-    top_row = torch.cat((e1_flipped, e2_flipped), dim=1)
-    bottom_row = torch.cat((e3_flipped, e4_flipped), dim=1)
+    top_row = torch.cat((e1, e2), dim=1)
+    bottom_row = torch.cat((e3, e4), dim=1)
     combined_image = torch.cat((top_row, bottom_row), dim=0)
 
     data_converted = cmap(normalize_for_colormap_benchmark_cwt(combined_image))
