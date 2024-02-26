@@ -138,7 +138,7 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
         emd.spectra.frequency_transform(intrinsic_mode_functions, fs, 'nht')
     # Compute Hilbert-Huang Transform (HHT)
     start_frequency = 1; end_frequency = fs # Hz
-    num_frequencies = 128
+    num_frequencies = 64
     frequency_edges, frequency_centres = emd.spectra.define_hist_bins(start_frequency, end_frequency, num_frequencies, 'linear')
     frequencies, hht = emd.spectra.hilberthuang(instantaneous_frequencies, instantaneous_amplitudes, frequency_edges, 
                                                 mode='amplitude',sum_time=False)
@@ -153,6 +153,10 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     # emg_sample /= torch.max(emg_sample)
 
     e1, e2, e3, e4 = emg_sample
+    e1 = e1[:num_frequencies//2, :]
+    e2 = e2[:num_frequencies//2, :]
+    e3 = e3[:num_frequencies//2, :]
+    e4 = e4[:num_frequencies//2, :]
 
     # Flip each part about the x-axis
     e1_flipped = torch.tensor(np.flipud(e1).copy())
@@ -174,7 +178,7 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
     
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+    resize = transforms.Resize([min(num_frequencies, native_resnet_size), native_resnet_size],
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
