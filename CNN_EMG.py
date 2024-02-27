@@ -74,6 +74,8 @@ parser.add_argument('--turn_on_hht', type=utils.str2bool, help='whether or not t
 parser.add_argument('--save_images', type=utils.str2bool, help='whether or not to save images. Set to False by default.', default=False)
 # Add argument to turn off scaler normalization
 parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help='whether or not to turn off scaler normalization. Set to False by default.', default=False)
+# Add argument to leve n subjects out randomly
+parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -135,6 +137,10 @@ print(f"The value of --project_name_suffix is {args.project_name_suffix}")
 print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
 print(f"The value of --turn_on_cwt is {args.turn_on_cwt}")
 print(f"The value of --turn_on_hht is {args.turn_on_hht}")
+
+print(f"The value of --save_images is {args.save_images}")
+print(f"The value of --turn_off_scaler_normalization is {args.turn_off_scaler_normalization}")
+print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_out_randomly}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -184,104 +190,27 @@ else:
     # This tends to be larger because the raw EMG
     # is usually much larger than the RMS
     sigma_coefficient = 0.5
-
-if (leaveOut == 0):
-    if args.turn_on_kfold:
-        skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
-        
-        emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
-        labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-        
-        labels_for_folds = np.argmax(labels_in, axis=1)
-        
-        fold_count = 1
-        for train_index, test_index in skf.split(emg_in, labels_for_folds):
-            if fold_count == args.fold_index:
-                train_indices = train_index
-                validation_indices = test_index
-                break
-            fold_count += 1
-
-        # Normalize by electrode
-        emg_in_by_electrode = emg_in[train_indices].reshape(-1, length, width)
-        # s = preprocessing.StandardScaler().fit(emg_in[train_indices])
-        global_min = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
-        global_max = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
-
-        # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
-        # Reshape data to (SAMPLES*50, 16)
-        emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
-
-        # Initialize and fit the scaler on the reshaped data
-        # This will compute the mean and std dev for each electrode across all samples and features
-        scaler = preprocessing.StandardScaler()
-        scaler.fit(emg_reshaped)
-        
-        # Repeat means and std_devs for each time point using np.repeat
-        scaler.mean_ = np.repeat(scaler.mean_, width)
-        scaler.scale_ = np.repeat(scaler.scale_, width)
-        scaler.var_ = np.repeat(scaler.var_, width)
-        scaler.n_features_in_ = width*utils.numElectrodes
-
-        del emg_in
-        del labels_in
-
-        del emg_in_by_electrode
-        del emg_reshaped
-
-    else: 
-        # Reshape and concatenate EMG data
-        # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
-        # Then concatenate along the subject dimension (axis=0)
-        emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
-        labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-        indices = np.arange(emg_in.shape[0])
-        train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
-        train_emg_in = emg_in[train_indices]  # Select only the train indices
-        # s = preprocessing.StandardScaler().fit(train_emg_in)
-
-        # Normalize by electrode
-        emg_in_by_electrode = train_emg_in.reshape(-1, length, width)
-        global_min = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
-        global_max = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
-
-        # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
-        # Reshape data to (SAMPLES*50, 16)
-        emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
-
-        # Initialize and fit the scaler on the reshaped data
-        # This will compute the mean and std dev for each electrode across all samples and features
-        scaler = preprocessing.StandardScaler()
-        scaler.fit(emg_reshaped)
-        
-        # Repeat means and std_devs for each time point using np.repeat
-        scaler.mean_ = np.repeat(scaler.mean_, width)
-        scaler.scale_ = np.repeat(scaler.scale_, width)
-        scaler.var_ = np.repeat(scaler.var_, width)
-        scaler.n_features_in_ = width*utils.numElectrodes
-
-        del emg_in
-        del labels_in
-
-        del train_emg_in
-        del indices
-
-        del emg_in_by_electrode
-        del emg_reshaped
-
-else: # Running LOSO
-    emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
-    # s = preprocessing.StandardScaler().fit(emg_in)
-    global_min = emg_in.mean() - sigma_coefficient*emg_in.std()
-    global_max = emg_in.mean() + sigma_coefficient*emg_in.std()
-
+    
+leaveOutIndices = []
+# Generate scaler for normalization
+if args.leave_n_subjects_out_randomly != 0:
+    leaveOut = args.leave_n_subjects_out_randomly
+    print(f"Leaving out {leaveOut} subjects randomly")
+    # subject indices to leave out randomly
+    leaveOutIndices = np.random.choice(range(utils.num_subjects), leaveOut, replace=False)
+    print(f"Leaving out subjects {np.sort(leaveOutIndices)}")
+    emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg if i not in leaveOutIndices], axis=0, dtype=np.float32)
+    
+    global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
+    global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
+    
     # Normalize by electrode
     emg_in_by_electrode = emg_in.reshape(-1, length, width)
-
+    
     # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
     # Reshape data to (SAMPLES*50, 16)
     emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
-
+    
     # Initialize and fit the scaler on the reshaped data
     # This will compute the mean and std dev for each electrode across all samples and features
     scaler = preprocessing.StandardScaler()
@@ -297,16 +226,144 @@ else: # Running LOSO
     del emg_in_by_electrode
     del emg_reshaped
 
+else: # Not leave n subjects out randomly
+    if (leaveOut == 0):
+        if args.turn_on_kfold:
+            skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
+            
+            emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
+            labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+            
+            labels_for_folds = np.argmax(labels_in, axis=1)
+            
+            fold_count = 1
+            for train_index, test_index in skf.split(emg_in, labels_for_folds):
+                if fold_count == args.fold_index:
+                    train_indices = train_index
+                    validation_indices = test_index
+                    break
+                fold_count += 1
+
+            # Normalize by electrode
+            emg_in_by_electrode = emg_in[train_indices].reshape(-1, length, width)
+            # s = preprocessing.StandardScaler().fit(emg_in[train_indices])
+            global_low_value = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
+            global_high_value = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
+
+            # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+            # Reshape data to (SAMPLES*50, 16)
+            emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
+
+            # Initialize and fit the scaler on the reshaped data
+            # This will compute the mean and std dev for each electrode across all samples and features
+            scaler = preprocessing.StandardScaler()
+            scaler.fit(emg_reshaped)
+            
+            # Repeat means and std_devs for each time point using np.repeat
+            scaler.mean_ = np.repeat(scaler.mean_, width)
+            scaler.scale_ = np.repeat(scaler.scale_, width)
+            scaler.var_ = np.repeat(scaler.var_, width)
+            scaler.n_features_in_ = width*utils.numElectrodes
+
+            del emg_in
+            del labels_in
+
+            del emg_in_by_electrode
+            del emg_reshaped
+
+        else: 
+            # Reshape and concatenate EMG data
+            # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
+            # Then concatenate along the subject dimension (axis=0)
+            emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
+            labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+            indices = np.arange(emg_in.shape[0])
+            train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
+            train_emg_in = emg_in[train_indices]  # Select only the train indices
+            # s = preprocessing.StandardScaler().fit(train_emg_in)
+
+            # Normalize by electrode
+            emg_in_by_electrode = train_emg_in.reshape(-1, length, width)
+            global_low_value = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
+            global_high_value = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
+
+            # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+            # Reshape data to (SAMPLES*50, 16)
+            emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
+
+            # Initialize and fit the scaler on the reshaped data
+            # This will compute the mean and std dev for each electrode across all samples and features
+            scaler = preprocessing.StandardScaler()
+            scaler.fit(emg_reshaped)
+            
+            # Repeat means and std_devs for each time point using np.repeat
+            scaler.mean_ = np.repeat(scaler.mean_, width)
+            scaler.scale_ = np.repeat(scaler.scale_, width)
+            scaler.var_ = np.repeat(scaler.var_, width)
+            scaler.n_features_in_ = width*utils.numElectrodes
+
+            del emg_in
+            del labels_in
+
+            del train_emg_in
+            del indices
+
+            del emg_in_by_electrode
+            del emg_reshaped
+
+    else: # Running LOSO
+        emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
+        # s = preprocessing.StandardScaler().fit(emg_in)
+        global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
+        global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
+
+        # Normalize by electrode
+        emg_in_by_electrode = emg_in.reshape(-1, length, width)
+
+        # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+        # Reshape data to (SAMPLES*50, 16)
+        emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
+
+        # Initialize and fit the scaler on the reshaped data
+        # This will compute the mean and std dev for each electrode across all samples and features
+        scaler = preprocessing.StandardScaler()
+        scaler.fit(emg_reshaped)
+        
+        # Repeat means and std_devs for each time point using np.repeat
+        scaler.mean_ = np.repeat(scaler.mean_, width)
+        scaler.scale_ = np.repeat(scaler.scale_, width)
+        scaler.var_ = np.repeat(scaler.var_, width)
+        scaler.n_features_in_ = width*utils.numElectrodes
+
+        del emg_in
+        del emg_in_by_electrode
+        del emg_reshaped
+
 
 data = []
 
 # add tqdm to show progress bar
 print("Width of EMG data: ", width)
 print("Length of EMG data: ", length)
-base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_subject' + str(leaveOut) + '/'
+
+if args.leave_n_subjects_out_randomly != 0:
+    base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
+else:
+    if leaveOut == 0:
+        base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
+    else:
+        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_subject' + str(leaveOut) + '/'
+
 if args.turn_off_scaler_normalization:
-        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_no_scaler_normalization/'
-        scaler = None
+    if args.leave_n_subjects_out_randomly != 0:
+        base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
+    else: 
+        if leaveOut == 0:
+            base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
+        else: 
+            base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
+    scaler = None
+
 if args.turn_on_rms:
     base_foldername_zarr += 'RMS_input_windowsize_' + str(args.RMS_input_windowsize) + '/'
 elif args.turn_on_spectrogram:
@@ -320,7 +377,7 @@ if args.save_images:
         os.makedirs(base_foldername_zarr)
 
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    subject_folder = f'LOSO_subject{x}/'
+    subject_folder = f'subject{x}/'
     foldername_zarr = base_foldername_zarr + subject_folder
     
     # Check if the folder (dataset) exists, load if yes, else create and save
@@ -333,7 +390,7 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
         # Get images and create the dataset
         images = utils.getImages(emg[x], scaler, length, width, 
                                  turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
-                                 turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max, 
+                                 turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value, 
                                  turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt, 
                                  turn_on_hht=args.turn_on_hht)
         images = np.array(images, dtype=np.float16)
@@ -351,45 +408,71 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
 print("------------------------------------------------------------------------------------------------------------------------")
 print("NOTE: The width 224 is natively used in Resnet50, height is currently integer multiples of number of electrode channels ")
 print("------------------------------------------------------------------------------------------------------------------------")
-if leaveOut == 0:
-    combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-    combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
-    X_train = combined_images[train_indices]
-    Y_train = combined_labels[train_indices]
-    X_validation = combined_images[validation_indices]
-    Y_validation = combined_labels[validation_indices]
-    X_validation, X_test, Y_validation, Y_test = model_selection.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation)
-    del combined_images
-    del combined_labels
-    del data
-    del emg
 
-    X_train = torch.from_numpy(X_train).to(torch.float32)
-    Y_train = torch.from_numpy(Y_train).to(torch.float32)
-    X_validation = torch.from_numpy(X_validation).to(torch.float32)
-    Y_validation = torch.from_numpy(Y_validation).to(torch.float32)
-    X_test = torch.from_numpy(X_test).to(torch.float32)
-    Y_test = torch.from_numpy(Y_test).to(torch.float32)
-    print("Size of X_train:     ", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-    print("Size of Y_train:     ", Y_train.size()) # (SAMPLE, GESTURE)
-    print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-    print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
-    print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-    print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
-else:
-        
-    X_validation = np.array(data.pop(leaveOut-1))
-    Y_validation = np.array(labels.pop(leaveOut-1))
-    X_train = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float32)
-    Y_train = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float32)
-    X_train = torch.from_numpy(X_train).to(torch.float32)
-    Y_train = torch.from_numpy(Y_train).to(torch.float32)
-    X_validation = torch.from_numpy(X_validation).to(torch.float32)
-    Y_validation = torch.from_numpy(Y_validation).to(torch.float32)
+if args.leave_n_subjects_out_randomly != 0:
+    
+    # Instead of the below code, leave n subjects out randomly to be used as the 
+    # validation set and the rest as the training set using leaveOutIndices
+    
+    X_validation = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
+    Y_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
+    X_validation = torch.from_numpy(X_validation).to(torch.float16)
+    Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+    
+    X_train = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
+    Y_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
+    X_train = torch.from_numpy(X_train).to(torch.float16)
+    Y_train = torch.from_numpy(Y_train).to(torch.float16)
+    
     print("Size of X_train:", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
     print("Size of Y_train:", Y_train.size()) # (SAMPLE, GESTURE)
     print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
     print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
+    
+    del data
+    del emg
+    del labels
+
+else: 
+    if leaveOut == 0:
+        combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+        combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
+        X_train = combined_images[train_indices]
+        Y_train = combined_labels[train_indices]
+        X_validation = combined_images[validation_indices]
+        Y_validation = combined_labels[validation_indices]
+        X_validation, X_test, Y_validation, Y_test = model_selection.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation)
+        del combined_images
+        del combined_labels
+        del data
+        del emg
+
+        X_train = torch.from_numpy(X_train).to(torch.float16)
+        Y_train = torch.from_numpy(Y_train).to(torch.float16)
+        X_validation = torch.from_numpy(X_validation).to(torch.float16)
+        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        X_test = torch.from_numpy(X_test).to(torch.float16)
+        Y_test = torch.from_numpy(Y_test).to(torch.float16)
+        print("Size of X_train:     ", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_train:     ", Y_train.size()) # (SAMPLE, GESTURE)
+        print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
+        print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
+    else:
+            
+        X_validation = np.array(data.pop(leaveOut-1))
+        Y_validation = np.array(labels.pop(leaveOut-1))
+        X_train = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
+        Y_train = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+        X_train = torch.from_numpy(X_train).to(torch.float16)
+        Y_train = torch.from_numpy(Y_train).to(torch.float16)
+        X_validation = torch.from_numpy(X_validation).to(torch.float16)
+        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        print("Size of X_train:", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_train:", Y_train.size()) # (SAMPLE, GESTURE)
+        print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
 
 model_name = args.model
 if args.model == 'resnet50_custom':
@@ -520,6 +603,10 @@ if args.turn_on_cwt:
     wandb_runname += '_cwt'
 if args.turn_on_hht:
     wandb_runname += '_hht'
+if args.leave_n_subjects_out_randomly != 0:
+    wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
+if args.turn_off_scaler_normalization:
+    wandb_runname += '_no-scaler-normalization'
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
@@ -532,7 +619,8 @@ project_name += args.project_name_suffix
 
 run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
-
+if args.leave_n_subjects_out_randomly != 0:
+    wandb.config.left_out_subjects = leaveOutIndices
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
@@ -634,8 +722,8 @@ if (leaveOut == 0):
     test_acc = 0.0
     with torch.no_grad():
         for X_batch, Y_batch in test_loader:
-            X_batch = X_batch.to(device)
-            Y_batch = Y_batch.to(device)
+            X_batch = X_batch.to(device).to(torch.float32)
+            Y_batch = Y_batch.to(device).to(torch.float32)
 
             output = model(X_batch)
             test_loss += criterion(output, Y_batch).item()
@@ -667,7 +755,7 @@ model.eval()
 with torch.no_grad():
     validation_predictions = []
     for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=int(X_validation.shape[0]/10))), desc="Validation Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device)
+        batch = batch.to(device).to(torch.float32)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         validation_predictions.extend(preds)
@@ -681,7 +769,7 @@ model.eval()
 with torch.no_grad():
     train_predictions = []
     for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/utils.num_subjects))), desc="Training Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device)
+        batch = batch.to(device).to(torch.float32)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         train_predictions.extend(preds)
