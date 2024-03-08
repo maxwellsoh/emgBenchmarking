@@ -68,6 +68,8 @@ parser.add_argument('--full_dataset_ozdemir', type=utils.str2bool, help='whether
 parser.add_argument('--turn_on_spectrogram', type=utils.str2bool, help='whether or not to use spectrogram transform. Set to False by default.', default=False)
 # Add argument for using cwt
 parser.add_argument('--turn_on_cwt', type=utils.str2bool, help='whether or not to use cwt. Set to False by default.', default=False)
+# Add argument for using Hilbert Huang Transform
+parser.add_argument('--turn_on_hht', type=utils.str2bool, help='whether or not to use HHT. Set to False by default.', default=False)
 # Add argument for saving images
 parser.add_argument('--save_images', type=utils.str2bool, help='whether or not to save images. Set to False by default.', default=False)
 # Add argument to turn off scaler normalization
@@ -132,6 +134,7 @@ if args.turn_on_magnitude:
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
 print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
 print(f"The value of --turn_on_cwt is {args.turn_on_cwt}")
+print(f"The value of --turn_on_hht is {args.turn_on_hht}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -300,18 +303,19 @@ data = []
 # add tqdm to show progress bar
 print("Width of EMG data: ", width)
 print("Length of EMG data: ", length)
-if args.save_images:
-    if args.turn_off_scaler_normalization:
+base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_subject' + str(leaveOut) + '/'
+if args.turn_off_scaler_normalization:
         base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_no_scaler_normalization/'
         scaler = None
-    else: 
-        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_subject' + str(leaveOut) + '/'
-    if args.turn_on_rms:
-        base_foldername_zarr += 'RMS_input_windowsize_' + str(args.RMS_input_windowsize) + '/'
-    elif args.turn_on_spectrogram:
-        base_foldername_zarr += 'spectrogram/'
-    elif args.turn_on_cwt:
-        base_foldername_zarr += 'cwt/'
+if args.turn_on_rms:
+    base_foldername_zarr += 'RMS_input_windowsize_' + str(args.RMS_input_windowsize) + '/'
+elif args.turn_on_spectrogram:
+    base_foldername_zarr += 'spectrogram/'
+elif args.turn_on_cwt:
+    base_foldername_zarr += 'cwt/'
+elif args.turn_on_hht:
+    base_foldername_zarr += 'hht/'
+if args.save_images: 
     if not os.path.exists(base_foldername_zarr):
         os.makedirs(base_foldername_zarr)
 
@@ -330,7 +334,8 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
         images = utils.getImages(emg[x], scaler, length, width, 
                                  turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
                                  turn_on_magnitude=args.turn_on_magnitude, global_min=global_min, global_max=global_max, 
-                                 turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt)
+                                 turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt, 
+                                 turn_on_hht=args.turn_on_hht)
         images = np.array(images, dtype=np.float16)
         
         # Save the dataset
@@ -342,8 +347,6 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
         else:
             print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
         data += [images]
-
-print("Structure of data:", data)
 
 print("------------------------------------------------------------------------------------------------------------------------")
 print("NOTE: The width 224 is natively used in Resnet50, height is currently integer multiples of number of electrode channels ")
@@ -515,6 +518,8 @@ if args.turn_on_spectrogram:
     wandb_runname += '_spectrogram'
 if args.turn_on_cwt:
     wandb_runname += '_cwt'
+if args.turn_on_hht:
+    wandb_runname += '_hht'
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
