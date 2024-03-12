@@ -308,15 +308,16 @@ for subject_number in tqdm(range(len(emg)), desc="Number of Subjects "):
         print(f"Loaded dataset for subject {subject_number} from {foldername_zarr}")
         data += [dataset[:]]
     else:
-        if args.model == 'prajjwal1/bert-tiny':
+        if 'prajjwal1/bert-' in args.model:
             vocabularized_data = utils.getVocabularizedData(emg[subject_number], scaler, length, width,
                                     turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize,
-                                    global_min=global_min, global_max=global_max, output_width=512)
+                                    global_min=global_min, global_max=global_max, output_width=512,
+                                    vocabulary_size=4096)
         else:
             # Get images and create the dataset
             vocabularized_data = utils.getVocabularizedData(emg[subject_number], scaler, length, width, 
                                  turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
-                                 global_min=global_min, global_max=global_max)
+                                 global_min=global_min, global_max=global_max, vocabulary_size=4096)
         vocabularized_data = np.array(vocabularized_data, dtype=np.int32)
         
         # Save the dataset
@@ -380,7 +381,7 @@ if 'bigbird' in args.model:
 elif 'longformer' in args.model:
     tokenizer = LongformerTokenizer.from_pretrained(model_name)
     model = LongformerForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
-elif 'prajjwal1/bert-tiny' in args.model:
+elif 'prajjwal1/bert-' in args.model:
     tokenizer = BertTokenizer.from_pretrained(model_name)
     model = BertForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
 else: 
@@ -399,7 +400,7 @@ for name, param in model.named_parameters():
         param.requires_grad = False
 
 batch_size = 4
-if args.model == 'prajjwal1/bert-tiny':
+if 'prajjwal1/bert-' in args.model:
     batch_size = 64
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
@@ -599,8 +600,8 @@ model.eval()
 with torch.no_grad():
     validation_predictions = []
     for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=int(X_validation.shape[0]/10))), desc="Validation Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device)
-        outputs = model(batch)
+        batch = batch.to(device).to(torch.int)
+        outputs = model(batch)['logits']
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         validation_predictions.extend(preds)
 
@@ -613,8 +614,8 @@ model.eval()
 with torch.no_grad():
     train_predictions = []
     for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/utils.num_subjects))), desc="Training Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device)
-        outputs = model(batch)
+        batch = batch.to(device).to(torch.int)
+        outputs = model(batch)['logits']
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         train_predictions.extend(preds)
 
