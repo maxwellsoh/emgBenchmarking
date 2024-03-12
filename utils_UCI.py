@@ -16,10 +16,10 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import h5py
 import os
-from scipy.signal import spectrogram
+from scipy.signal import spectrogram, stft
 import pywt
 
-numGestures = 7
+numGestures = 6 # 7 total, but not all subjects have 7
 fs = 1000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
@@ -29,6 +29,7 @@ num_subjects = 36
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
 gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations","extended palm"]
+gesture_labels = gesture_labels[:numGestures]
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -83,11 +84,11 @@ def contract(R):
 
 def filter(emg):
     # sixth-order Butterworth highpass filter
-    b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=2000.0)
+    b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=fs)
     emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 
     #second-order notch filter at 50 Hz
-    b, a = iirnotch(w0=50.0, Q=0.0001, fs=2000.0)
+    b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
 # not needed for Ozdemir
@@ -96,21 +97,31 @@ def getRestim (n):
     n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
         try:
-            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
             restim.append(data[:, -1][balance(data[:, -1])])
         except:
             print("Error reading file", file, "Subject", n)
+    if numGestures == 6:
+        for i in range(len(restim)):
+            restim[i] = restim[i][torch.all(restim[i] != 7, axis=1)]
+        return torch.cat(restim, dim=0)
     return torch.cat(restim, dim=0)
 
 def getEMG (n):
     emg = []
+    restim = []
     n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
         try: 
-            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
             emg.append(data[:, :-1][balance(data[:, -1])])
+            restim.append(data[:, -1][balance(data[:, -1])])
         except:
             print("Error reading file", file, "Subject", n)
+    if numGestures == 6:
+        for i in range(len(restim)):
+            emg[i] = emg[i][torch.all(restim[i] != 7, axis=1)]
+        return torch.cat(emg, dim=0)
     return torch.cat(emg, dim=0)
 
 def getLabels (n):
@@ -164,10 +175,10 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = 50
+    spectrogram_window_size = 64
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
-    frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=0.5*spectrogram_window_size)
-    Sxx_dB = 10 * np.log10(Sxx + 1e-6) # small constant added to avoid log(0)
+    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window
+    Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-6) # small constant added to avoid log(0)
     emg_sample = torch.from_numpy(Sxx_dB)
     emg_sample -= torch.min(emg_sample)
     emg_sample /= torch.max(emg_sample)
@@ -247,7 +258,8 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None, turn_on_spectrogram=False, turn_on_cwt=False):
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, 
+              global_min=None, global_max=None, turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
 
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
@@ -297,6 +309,9 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
             images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
             images_cwt = images_async.get()
         images = images_cwt
+        
+    elif turn_on_hht:
+        NotImplementedError("HHT is not implemented yet")
     
     return images
 
