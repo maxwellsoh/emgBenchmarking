@@ -406,6 +406,40 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         
     return images
 
+def getVocabularizedData(emg, standardScaler, length, width, turn_on_rms=False, 
+                         rms_windows=10, global_min=None, global_max=None, 
+                         vocabulary_size=None, output_width=None):
+
+    if standardScaler is not None:
+        emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+    else:
+        emg = np.array(emg.view(len(emg), length*width))
+        
+    # Use RMS preprocessing
+    if turn_on_rms:
+        emg = emg.reshape(len(emg), length, width)
+        # Reshape data for RMS calculation: (SAMPLES, 16, 5, 10)
+        emg = emg.reshape(len(emg), length, rms_windows, width // rms_windows)
+        
+        # Apply RMS calculation along the last axis (axis=-1)
+        emg_rms = np.apply_along_axis(calculate_rms, -1, emg)
+        emg = emg_rms  # Resulting shape will be (SAMPLES, 16, 5)
+        width = rms_windows
+        emg = emg.reshape(len(emg), length*width)
+
+    if vocabulary_size is not None:
+        emg_vocabularized = getFlattenedAndVocabularizedData(emg, vocabulary_size, 
+                                                             minimum_to_use=global_min, 
+                                                             maximum_to_use=global_max, 
+                                                             output_width=output_width)
+    else: 
+        emg_vocabularized = getFlattenedAndVocabularizedData(emg, 
+                                                             minimum_to_use=global_min, 
+                                                             maximum_to_use=global_max,
+                                                             output_width=output_width)
+        
+    return emg_vocabularized
+
 def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):
     periodLength = 0
     for i in range(cycles):
@@ -413,6 +447,43 @@ def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):
     periodLength = num_epochs / periodLength
     
     return ceil(periodLength)
+
+def getFlattenedAndVocabularizedData(data, vocabulary_size=1024, minimum_to_use=None, maximum_to_use=None, output_width=None):
+    """
+    Flattens the input data and converts it into a vocabulary of discrete values.
+
+    Parameters:
+        data (ndarray): The input data to be flattened and vocabularized.
+        vocabulary_size (int): The number of discrete values in the vocabulary. Default is 1024.
+        minimum_to_use (float): The minimum value to use for vocabularization. If None, the minimum value in the data will be used.
+        maximum_to_use (float): The maximum value to use for vocabularization. If None, the maximum value in the data will be used.
+
+    Returns:
+        ndarray: The vocabularized data, where each value is an index representing a discrete value in the vocabulary.
+        ndarray: The attention mask to indicate which "tokens" are real and which are padding.
+    """
+    
+    if minimum_to_use is None:
+        minimum_to_use = np.min(data)
+    if maximum_to_use is None:
+        maximum_to_use = np.max(data)
+    
+    # Flatten the data
+    data_flattened = data.reshape(data.shape[0], -1)
+
+    if output_width is not None: # interpolate flattened results
+        data_flattened_new_width = np.zeros((data_flattened.shape[0], output_width))
+        for i in range(data_flattened.shape[0]):
+            data_flattened_new_width[i] = np.interp(np.linspace(0, 1, output_width), np.linspace(0, 1, data_flattened.shape[1]), data_flattened[i])
+        data_flattened = data_flattened_new_width
+    # Get the vocabulary
+    vocabulary_bins = np.linspace(minimum_to_use, maximum_to_use, vocabulary_size)
+    
+    # Vocabularize the data
+    data_vocabularized = np.digitize(data_flattened, vocabulary_bins)
+    #attention_mask = np.ones_like(data_vocabularized)
+    
+    return data_vocabularized #, attention_mask
 
 class Data(Dataset):
     def __init__(self, data):
