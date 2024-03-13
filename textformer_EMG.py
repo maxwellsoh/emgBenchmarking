@@ -303,11 +303,12 @@ for subject_number in tqdm(range(len(emg)), desc="Number of Subjects "):
     foldername_zarr = base_foldername_zarr + subject_folder
     
     # Check if the folder (dataset) exists, load if yes, else create and save
-    if os.path.exists(foldername_zarr):
+    if os.path.exists(foldername_zarr) and not ('prajjwal1/bert-' in args.model):
         # Load the dataset
         dataset = zarr.open(foldername_zarr, mode='r')
         print(f"Loaded dataset for subject {subject_number} from {foldername_zarr}")
         data += [dataset[:]]
+    
     else:
         if 'prajjwal1/bert-' in args.model:
             vocabularized_data = utils.getVocabularizedData(emg[subject_number], scaler, length, width,
@@ -376,17 +377,13 @@ else:
     print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
 
 model_name = args.model
-if 'bigbird' in args.model:
-    tokenizer = BigBirdTokenizer.from_pretrained(model_name)
+if 'bigbird' in args.model or 'BigBird' in args.model:
     model = BigBirdForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
 elif 'allenai/longformer-base-4096' in args.model:
-    tokenizer = LongformerTokenizer.from_pretrained(model_name)
     model = LongformerForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
 elif 'prajjwal1/bert-' in args.model:
-    tokenizer = BertTokenizer.from_pretrained(model_name)
     model = BertForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
 else: 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
 
 number_of_layers_to_freeze = 0
