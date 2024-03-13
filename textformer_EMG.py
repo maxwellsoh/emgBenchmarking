@@ -473,6 +473,7 @@ if not os.path.exists(testrun_foldername):
 model_filename = f'{testrun_foldername}model_{formatted_datetime}.pth'
 
 accumulation_steps = 64 // batch_size 
+X_batch_tokenized = {}
 
 torch.cuda.empty_cache()  # Clear cache if needed  
 for epoch in tqdm(range(num_epochs), desc="Epoch"):
@@ -482,13 +483,17 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
     optimizer.zero_grad()
     
     step = 0
+   
     with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
         for X_batch, Y_batch in t:
             X_batch = X_batch.to(device).to(torch.int)
             Y_batch = Y_batch.to(device).to(torch.float32)
 
+            X_batch_tokenized['input_ids'] = X_batch   
+            X_batch_tokenized['attention_mask'] = torch.ones(X_batch.size(), dtype=torch.int).to(device)
+
             # optimizer.zero_grad()
-            output = model(X_batch)['logits']
+            output = model(**X_batch_tokenized)['logits']
             loss = criterion(output, Y_batch)
             loss = loss / accumulation_steps
             loss.backward()
@@ -523,8 +528,11 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
             X_batch = X_batch.to(device).to(torch.int)
             Y_batch = Y_batch.to(device).to(torch.float32)
 
+            X_batch_tokenized['input_ids'] = X_batch   
+            X_batch_tokenized['attention_mask'] = torch.ones(X_batch.size(), dtype=torch.int).to(device)
+
             #output = model(X_batch).logits
-            output = model(X_batch)['logits']
+            output = model(**X_batch_tokenized)['logits']
             val_loss += criterion(output, Y_batch).item()
             preds = torch.argmax(output, dim=1)
             Y_batch_long = torch.argmax(Y_batch, dim=1)
@@ -568,7 +576,10 @@ if (leaveOut == 0):
             X_batch = X_batch.to(device).to(torch.int)
             Y_batch = Y_batch.to(device).to(torch.float32)
 
-            output = model(X_batch)['logits']
+            X_batch_tokenized['input_ids'] = X_batch   
+            X_batch_tokenized['attention_mask'] = torch.ones(X_batch.size(), dtype=torch.int).to(device)
+
+            output = model(**X_batch_tokenized)['logits']
             test_loss += criterion(output, Y_batch).item()
 
             test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
@@ -598,8 +609,11 @@ model.eval()
 with torch.no_grad():
     validation_predictions = []
     for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=batch_size)), desc="Validation Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device).to(torch.int)
-        outputs = model(batch)['logits']
+        X_batch = batch.to(device).to(torch.int)
+
+        X_batch_tokenized['input_ids'] = X_batch   
+        X_batch_tokenized['attention_mask'] = torch.ones(X_batch.size(), dtype=torch.int).to(device)
+        outputs = model(**X_batch_tokenized)['logits']
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         validation_predictions.extend(preds)
 
@@ -612,8 +626,11 @@ model.eval()
 with torch.no_grad():
     train_predictions = []
     for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=batch_size)), desc="Training Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device).to(torch.int)
-        outputs = model(batch)['logits']
+        X_batch = batch.to(device).to(torch.int)
+
+        X_batch_tokenized['input_ids'] = X_batch   
+        X_batch_tokenized['attention_mask'] = torch.ones(X_batch.size(), dtype=torch.int).to(device)
+        outputs = model(**X_batch_tokenized)['logits']
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         train_predictions.extend(preds)
 
