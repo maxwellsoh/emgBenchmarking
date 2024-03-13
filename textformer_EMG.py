@@ -27,6 +27,7 @@ import zarr
 from transformers import BigBirdTokenizer, BigBirdForSequenceClassification
 from transformers import LongformerTokenizer, LongformerForSequenceClassification
 from transformers import BertTokenizer, BertForSequenceClassification
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import gc
 
 import logging
@@ -378,15 +379,15 @@ model_name = args.model
 if 'bigbird' in args.model:
     tokenizer = BigBirdTokenizer.from_pretrained(model_name)
     model = BigBirdForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
-elif 'longformer' in args.model:
+elif 'allenai/longformer-base-4096' in args.model:
     tokenizer = LongformerTokenizer.from_pretrained(model_name)
     model = LongformerForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
 elif 'prajjwal1/bert-' in args.model:
     tokenizer = BertTokenizer.from_pretrained(model_name)
     model = BertForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
 else: 
-    tokenizer = BertTokenizer.from_pretrained(model_name)
-    model = BertForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=utils.numGestures)
 
 number_of_layers_to_freeze = 0
 current_freezing_layer = 0
@@ -400,7 +401,7 @@ for name, param in model.named_parameters():
         param.requires_grad = False
 
 batch_size = 4
-if 'prajjwal1/bert-' in args.model:
+if 'tiny' in args.model or 'small' in args.model or 'mini' in args.model or 'medium' in args.model:
     batch_size = 64
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
