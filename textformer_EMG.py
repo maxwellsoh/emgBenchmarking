@@ -60,10 +60,9 @@ parser.add_argument('--turn_on_cosine_annealing', type=utils.str2bool, help='whe
 parser.add_argument('--turn_on_rms', type=utils.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
 # Add argument for RMS input window size (resulting feature dimension to classifier)
 parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
-# Add argument for whether or not to concatenate magnitude image
 parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 # Add argument for model to use
-parser.add_argument('--model', type=str, help='model to use (e.g. \'allenai/longformer-base-4096\', \'google/bigbird-roberta-base\', \'prajjwal1/bert-tiny\'). Set to resnet50 by default.', default='resnet50')
+parser.add_argument('--model', type=str, help='model to use (e.g. \'allenai/longformer-base-4096\', \'google/bigbird-roberta-base\', \'prajjwal1/bert-tiny\', \'kiddothe2b/longformer-mini-1024\'). Set to resnet50 by default.', default='resnet50')
 # Add argument for project suffix
 parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
 # Add argument for full or partial dataset for Ozdemir EMG dataset
@@ -310,16 +309,10 @@ for subject_number in tqdm(range(len(emg)), desc="Number of Subjects "):
         data += [dataset[:]]
     
     else:
-        if 'prajjwal1/bert-' in args.model:
-            vocabularized_data = utils.getVocabularizedData(emg[subject_number], scaler, length, width,
+        vocabularized_data = utils.getVocabularizedData(emg[subject_number], scaler, length, width,
                                     turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize,
                                     global_min=global_min, global_max=global_max, output_width=512,
                                     vocabulary_size=4096)
-        else:
-            # Get images and create the dataset
-            vocabularized_data = utils.getVocabularizedData(emg[subject_number], scaler, length, width, 
-                                 turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
-                                 global_min=global_min, global_max=global_max, vocabulary_size=4096)
         vocabularized_data = np.array(vocabularized_data, dtype=np.int32)
         
         # Save the dataset
