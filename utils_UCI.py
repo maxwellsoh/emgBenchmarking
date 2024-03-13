@@ -17,7 +17,7 @@ from tqdm import tqdm
 import h5py
 import os
 
-numGestures = 7
+numGestures = 6
 fs = 1000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
@@ -26,7 +26,8 @@ numElectrodes = 8
 num_subjects = 36
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
-gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations","extended palm"]
+#gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations","extended palm"]
+gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations"]
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -68,7 +69,7 @@ def balance (restimulus):
     for x in range (len(restimulus)):
         L = torch.chunk(restimulus[x], 2, dim=0)
         if torch.equal(L[0], L[1]):
-            if (L[0][0] != 0):
+            if (L[0][0] > 0 and L[0][0] < 7):
                 indices.append(x)
     return indices
 
@@ -81,11 +82,13 @@ def contract(R):
 
 def filter(emg):
     # sixth-order Butterworth highpass filter
-    b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=2000.0)
+    #b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=1000.0)
+    #emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
+    b, a = butter(N=3, Wn=5, btype='highpass', analog=False, fs=1000.0)
     emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 
     #second-order notch filter at 50 Hz
-    b, a = iirnotch(w0=50.0, Q=0.0001, fs=2000.0)
+    b, a = iirnotch(w0=50.0, Q=0.0001, fs=1000.0)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
 # not needed for Ozdemir
@@ -101,7 +104,7 @@ def getEMG (n):
     for file in os.listdir(f"uciEMG/{n}/"):
         data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
         emg.append(data[:, :-1][balance(data[:, -1])])
-    return torch.cat(emg, dim=0)
+    return filter(torch.cat(emg, dim=0))
 
 def getLabels (n):
     return contract(getRestim(n))

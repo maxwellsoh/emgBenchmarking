@@ -28,6 +28,10 @@ import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 
 
+# Define a custom argument type for a list of integers
+def list_of_ints(arg):
+    return list(map(int, arg.split(',')))
+
 ## Argument parser with optional argumenets
 
 # Create the parser
@@ -49,7 +53,7 @@ parser.add_argument('--kfold', type=int, help='number of folds for stratified k-
 parser.add_argument('--fold_index', type=int, help='index of the fold to use for cross validation (should be from 1 to --kfold). Set to 1 by default.', default=1)
 # Add argument for whether or not to use cyclical learning rate
 parser.add_argument('--turn_on_cyclical_lr', type=utils.str2bool, help='whether or not to use cyclical learning rate. Set to False by default.', default=False)
-# Add argument for whether or not to use cosine annealing with warm restartfs
+# Add argument for whether or not to use cosine annealing with warm restarts
 parser.add_argument('--turn_on_cosine_annealing', type=utils.str2bool, help='whether or not to use cosine annealing with warm restarts. Set to False by default.', default=False)
 # Add argument for whether or not to use RMS
 parser.add_argument('--turn_on_rms', type=utils.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
@@ -59,9 +63,13 @@ parser.add_argument('--num_rms_windows', type=int, help='number of RMS windows t
 parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 # Add argument for model to use
 parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
+# Add argument for exercises to include
+parser.add_argument('--exercises', type=list_of_ints, help='List the exercises of the 3 to load. The most popular for benchmarking seem to be 2 and 3. Can format as \'--exercises 1,2,3\'', default=[1, 2, 3])
 
 # Parse the arguments
 args = parser.parse_args()
+
+exercises = False
 
 if (args.dataset == "uciEMG"):
     import utils_UCI as utils
@@ -72,11 +80,18 @@ elif (args.dataset == "ninapro-db2"):
     import utils_NinaproDB2 as utils
     print(f"The dataset being tested is ninapro-db2")
     project_name = 'emg_benchmarking_ninapro-db2'
+    exercises = True
 
 elif (args.dataset == "ninapro-db5"):
     import utils_NinaproDB5 as utils
     print(f"The dataset being tested is ninapro-db5")
     project_name = 'emg_benchmarking_ninapro-db5'
+    exercises = True
+
+elif (args.dataset == "M_dataset"):
+    import utils_M_dataset as utils
+    print(f"The dataset being  tested is M_dataset")
+    project_name = 'emg_benchmarking_M_dataset'
 
 else:
     print(f"The dataset being tested is OzdemirEMG")
@@ -108,7 +123,9 @@ if args.turn_on_rms:
     print(f"The value of --num_rms_windows is {args.num_rms_windows}")
 if args.turn_on_magnitude:
     print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
-    
+if exercises:
+    print(f"The value of --exercises is {args.exercises}")
+
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
 formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
@@ -131,12 +148,75 @@ if torch.cuda.is_available():
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-with  multiprocessing.Pool() as pool:
-    emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
-    emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-    
-    labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
-    labels = labels_async.get()
+if (exercises):
+    emg = []
+    labels = []
+
+    with  multiprocessing.Pool() as pool:
+        for exercise in args.exercises:
+            emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
+            emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
+            
+            labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
+            labels.append(labels_async.get())
+            
+            assert len(emg[-1]) == len(labels[-1]), "Number of trials for EMG and labels do not match"
+            
+    # Append exercise sets together and add dimensions to labels if necessary
+
+    new_emg = []  # This will store the concatenated data for each subject
+    new_labels = []  # This will store the concatenated labels for each subject
+    numGestures = 0 # This will store the number of gestures for each subject
+
+    for subject in range(utils.num_subjects): 
+        subject_trials = []  # List to store trials for this subject across all exercise sets
+        subject_labels = []  # List to store labels for this subject across all exercise sets
+        
+        for exercise_set in range(len(emg)):  
+            # Append the trials of this subject in this exercise set
+            subject_trials.append(emg[exercise_set][subject])
+            subject_labels.append(labels[exercise_set][subject])
+
+        concatenated_trials = np.concatenate(subject_trials, axis=0)  # Concatenate trials across exercise sets
+        
+        total_number_labels = 0
+        for i in range(len(subject_labels)):
+            total_number_labels += subject_labels[i].shape[1]
+            
+        # Convert from one hot encoding to labels
+        # Assuming labels are stored separately and need to be concatenated end-to-end
+        labels_set = []
+        index_to_start_at = 0
+        for i in range(len(subject_labels)):
+            subject_labels_to_concatenate = [x + index_to_start_at if x != 0 else 0 for x in np.argmax(subject_labels[i], axis=1)]
+            if (args.dataset == "ninapro-db5"):
+                index_to_start_at = max(subject_labels_to_concatenate)
+            labels_set.append(subject_labels_to_concatenate)
+        
+        # Assuming labels are stored separately and need to be concatenated end-to-end
+        concatenated_labels = np.concatenate(labels_set, axis=0) # (TRIAL)
+        
+        numGestures = len(np.unique(concatenated_labels))
+        
+        # Convert to one hot encoding
+        concatenated_labels = np.eye(numGestures)[concatenated_labels] # (TRIAL, GESTURE)
+        
+        # Append the concatenated trials to the new_emg list
+        new_emg.append(concatenated_trials)
+        new_labels.append(concatenated_labels)
+
+    emg = [torch.from_numpy(emg_np) for emg_np in new_emg]
+    labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
+
+else:
+    with  multiprocessing.Pool() as pool:
+        emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
+        emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+        
+        labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
+        labels = labels_async.get()
+
+    numGestures = utils.numGestures
 
 length = len(emg[0][0])
 width = len(emg[0][0][0])
@@ -332,7 +412,7 @@ if args.model == 'resnet50':
     model.add_module('fc1', nn.Linear(num_features, 512))
     model.add_module('relu', nn.ReLU())
     model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(512, utils.numGestures))
+    model.add_module('fc3', nn.Linear(512, numGestures))
     model.add_module('softmax', nn.Softmax(dim=1))
 elif args.model == 'convnext_tiny_custom':
     # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
@@ -345,7 +425,7 @@ elif args.model == 'convnext_tiny_custom':
 
     n_inputs = 768
     hidden_size = 128 # default is 2048
-    n_outputs = utils.numGestures
+    n_outputs = numGestures
 
     # model = timm.create_model(model_name, pretrained=True, num_classes=10)
     model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
@@ -373,7 +453,7 @@ elif args.model == 'convnext_tiny_custom':
 else: 
     # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
     # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-    model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
+    model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
     # # Load the Vision Transformer model
     # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
     # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
@@ -432,6 +512,8 @@ if args.turn_on_magnitude:
 if args.leftout_subject != 0:
     wandb_runname += '_LOSO-'+str(args.leftout_subject)
 wandb_runname += '_' + model_name
+if (exercises):
+    wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
@@ -457,16 +539,23 @@ if not os.path.exists(testrun_foldername):
     os.makedirs(testrun_foldername)
 model_filename = f'{testrun_foldername}model_{formatted_datetime}.pth'
 
+if (exercises):
+    gesture_labels = utils.gesture_labels['Rest']
+    for exercise_set in args.exercises:
+        gesture_labels = gesture_labels + utils.gesture_labels[exercise_set]
+else:
+    gesture_labels = utils.gesture_labels
+
 if leaveOut == 0:
     # Plot and log images
-    utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-    utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
-utils.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
-utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+utils.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
 
-utils.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+utils.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
 
 for epoch in tqdm(range(num_epochs), desc="Epoch"):
     model.train()
@@ -559,7 +648,7 @@ if (leaveOut == 0):
     
     # %% Confusion Matrix
     # Plot and log confusion matrix in wandb
-    utils.plot_confusion_matrix(true, pred, utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    utils.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
 # Load validation in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
@@ -573,7 +662,7 @@ with torch.no_grad():
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         validation_predictions.extend(preds)
 
-utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
 
 # Load training in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
@@ -587,6 +676,6 @@ with torch.no_grad():
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         train_predictions.extend(preds)
 
-utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
     
 run.finish()

@@ -12,4 +12,5 @@ LOSOimages_zarr/
 .gitignore
 OzdemirEMG/
 uciEMG/
+M_dataset/
 *.zip

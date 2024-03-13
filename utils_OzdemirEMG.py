@@ -104,9 +104,9 @@ def getEMG (n):
     file = h5py.File('DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     emg = []
     for gesture in gesture_labels:
-        data = filter(torch.from_numpy(np.array(file["Gesture" + gesture]))).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
+        data = torch.from_numpy(np.array(file["Gesture" + gesture])).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
         emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)))
-    return torch.cat(emg, dim=0)
+    return filter(torch.cat(emg, dim=0))
 
 # size of 4800 assumes 250 ms window
 def getLabels (n):
