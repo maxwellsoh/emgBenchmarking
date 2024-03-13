@@ -217,8 +217,11 @@ def calculate_rms(array_2d):
     return np.sqrt(np.mean(array_2d**2))
 
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None):
+    if standardScaler is not None:
+        emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+    else:
+        emg = np.array(emg.view(len(emg), length*width))
 
-    emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
     # Use RMS preprocessing
     if turn_on_rms:
         emg = emg.reshape(len(emg), length, width)

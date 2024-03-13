@@ -16,8 +16,10 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import h5py
 import os
+from scipy.signal import spectrogram, stft
+import pywt
 
-numGestures = 6
+numGestures = 6 # 7 total, but not all subjects have 7
 fs = 1000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
@@ -26,8 +28,8 @@ numElectrodes = 8
 num_subjects = 36
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
-#gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations","extended palm"]
-gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations"]
+gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations","extended palm"]
+gesture_labels = gesture_labels[:numGestures]
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -82,32 +84,126 @@ def contract(R):
 
 def filter(emg):
     # sixth-order Butterworth highpass filter
-    #b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=1000.0)
-    #emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
-    b, a = butter(N=3, Wn=5, btype='highpass', analog=False, fs=1000.0)
+    b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=fs)
     emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 
     #second-order notch filter at 50 Hz
-    b, a = iirnotch(w0=50.0, Q=0.0001, fs=1000.0)
+    b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
 # not needed for Ozdemir
 def getRestim (n):
     restim = []
+    n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
-        data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-        restim.append(data[:, -1][balance(data[:, -1])])
+        try:
+            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+            restim.append(data[:, -1][balance(data[:, -1])])
+        except:
+            print("Error reading file", file, "Subject", n)
+    if numGestures == 6:
+        for i in range(len(restim)):
+            restim[i] = restim[i][torch.all(restim[i] != 7, axis=1)]
+        return torch.cat(restim, dim=0)
     return torch.cat(restim, dim=0)
 
 def getEMG (n):
     emg = []
+    restim = []
+    n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
-        data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float16, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-        emg.append(data[:, :-1][balance(data[:, -1])])
-    return filter(torch.cat(emg, dim=0))
+        try: 
+            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+            emg.append(data[:, :-1][balance(data[:, -1])])
+            restim.append(data[:, -1][balance(data[:, -1])])
+        except:
+            print("Error reading file", file, "Subject", n)
+    if numGestures == 6:
+        for i in range(len(restim)):
+            emg[i] = emg[i][torch.all(restim[i] != 7, axis=1)]
+        return torch.cat(emg, dim=0)
+    return torch.cat(emg, dim=0)
 
 def getLabels (n):
     return contract(getRestim(n))
+
+def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
+    emg_sample = data
+    # Convert EMG sample to numpy array for CWT computation
+    emg_sample_np = emg_sample.astype(np.float16).flatten()
+    highest_cwt_scale = 31
+    downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
+    scales = np.arange(1, highest_cwt_scale)  
+    wavelet = 'cmor1.5-1.0'  # Complex Morlet wavelet; adjust as needed
+    # Perform Continuous Wavelet Transform (CWT)
+    # Note: PyWavelets returns scales and coeffs (coefficients)
+    coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
+    coefficients_dB = 10 * np.log10(np.abs(coefficients) + 1e-6)  # Adding a small constant to avoid log(0)
+    # Convert back to PyTorch tensor and reshape
+    emg_sample = torch.tensor(coefficients_dB).float().reshape(-1, coefficients_dB.shape[-1])
+    # Normalization
+    emg_sample -= torch.min(emg_sample)
+    emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
+    blocks = emg_sample.reshape(highest_cwt_scale-1, numElectrodes, -1)
+    emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale-1), -1)
+        
+    # Update 'window_size' if necessary
+    window_size = emg_sample.shape[1]
+
+    emg_sample -= torch.min(emg_sample)
+    emg_sample /= torch.max(emg_sample)
+    data = emg_sample
+
+    data_converted = cmap(data)
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+    
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp between 0 and 1 using torch.clamp
+    image_clamped = torch.clamp(image_resized, 0, 1)
+
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    # Since no split occurs, we don't need to concatenate halves back together
+    final_image = image_normalized.numpy().astype(np.float32)
+
+    return final_image
+
+def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
+    spectrogram_window_size = 64
+    emg_sample_unflattened = data.reshape(numElectrodes, -1)
+    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window
+    Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-6) # small constant added to avoid log(0)
+    emg_sample = torch.from_numpy(Sxx_dB)
+    emg_sample -= torch.min(emg_sample)
+    emg_sample /= torch.max(emg_sample)
+    emg_sample = emg_sample.reshape(emg_sample.shape[0]*emg_sample.shape[1], emg_sample.shape[2])
+    data = emg_sample
+
+    data_converted = cmap(data)
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+    
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp between 0 and 1 using torch.clamp
+    image_clamped = torch.clamp(image_resized, 0, 1)
+
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    final_image = image_normalized.numpy().astype(np.float32)
+
+    return final_image
+
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
@@ -134,39 +230,42 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
 
 def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size):
     # Contrast normalize and convert data
-    # NOTE: Should this be contrast normalized? Then only patterns of data will be visible, not absolute values
     data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
     image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
     image = np.transpose(image_data, (2, 0, 1))
     
-    # Split image and resize
-    imageL, imageR = np.split(image, 2, axis=2)
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+    # Resize the whole image instead of splitting it
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
                                interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    image = resize(torch.from_numpy(image))
     
     # Get max and min values after interpolation
-    max_val = max(imageL.max(), imageR.max())
-    min_val = min(imageL.min(), imageR.min())
+    max_val = image.max()
+    min_val = image.min()
     
     # Contrast normalize again after interpolation
-    imageL, imageR = map(lambda img: (img - min_val) / (max_val - min_val), (imageL, imageR))
+    image = (image - min_val) / (max_val - min_val)
     
     # Normalize with standard ImageNet normalization
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    imageL, imageR = map(normalize, (imageL, imageR))
+    image = normalize(image)
     
-    return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
+    return image.numpy().astype(np.float32)
 
 def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None):
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, 
+              global_min=None, global_max=None, turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
 
-    emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+    if standardScaler is not None:
+        emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+    else:
+        emg = np.array(emg.view(len(emg), length*width))
+        
     # Use RMS preprocessing
     if turn_on_rms:
         emg = emg.reshape(len(emg), length, width)
@@ -196,6 +295,23 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
             images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
             images_magnitude = images_async.get()
         images = np.concatenate((images, images_magnitude), axis=2)
+
+    elif turn_on_spectrogram:
+        with multiprocessing.Pool(processes=5) as pool:
+            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+            images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
+            images_spectrogram = images_async.get()
+        images = images_spectrogram
+    
+    elif turn_on_cwt:
+        with multiprocessing.Pool(processes=5) as pool:
+            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+            images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
+            images_cwt = images_async.get()
+        images = images_cwt
+        
+    elif turn_on_hht:
+        NotImplementedError("HHT is not implemented yet")
     
     return images
 
@@ -260,13 +376,13 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
         gesture_indices = np.where(true_np == i)[0]
 
         # Select and denormalize only the required images
-        gesture_images = denormalize(image_data[gesture_indices]).cpu().detach().numpy()
+        gesture_images = denormalize(transforms.Resize((224,224))(image_data[gesture_indices])).cpu().detach().numpy()
         average_images.append(np.mean(gesture_images, axis=0))
 
     average_images = np.array(average_images)
 
     # Plot average image of each gesture
-    fig, axs = plt.subplots(2, 9, figsize=(10, 5))
+    fig, axs = plt.subplots(2, 9, figsize=(10, 10))
     for i in range(numGestures):
         axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])
@@ -289,7 +405,7 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     total_gestures = numGestures  # Replace with the actual number of gestures
 
     # Create subplots
-    fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))
+    fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 20))
 
     print(f"Plotting first fifteen {partition_name} images...")
     for i in range(total_gestures):
@@ -297,7 +413,7 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
         gesture_indices = np.where(true_np == i)[0][:rows_per_gesture]
         
         # Select and denormalize only the required images
-        gesture_images = denormalize(image_data[gesture_indices]).cpu().detach().numpy()
+        gesture_images = denormalize(transforms.Resize((224,224))(image_data[gesture_indices])).cpu().detach().numpy()
 
         for j in range(len(gesture_images)):  # len(gesture_images) is no more than rows_per_gesture
             ax = axs[j, i]
