@@ -28,7 +28,6 @@ import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
 
-
 ## Argument parser with optional argumenets
 
 # Create the parser
@@ -74,6 +73,8 @@ parser.add_argument('--turn_on_hht', type=utils.str2bool, help='whether or not t
 parser.add_argument('--save_images', type=utils.str2bool, help='whether or not to save images. Set to False by default.', default=False)
 # Add argument to turn off scaler normalization
 parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help='whether or not to turn off scaler normalization. Set to False by default.', default=False)
+# Add argument to change learning rate
+parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 1e-4 by default.', default=1e-4)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -135,6 +136,10 @@ print(f"The value of --project_name_suffix is {args.project_name_suffix}")
 print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
 print(f"The value of --turn_on_cwt is {args.turn_on_cwt}")
 print(f"The value of --turn_on_hht is {args.turn_on_hht}")
+
+print(f"The value of --save_images is {args.save_images}")
+print(f"The value of --turn_off_scaler_normalization is {args.turn_off_scaler_normalization}")
+print(f"The value of --learning_rate is {args.learning_rate}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -473,7 +478,7 @@ if (leaveOut == 0):
 
 # Define the loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-learn = 1e-4
+learn = args.learning_rate
 optimizer = torch.optim.Adam(model.parameters(), lr=learn)
 
 num_epochs = args.epochs
@@ -520,6 +525,8 @@ if args.turn_on_cwt:
     wandb_runname += '_cwt'
 if args.turn_on_hht:
     wandb_runname += '_hht'
+if args.learning_rate != 1e-4:
+    wandb_runname += '_lr-'+str(args.learning_rate)
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
