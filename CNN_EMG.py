@@ -75,6 +75,8 @@ parser.add_argument('--save_images', type=utils.str2bool, help='whether or not t
 parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help='whether or not to turn off scaler normalization. Set to False by default.', default=False)
 # Add argument to change learning rate
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 1e-4 by default.', default=1e-4)
+# Add argument to specify which gpu to use (if any gpu exists)
+parser.add_argument('--gpu', type=int, help='which gpu to use. Set to 0 by default.', default=0)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -140,6 +142,7 @@ print(f"The value of --turn_on_hht is {args.turn_on_hht}")
 print(f"The value of --save_images is {args.save_images}")
 print(f"The value of --turn_off_scaler_normalization is {args.turn_off_scaler_normalization}")
 print(f"The value of --learning_rate is {args.learning_rate}")
+print(f"The value of --gpu is {args.gpu}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -541,7 +544,7 @@ run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:" + str(args.gpu) if torch.cuda.is_available() else "cpu")
 print("Device:", device)
 model.to(device)
 
