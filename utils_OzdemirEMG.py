@@ -371,34 +371,34 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         resize_length_factor = 3
     native_resnet_size = 224
 
-    with multiprocessing.Pool(processes=32) as pool:
+    with multiprocessing.Pool(processes=16) as pool:
         args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
         images_async = pool.starmap_async(optimized_makeOneImage, args)
         images = images_async.get()
 
     if turn_on_magnitude:
-        with multiprocessing.Pool(processes=32) as pool:
+        with multiprocessing.Pool(processes=16) as pool:
             args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
             images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
             images_magnitude = images_async.get()
         images = np.concatenate((images, images_magnitude), axis=2)
 
     elif turn_on_spectrogram:
-        with multiprocessing.Pool(processes=32) as pool:
+        with multiprocessing.Pool(processes=16) as pool:
             args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
             images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
             images_spectrogram = images_async.get()
         images = images_spectrogram
 
     elif turn_on_cwt:
-        with multiprocessing.Pool(processes=32) as pool:
+        with multiprocessing.Pool(processes=16) as pool:
             args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
             images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
             images_cwt = images_async.get()
         images = images_cwt
     
     elif turn_on_hht:
-        with multiprocessing.Pool(processes=32) as pool:
+        with multiprocessing.Pool(processes=16) as pool:
             args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
             images_async = pool.starmap_async(optimized_makeOneHilbertHuangImage, args)
             images_hilbert_huang = images_async.get()
