@@ -82,7 +82,8 @@ parser.add_argument('--save_images', type=utils.str2bool, help='whether or not t
 parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help='whether or not to turn off scaler normalization. Set to False by default.', default=False)
 # Add argument to leve n subjects out randomly
 parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
-
+# use target domain for normalization
+parser.add_argument('--target_normalize', type=utils.str2bool, help='use a leftout window for normalization. Set to False by default.', default=False)
 # Parse the arguments
 args = parser.parse_args()
 
@@ -107,8 +108,13 @@ elif (args.dataset == "ninapro-db5"):
 
 elif (args.dataset == "M_dataset"):
     import utils_M_dataset as utils
-    print(f"The dataset being  tested is M_dataset")
+    print(f"The dataset being tested is M_dataset")
     project_name = 'emg_benchmarking_M_dataset'
+
+elif (args.dataset == "hyser"):
+    import utils_hyser as utils
+    print(f"The dataset being tested is hyser")
+    project_name = 'emg_benchmarking_hyser'
 
 else:
     print(f"The dataset being tested is OzdemirEMG")
@@ -243,13 +249,26 @@ if (exercises):
     labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
 
 else:
-    with  multiprocessing.Pool() as pool:
-        emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
-        emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-        
-        labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
-        labels = labels_async.get()
+    # assumes operating in LOSO
+    if (args.target_normalize):
+        mins, maxes = utils.getExtrema(args.leftout_subject + 1)
+        with multiprocessing.Pool() as pool:
+            emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
+            emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+            
+            labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
+            labels = labels_async.get()
 
+    else:
+        #with multiprocessing.pool.ThreadPool() as pool:
+        with multiprocessing.Pool() as pool:
+            emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
+            emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+            
+            labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
+            labels = labels_async.get()
+
+    print("subject 1 mean", torch.mean(emg[0]))
     numGestures = utils.numGestures
 
 length = len(emg[0][0])
@@ -469,6 +488,8 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
         data += [dataset[:]]
     else:
         # Get images and create the dataset
+        if (args.target_normalize):
+            scaler = None
         images = utils.getImages(emg[x], scaler, length, width, 
                                  turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
                                  turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value, 
@@ -690,6 +711,8 @@ if args.leave_n_subjects_out_randomly != 0:
     wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
 if args.turn_off_scaler_normalization:
     wandb_runname += '_no-scaler-normalization'
+if args.target_normalize:
+    wandb_runname += '_target-normalize'
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
@@ -700,7 +723,7 @@ else:
     project_name += '_LOSO'
 project_name += args.project_name_suffix
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
+run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
 wandb.config.lr = learn
 if args.leave_n_subjects_out_randomly != 0:
     wandb.config.left_out_subjects = leaveOutIndices

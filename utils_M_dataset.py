@@ -85,17 +85,54 @@ def format_emg (data):
             emg[i][j] = data[i * numElectrodes + j]
     return emg
 
-def getEMG (n):
+# target is [# channels, # gestures]
+def normalize (data, target_min, target_max, gesture):
+    source_min = np.zeros(len(data[0]), dtype=np.float32)
+    source_max = np.zeros(len(data[0]), dtype=np.float32)
+    for i in range(len(data[0])):
+        source_min[i] = np.min(data[:, i])
+        source_max[i] = np.max(data[:, i])
+
+    for i in range(len(data[0])):
+        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
+    return data
+
+def getEMG (args):
+    if (type(args) == int):
+        n = args
+    else:
+        n = args[0]
+        target_max = args[1]
+        target_min = args[2]
+        leftout = args[3]
+
     emg = []
     for i in range(numGestures * 4):
         if (n < 3):
             data = np.fromfile(f'M_dataset/Female{n-1}/Test1/classe_{i}.dat', dtype=np.int16)
         else:
             data = np.fromfile(f'M_dataset/Male{n-3}/Test1/classe_{i}.dat', dtype=np.int16)
-        #emg.append(torch.from_numpy(np.array(data, dtype=np.float32)).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
-        emg.append(torch.from_numpy(format_emg(np.array(data, dtype=np.float32))).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
+        data = format_emg(np.array(data, dtype=np.float32))
+        if (type(args) != int and leftout != n):
+            data = normalize(data, target_min, target_max, i % numGestures)
+        emg.append(torch.from_numpy(data).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
     emg = filter(torch.cat(emg, dim=0))
     return emg
+
+def getExtrema (n):
+    mins = np.zeros((numElectrodes, numGestures))
+    maxes = np.zeros((numElectrodes, numGestures))
+    for i in range(numGestures):
+        if (n < 3):
+            data = np.fromfile(f'M_dataset/Female{n-1}/Test1/classe_{i}.dat', dtype=np.int16)
+        else:
+            data = np.fromfile(f'M_dataset/Male{n-3}/Test1/classe_{i}.dat', dtype=np.int16)
+        data = format_emg(np.array(data, dtype=np.float32))
+        for j in range(numElectrodes):
+            mins[j][i] = np.min(data[:, j])
+            maxes[j][i] = np.max(data[:, j])
+    return mins, maxes
 
 def getLabels (n):
     labels = []
@@ -163,9 +200,13 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None):
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_cwt=False,
+              turn_on_hht=False, global_min=None, global_max=None):
 
-    emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+    if (standardScaler != None):
+        emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+    else:
+        emg = np.array(emg.view(len(emg), length*width))
     # Use RMS preprocessing
     if turn_on_rms:
         emg = emg.reshape(len(emg), length, width)

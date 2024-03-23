@@ -13,4 +13,5 @@ LOSOimages_zarr/
 OzdemirEMG/
 uciEMG/
 M_dataset/
+hyser/
 *.zip
