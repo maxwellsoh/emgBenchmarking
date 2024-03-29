@@ -60,6 +60,7 @@ parser.add_argument('--turn_on_cosine_annealing', type=utils.str2bool, help='whe
 parser.add_argument('--turn_on_rms', type=utils.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
 # Add argument for RMS input window size (resulting feature dimension to classifier)
 parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
+# Add argument for whether or not to concatenate magnitude image
 parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 # Add argument for model to use
 parser.add_argument('--model', type=str, help='model to use (e.g. \'allenai/longformer-base-4096\', \'google/bigbird-roberta-base\', \'prajjwal1/bert-tiny\', \'kiddothe2b/longformer-mini-1024\'). Set to resnet50 by default.', default='resnet50')
