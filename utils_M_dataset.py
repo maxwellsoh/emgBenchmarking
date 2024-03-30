@@ -14,74 +14,22 @@ from sklearn.metrics import confusion_matrix
 import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from scipy import io
+import h5py
+import os
 
-fs = 2000 #Hz
+numGestures = 7
+fs = 200.0 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 100 #50 ms
-numElectrodes = 12
-num_subjects = 40
+stepLen = 10 #50 ms
+numElectrodes = 8
+num_subjects = 18
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
-gesture_labels = {}
-gesture_labels['Rest'] = ['Rest'] # Shared between exercises
+gesture_labels = ["Neutral","Radial Deviation","Wrist Flexion","Ulnar Deviation","Wrist Extension","Hand Close","Hand Open"]
 
-gesture_labels[1] = ['Index Flexion', 'Index Extension', 'Middle Flexion', 'Middle Extension', 'Ring Flexion', 'Ring Extension',
-                    'Little Finger Flexion', 'Little Finger Extension', 'Thumb Adduction', 'Thumb Abduction', 'Thumb Flexion',
-                    'Thumb Extension'] # End exercise A
-
-gesture_labels[2] = ['Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction',
-                    'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation',
-                    'Ulnar Deviation', 'Wrist Extension Fist'] # End exercise B
-
-gesture_labels[3] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook Grasp', 'Index Finger Extension Grasp', 'Medium Wrap',
-                    'Ring Grasp', 'Prismatic Four Fingers Grasp', 'Stick Grasp', 'Writing Tripod Grasp', 'Power Sphere Grasp', 'Three Finger Sphere Grasp', 'Precision Sphere Grasp',
-                    'Tripod Grasp', 'Prismatic Pinch Grasp', 'Tip Pinch Grasp', 'Quadrupod Grasp', 'Lateral Grasp', 'Parallel Extension Grasp', 'Extension Type Grasp', 'Power Disk Grasp',
-                    'Open A Bottle With A Tripod Grasp', 'Turn A Screw', 'Cut Something'] # End exercise C
-
-class CustomDataset_swav(Dataset):
-    def __init__(self, data, labels=None, transform=None):
-        self.data = data
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        x = self.data[idx]
-        y = self.labels[idx]
-        
-        if self.transform:
-            x = self.transform(x)
-        
-        return x, y
-    
-class CustomDataset_Simclr(Dataset):
-    def __init__(self, data, labels=None, transform=None):
-        self.data = data
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        x = self.data[idx]
-        if self.transform:
-            x_i = self.transform(x)
-            x_j = self.transform(x)
-        else:
-            x_i = x_j = x
-        
-        if self.labels is not None:
-            y = self.labels[idx]
-            return (x_i, x_j), y
-        return (x_i, x_j)
-    
 class CustomDataset(Dataset):
-    def __init__(self, data, labels=None, transform=None):
+    def __init__(self, data, labels, transform=None):
         self.data = data
         self.labels = labels
         self.transform = transform
@@ -92,12 +40,12 @@ class CustomDataset(Dataset):
     def __getitem__(self, idx):
         x = self.data[idx]
         y = self.labels[idx]
-        
+
         if self.transform:
             x = self.transform(x)
-        
+
         return x, y
-        
+
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -113,51 +61,89 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance (restimulus):
-    numZero = 0
-    indices = []
-    #print(restimulus.shape)
-    for x in range (len(restimulus)):
-        L = torch.chunk(restimulus[x], 2, dim=1)
-        if torch.equal(L[0], L[1]):
-            if L[0][0][0] == 0:
-                if (numZero < 550):
-                    #print("working")
-                    indices += [x]
-                numZero += 1
-            else:
-                indices += [x]
-    return indices
-
 def contract(R):
-    numGestures = R.max() + 1
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
     for x in range(len(R)):
-        labels[x][int(R[x][0][0])] = 1.0
+        labels[x][int(R[x]) - 1] = 1.0
     return labels
 
 def filter(emg):
     # sixth-order Butterworth highpass filter
-    b, a = butter(N=1, Wn=999.0, btype='lowpass', analog=False, fs=2000.0)
-    return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
+    b, a = butter(N=3, Wn=5, btype='highpass', analog=False, fs=fs)
+    emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 
-def getRestim (n: int, exercise: int = 2):
-    restim = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['restimulus'])
-    return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+    #second-order notch filter at 50 Hz
+    b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
+    return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
+
+# partition data by channel
+def format_emg (data):
+    emg = np.zeros((len(data) // numElectrodes, numElectrodes))
+    for i in range(len(data) // numElectrodes):
+        for j in range(numElectrodes):
+            emg[i][j] = data[i * numElectrodes + j]
+    return emg
+
+# target is [# channels, # gestures]
+def normalize (data, target_min, target_max, gesture):
+    source_min = np.zeros(len(data[0]), dtype=np.float32)
+    source_max = np.zeros(len(data[0]), dtype=np.float32)
+    for i in range(len(data[0])):
+        source_min[i] = np.min(data[:, i])
+        source_max[i] = np.max(data[:, i])
+
+    for i in range(len(data[0])):
+        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
+    return data
 
 def getEMG (args):
-    n, exercise = args
-    restim = getRestim(n, exercise)
-    #emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
-    #emg = torch.tensor(emg.values)
-    emg = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['emg'])
-    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+    if (type(args) == int):
+        n = args
+    else:
+        n = args[0]
+        target_max = args[1]
+        target_min = args[2]
+        leftout = args[3]
 
-def getLabels (args):
-    n, exercise = args
-    restim = getRestim(n, exercise)
-    return contract(restim[balance(restim)])
+    emg = []
+    for i in range(numGestures * 4):
+        if (n < 3):
+            data = np.fromfile(f'M_dataset/Female{n-1}/Test1/classe_{i}.dat', dtype=np.int16)
+        else:
+            data = np.fromfile(f'M_dataset/Male{n-3}/Test1/classe_{i}.dat', dtype=np.int16)
+        data = format_emg(np.array(data, dtype=np.float32))
+        if (type(args) != int and leftout != n):
+            data = normalize(data, target_min, target_max, i % numGestures)
+        emg.append(torch.from_numpy(data).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
+    emg = filter(torch.cat(emg, dim=0))
+    return emg
+
+def getExtrema (n):
+    mins = np.zeros((numElectrodes, numGestures))
+    maxes = np.zeros((numElectrodes, numGestures))
+    for i in range(numGestures):
+        if (n < 3):
+            data = np.fromfile(f'M_dataset/Female{n-1}/Test1/classe_{i}.dat', dtype=np.int16)
+        else:
+            data = np.fromfile(f'M_dataset/Male{n-3}/Test1/classe_{i}.dat', dtype=np.int16)
+        data = format_emg(np.array(data, dtype=np.float32))
+        for j in range(numElectrodes):
+            mins[j][i] = np.min(data[:, j])
+            maxes[j][i] = np.max(data[:, j])
+    return mins, maxes
+
+def getLabels (n):
+    labels = []
+    for i in range(numGestures * 4):
+        if (n < 3):
+            data = np.fromfile(f'M_dataset/Female{n-1}/Test1/classe_{i}.dat', dtype=np.int16)
+        else:
+            data = np.fromfile(f'M_dataset/Male{n-3}/Test1/classe_{i}.dat', dtype=np.int16)
+        labels.append(torch.from_numpy((i % numGestures) + np.zeros(torch.from_numpy(format_emg(np.array(data, dtype=np.float32))).unfold(dimension=0, size=wLenTimesteps, step=stepLen).shape[0])))
+    labels = contract(torch.cat(labels, dim=0))
+    return labels
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
@@ -169,10 +155,9 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
     
     # Split image and resize
     imageL, imageR = np.split(image, 2, axis=2)
-    #resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-    #                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    #imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
-    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
     
     # Clamp between 0 and 1 using torch.clamp
     imageL, imageR = map(lambda img: torch.clamp(img, 0, 1), (imageL, imageR))
@@ -194,10 +179,9 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     
     # Split image and resize
     imageL, imageR = np.split(image, 2, axis=2)
-    #resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-    #                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    #imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
-    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
     
     # Get max and min values after interpolation
     max_val = max(imageL.max(), imageR.max())
@@ -216,12 +200,13 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None):
-    if standardScaler is not None:
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_cwt=False,
+              turn_on_hht=False, global_min=None, global_max=None):
+
+    if (standardScaler != None):
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
     else:
         emg = np.array(emg.view(len(emg), length*width))
-
     # Use RMS preprocessing
     if turn_on_rms:
         emg = emg.reshape(len(emg), length, width)
@@ -310,8 +295,6 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     # Calculate average image of each gesture
     average_images = []
     print(f"Plotting average {partition_name} images...")
-    numGestures = len(gesture_labels)
-
     for i in range(numGestures):
         # Find indices
         gesture_indices = np.where(true_np == i)[0]
@@ -343,7 +326,7 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
 
     # Parameters for plotting
     rows_per_gesture = 15
-    total_gestures = len(gesture_labels)  # Replace with the actual number of gestures
+    total_gestures = numGestures  # Replace with the actual number of gestures
 
     # Create subplots
     fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))
