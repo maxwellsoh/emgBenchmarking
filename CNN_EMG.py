@@ -80,6 +80,10 @@ parser.add_argument('--turn_on_hht', type=utils.str2bool, help='whether or not t
 parser.add_argument('--save_images', type=utils.str2bool, help='whether or not to save images. Set to False by default.', default=False)
 # Add argument to turn off scaler normalization
 parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help='whether or not to turn off scaler normalization. Set to False by default.', default=False)
+# Add argument to change learning rate
+parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 1e-4 by default.', default=1e-4)
+# Add argument to specify which gpu to use (if any gpu exists)
+parser.add_argument('--gpu', type=int, help='which gpu to use. Set to 0 by default.', default=0)
 # Add argument to leve n subjects out randomly
 parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
 # use target domain for normalization
@@ -164,6 +168,8 @@ print(f"The value of --turn_on_hht is {args.turn_on_hht}")
 
 print(f"The value of --save_images is {args.save_images}")
 print(f"The value of --turn_off_scaler_normalization is {args.turn_off_scaler_normalization}")
+print(f"The value of --learning_rate is {args.learning_rate}")
+print(f"The value of --gpu is {args.gpu}")
 print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_out_randomly}")
     
 # Add date and time to filename
@@ -188,6 +194,12 @@ if torch.cuda.is_available():
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+with  multiprocessing.Pool(processes=16) as pool:
+    emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
+    emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+    
+    labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
+    labels = labels_async.get()
 if (exercises):
     emg = []
     labels = []
@@ -658,7 +670,7 @@ if (leaveOut == 0):
 
 # Define the loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-learn = 1e-4
+learn = args.learning_rate
 optimizer = torch.optim.Adam(model.parameters(), lr=learn)
 
 num_epochs = args.epochs
@@ -707,6 +719,8 @@ if args.turn_on_cwt:
     wandb_runname += '_cwt'
 if args.turn_on_hht:
     wandb_runname += '_hht'
+if args.learning_rate != 1e-4:
+    wandb_runname += '_lr-'+str(args.learning_rate)
 if args.leave_n_subjects_out_randomly != 0:
     wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
 if args.turn_off_scaler_normalization:
@@ -728,7 +742,7 @@ wandb.config.lr = learn
 if args.leave_n_subjects_out_randomly != 0:
     wandb.config.left_out_subjects = leaveOutIndices
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:" + str(args.gpu) if torch.cuda.is_available() else "cpu")
 print("Device:", device)
 model.to(device)
 
