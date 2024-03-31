@@ -581,6 +581,13 @@ if args.turn_on_hht:
     wandb_runname += '_hht'
 if args.learning_rate != 1e-4:
     wandb_runname += '_lr-'+str(args.learning_rate)
+    
+if args.load_diffusion_generated_images:
+    wandb_runname += '_diffusion-generated' + '_guidance-scales-' + '_'.join(args.guidance_scales)
+    
+if args.reduce_training_data_size:
+    wandb_runname += '_reduced-training-data-size-' + str(args.reduced_training_data_size)
+
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
@@ -589,11 +596,6 @@ if (leaveOut == 0):
         project_name += '_heldout'
 else:
     project_name += '_LOSO'
-if args.load_diffusion_generated_images:
-    project_name += '_diffusion-generated' + '_guidance-scales-' + '_'.join(args.guidance_scales)
-    
-if args.reduce_training_data_size:
-    project_name += '_reduced-training-data-size-' + str(args.reduced_training_data_size)
 
 project_name += args.project_name_suffix
 
@@ -739,7 +741,7 @@ with torch.no_grad():
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         validation_predictions.extend(preds)
 
-utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().FFnumpy(), axis=1), np.array(validation_predictions), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
 
 # Load training in smaller batches for memory purposes
 torch.cuda.empty_cache()  # Clear cache if needed
@@ -747,8 +749,8 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     train_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/utils.num_subjects))), desc="Training Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device)
+    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=batch_size)), desc="Training Batch Loading"):  # Or some other number that fits in memory
+        batch = batch.to(device).to(torch.float32)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
         train_predictions.extend(preds)
