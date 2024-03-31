@@ -1,10 +1,20 @@
 import multiprocessing
 import os
 
+import argparse
 import numpy as np
 import zarr
 from PIL import Image
 
+
+args = argparse.ArgumentParser()
+args.add_argument("--zarr_path", type=str, default="LOSOimages_zarr/OzdemirEMG/LOSO_no_scaler_normalization/hht/")
+args.add_argument("--save_dir", type=str, default="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/hht/")
+args.add_argument("--loso_subject_number", type=int, default=1)
+args = args.parse_args()
+
+zarr_path_to_subject = args.zarr_path + f"LOSO_subject{args.loso_subject_number}/"
+save_dir_for_subject = args.save_dir + f"LOSO_subject{args.loso_subject_number}/"
 
 def denormalize(images):
     # Define mean and std from imageNet
@@ -70,8 +80,8 @@ def process_image(image_data, labels, gesture_labels_partial, save_dir, i, j):
 def process_images_range(start, end):
     for i in range(start, end):
         # Path to the Zarr dataset
-        zarr_path = f'examples/dreambooth/emg/cwt/LOSO_subject{i}/'
-        save_dir = f'examples/dreambooth/emg_images/cwt/LOSO_subject{i}/'
+        zarr_path = zarr_path_to_subject
+        save_dir = save_dir_for_subject
         gesture_labels_partial = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction']
 
         # Make save_dir if it doesn't exist

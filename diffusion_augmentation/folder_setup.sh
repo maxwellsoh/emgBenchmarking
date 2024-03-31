@@ -2,17 +2,32 @@
 
 # Check if a subject number is provided
 if [ -z "$1" ]; then
-  echo "Usage: $0 <subject_number>"
+  echo "Usage: $0 <subject_number> <src_dir> <target_dir> <gesture_array>"
+  echo "Example: $0 1 examples/dreambooth/emg_images/cwt examples/dreambooth/emg_images/cwt/all_data_except \
+  'Rest' 'Extension' 'Flexion' 'Ulnar_Deviation' 'Radial_Deviation' 'Grip' 'Abduction'"
   exit 1
 fi
 
+DEFAULT_SUBJECT_NUMBER="1"
+DEFAULT_SRC_DIR="examples/dreambooth/emg_images/cwt"
+DEFAULT_OUTPUT_DIR="examples/dreambooth/emg_images/cwt/all_data_except"
+DEFAULT_GESTURE_ARRAY=('Rest' 'Extension' 'Flexion' 'Ulnar_Deviation' 'Radial_Deviation' 'Grip' 'Abduction')
+
 # Subject number from the first script argument
 SUBJECT_NUMBER="$1"
-
 # Base directory for source files
-SRC_DIR="examples/dreambooth/emg_images/cwt"
+SRC_DIR="$2" # "../examples/dreambooth/emg_images/cwt"
 # Base directory for target temporary folders
-TARGET_DIR="examples/dreambooth/emg_images/cwt/all_data_except"
+TARGET_DIR="$3" # "examples/dreambooth/emg_images/cwt/all_data_except"
+GESTURE_ARRAY=('Rest' 'Extension' 'Flexion' 'Ulnar_Deviation' 'Radial_Deviation' 'Grip' 'Abduction')
+
+SUBJECT_NUMBER="${1:-$DEFAULT_SUBJECT_NUMBER}"
+SRC_DIR="${2:-$DEFAULT_SRC_DIR}"
+TARGET_DIR="${3:-$DEFAULT_OUTPUT_DIR}"
+
+# GESTURE_ARRAY=(${2:-${DEFAULT_GESTURE_ARRAY[@]}})
+# OUTPUT_DIR="${4:-$DEFAULT_OUTPUT_DIR}"
+# SRC_DIR="${5:-$DEFAULT_SRC_DIR}"
 
 # Array of gestures
 GESTURE_ARRAY=('Rest' 'Extension' 'Flexion' 'Ulnar_Deviation' 'Radial_Deviation' 'Grip' 'Abduction')

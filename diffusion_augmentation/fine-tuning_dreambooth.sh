@@ -1,4 +1,5 @@
 #!/bin/bash
+# DreamBooth seems better for few-shot learning than standard fine-tuning
 
 MODEL_NAME="runwayml/stable-diffusion-v1-5"
 #MODEL_NAME="stabilityai/stable-diffusion-2-1"
