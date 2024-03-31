@@ -26,6 +26,7 @@ def load_images(subject_number, guidance_scales, gesture_names=None):
             match = pattern.match(key)
             if match:
                 gesture, scale = match.groups()
+                img_array = None
                 if scale in guidance_scales:  
                     img_array = z_group[key][:]
                     # Convert numpy array to PyTorch tensor
@@ -37,7 +38,8 @@ def load_images(subject_number, guidance_scales, gesture_names=None):
                     # Encode into one-hot
                     label_numbers = torch.nn.functional.one_hot(label_numbers, num_classes=len(gesture_to_number))
                     labels.append(label_numbers)
-                print(f"Loaded {key}, which has shape {img_array.shape}")
+                if img_array is not None:
+                    print(f"Loaded {key}, which has shape {img_array.shape}")
     
     return loaded_image_groups, labels
 
