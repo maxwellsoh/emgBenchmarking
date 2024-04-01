@@ -8,13 +8,11 @@ from PIL import Image
 
 
 args = argparse.ArgumentParser()
-args.add_argument("--zarr_path", type=str, default="LOSOimages_zarr/OzdemirEMG/LOSO_no_scaler_normalization/hht/")
-args.add_argument("--save_dir", type=str, default="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/hht/")
-args.add_argument("--loso_subject_number", type=int, default=1)
+args.add_argument("--zarr_path", type=str, default="LOSOimages_zarr/OzdemirEMG/LOSO_no_scaler_normalization/cwt_256/")
+args.add_argument("--save_dir", type=str,  default="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/cwt_256/")
+args.add_argument("--gesture_labels", type=str, default="Rest,Extension,Flexion,Ulnar_Deviation,Radial_Deviation,Grip,Abduction")
+args.add_argument("--total_subjects", type=int, default=40)
 args = args.parse_args()
-
-zarr_path_to_subject = args.zarr_path + f"LOSO_subject{args.loso_subject_number}/"
-save_dir_for_subject = args.save_dir + f"LOSO_subject{args.loso_subject_number}/"
 
 def denormalize(images):
     # Define mean and std from imageNet
@@ -80,9 +78,9 @@ def process_image(image_data, labels, gesture_labels_partial, save_dir, i, j):
 def process_images_range(start, end):
     for i in range(start, end):
         # Path to the Zarr dataset
-        zarr_path = zarr_path_to_subject
-        save_dir = save_dir_for_subject
-        gesture_labels_partial = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction']
+        zarr_path = args.zarr_path + f"LOSO_subject{i}/"
+        save_dir = args.save_dir + f"LOSO_subject{i}/"
+        gesture_labels = args.gesture_labels.split(',')
 
         # Make save_dir if it doesn't exist
         os.makedirs(save_dir, exist_ok=True)
@@ -99,14 +97,14 @@ def process_images_range(start, end):
 
         # Iterate through each image
         for j, img_array in enumerate(image_data):
-            process_image(img_array, labels, gesture_labels_partial, save_dir, i, j)
+            process_image(img_array, labels, gesture_labels, save_dir, i, j)
 
 # Define the number of processes to use
 num_processes = multiprocessing.cpu_count()
 
 # Create a list of process ranges
 process_ranges = []
-total_number_of_subjects=40
+total_number_of_subjects=args.total_subjects
 number_of_subjects_per_process, remainder = divmod(total_number_of_subjects, num_processes)
 
 for i in range(num_processes):

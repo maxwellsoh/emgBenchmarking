@@ -1,19 +1,21 @@
 #!/bin/bash
-# Usage: script.sh <MODEL_NAME> <"GESTURE_ARRAY"> <"SPECIFIC_SUBJECTS"> <OUTPUT_DIR> <INSTANCE_DIR_GESTURE>
+# Usage: script.sh <MODEL_NAME> <"GESTURE_ARRAY" [comma delimited]> <"SPECIFIC_SUBJECTS" [comma delimited]> \
+# <OUTPUT_DIR> <INSTANCE_DIR_GESTURE>
 
 # Standard fine-tuning seems better for many-shot learning and multiple gestures in one model
 
 # Default values for the script arguments
-DEFAULT_MODEL_NAME="ehristoforu/stable-diffusion-v1-5-tiny"
-DEFAULT_GESTURE_ARRAY=('Rest' 'Extension' 'Flexion' 'Ulnar_Deviation' 'Radial_Deviation' 'Grip' 'Abduction')
-DEFAULT_SPECIFIC_SUBJECTS=(1 5)
-DEFAULT_OUTPUT_DIR="diffusion_augmentation/custom_models/emg-loso-model/cwt256"
-DEFAULT_INSTANCE_DIR_GESTURE="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/cwt_256/all_data_except"
+DEFAULT_MODEL_NAME="runwayml/stable-diffusion-v1-5"
+DEFAULT_GESTURE_ARRAY="Rest,Extension,Flexion,Ulnar_Deviation,Radial_Deviation,Grip,Abduction"
+DEFAULT_SPECIFIC_SUBJECTS="1"
+DEFAULT_OUTPUT_DIR="diffusion_augmentation/custom_models/emg-loso-model/cwt_256"
+DEFAULT_INSTANCE_DIR_GESTURE="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/cwt_256"
 
 # Check for provided script arguments and set defaults if not provided
 MODEL_NAME="${1:-$DEFAULT_MODEL_NAME}"
-GESTURE_ARRAY=(${2:-${DEFAULT_GESTURE_ARRAY[@]}})
-SPECIFIC_SUBJECTS=(${3:-${DEFAULT_SPECIFIC_SUBJECTS[@]}})
+# Convert delimited string to array
+IFS=',' read -r -a GESTURE_ARRAY <<< "${2:-$DEFAULT_GESTURE_ARRAY}"
+IFS=',' read -r -a SPECIFIC_SUBJECTS <<< "${3:-$DEFAULT_SPECIFIC_SUBJECTS}"
 OUTPUT_DIR="${4:-$DEFAULT_OUTPUT_DIR}"
 INSTANCE_DIR_GESTURE="${5:-$DEFAULT_INSTANCE_DIR_GESTURE}"
 
@@ -24,22 +26,22 @@ INSTANCE_DIR_GESTURE="${5:-$DEFAULT_INSTANCE_DIR_GESTURE}"
 # Use seq to create a sequence. Bash loops use a different syntax.
 
 # Delete corrupted images with size 0
-find ${INSTANCE_DIR_GESTURE} -type f -size 0 -exec rm {} +
+find ${INSTANCE_DIR_GESTURE}/.. -type f -size 0 -exec rm {} +
 
 # Loop through specified subjects only
 for i in "${SPECIFIC_SUBJECTS[@]}"; do
-  # Setup folder
-  ./diffusion_augmentation/folder_setup.sh ${i} ${INSTANCE_DIR_GESTURE} ${OUTPUT_DIR} ${GESTURE_ARRAY}
+  SUBJECT_OUTPUT_DIR="${OUTPUT_DIR}/subject-${i}"
 
-  OUTPUT_DIR="${OUTPUT_DIR}/subject-${i}"
+  # Setup folder
+  IFS=,; ./diffusion_augmentation/folder_setup.sh ${i} ${INSTANCE_DIR_GESTURE} "${GESTURE_ARRAY[*]}"
 
     # Use the corrected syntax for variable expansion and command execution
     # TODO: change following link to run script
-  accelerate launch examples/text_to_image/train_text_to_image.py \
+  accelerate launch diffusion_augmentation/train_text_to_image.py \
       --pretrained_model_name_or_path="$MODEL_NAME" \
       --dataset_name="$INSTANCE_DIR_GESTURE" \
       --use_ema \
-      --output_dir="$OUTPUT_DIR" \
+      --output_dir="$SUBJECT_OUTPUT_DIR" \
       --train_batch_size=1 \
       --gradient_accumulation_steps=2 \
       --learning_rate=1e-5 \
@@ -54,6 +56,6 @@ for i in "${SPECIFIC_SUBJECTS[@]}"; do
 
   echo "Done training for subject left out ${i}"
   # Delete temporate folder
-  rm -rf ${INSTANCE_DIR_GESTURE}
+  rm -rf ${INSTANCE_DIR_GESTURE}/all_data_except
 done
 

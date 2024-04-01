@@ -24,7 +24,7 @@ for i in "${SPECIFIC_SUBJECTS[@]}"; do
     INSTANCE_DIR_GESTURE="examples/dreambooth/emg_images/cwt/all_data_except/all_data_except_subject${i}_${GESTURE_ARRAY[$j]}"
 
     # Use the corrected syntax for variable expansion and command execution
-    accelerate launch examples/dreambooth/train_dreambooth.py \
+    accelerate launch diffusion_augmentation/train_dreambooth.py \
       --pretrained_model_name_or_path="$MODEL_NAME" \
       --instance_data_dir="$INSTANCE_DIR_GESTURE" \
       --output_dir="$OUTPUT_DIR" \
