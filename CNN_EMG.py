@@ -517,7 +517,15 @@ for name, param in model.named_parameters():
         param.requires_grad = False
         
 if args.load_diffusion_generated_images:
-    generated_images_grouped, generated_group_labels = dgzl.load_images(args.leftout_subject, args.guidance_scales, utils.gesture_labels)
+    zarr_foldername = f'LOSOimages_zarr_generated-from-diffusion/{args.dataset}/'
+    if args.turn_on_cwt:
+        zarr_foldername += 'cwt/'
+    elif args.turn_on_hht:
+        zarr_foldername += 'hht/'
+    elif args.turn_on_spectrogram:
+        zarr_foldername += 'spectrogram/'
+    
+    generated_images_grouped, generated_group_labels = dgzl.load_images(args.leftout_subject, args.guidance_scales, utils.gesture_labels, zarr_foldername)
     
     # Because images and labels are stored as tensors in a list, we need to append them to X_train and Y_train
     for i in range(len(generated_images_grouped)):
