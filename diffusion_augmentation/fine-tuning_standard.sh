@@ -8,7 +8,7 @@
 DEFAULT_MODEL_NAME="runwayml/stable-diffusion-v1-5"
 DEFAULT_GESTURE_ARRAY="Rest,Extension,Flexion,Ulnar_Deviation,Radial_Deviation,Grip,Abduction"
 DEFAULT_SPECIFIC_SUBJECTS="1"
-DEFAULT_OUTPUT_DIR="diffusion_augmentation/custom_models/emg-loso-model/cwt_256"
+DEFAULT_OUTPUT_DIR="diffusion_augmentation/custom_models/OzdemirEMG/cwt_256"
 DEFAULT_INSTANCE_DIR_GESTURE="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/cwt_256"
 
 # Check for provided script arguments and set defaults if not provided

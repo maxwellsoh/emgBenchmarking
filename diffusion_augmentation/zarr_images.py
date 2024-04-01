@@ -12,10 +12,12 @@ args = argparse.ArgumentParser()
 args.add_argument("--loso_subject_number", type=int, default=1)
 args.add_argument("--gesture_labels", type=str, default="Rest,Extension,Flexion,Ulnar_Deviation,Radial_Deviation,Grip,Abduction")
 args.add_argument("--guidance_scales", type=str, default="5,15,25,50")
+args.add_argument("--image_directory", type=str, default="LOSOimages_generated-from-diffusion/OzdemirEMG/cwt_256/")
+args.add_argument("--output_directory", type=str, default="LOSOimages_zarr_generated-from-diffusion/OzdemirEMG/cwt_256/")
 args = args.parse_args()
 
 # Configure paths and constants
-args.image_directory = f'examples/dreambooth/emg_images_generated-from-diffusion/emg-loso-model_subject-{args.loso_subject_number}'
+image_directory = f'{args.image_directory}subject-{args.loso_subject_number}'
 MEAN = np.array([0.485, 0.456, 0.406]).reshape(1, 1, 3)
 STD = np.array([0.229, 0.224, 0.225]).reshape(1, 1, 3)
 
@@ -28,14 +30,16 @@ def load_and_process_image(image_path):
     return img_array
 
 def process_subject(gesture_labels, guidance_scales):
-    save_dir = f'examples/dreambooth/emg-zarr_generated-from-diffusion/cwt/LOSO_subject{args.loso_subject_number}/'
+    save_dir = f'{args.output_directory}subject-{args.loso_subject_number}/'
     os.makedirs(save_dir, exist_ok=True)
 
     zarr_group = zarr.open_group(save_dir, mode='w')
 
     for gesture_label in gesture_labels:
         for guidance_scale in guidance_scales:
-            images_dir = f'{args.image_directory}/gesture-{gesture_label}/'
+            images_dir = f'{image_directory}/gesture-{gesture_label}/'
+            os.makedirs(images_dir, exist_ok=True)
+            
             image_files = [f for f in os.listdir(images_dir) if f'guidance-scale-{guidance_scale}_' in f]
             print(f'Processing {len(image_files)} images for gesture {gesture_label} at guidance scale {guidance_scale}')
             with tqdm(total=len(image_files)) as pbar:
