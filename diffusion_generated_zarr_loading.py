@@ -4,9 +4,9 @@ import torch
 import os
 import re
 
-def load_images(subject_number, guidance_scales, gesture_names=None):
+def load_images(subject_number, guidance_scales, gesture_names=None, images_dir=None):
     # Construct the base path for the images
-    base_path = f"../diffusers/examples/dreambooth/emg-zarr_generated-from-diffusion/cwt/LOSO_subject{subject_number}"
+    base_path = f"{images_dir}subject-{subject_number}"
     
     gesture_to_number = {key: value for value, key in enumerate(gesture_names)}
 
@@ -47,16 +47,17 @@ def main():
     parser = argparse.ArgumentParser(description='Load Zarr images into PyTorch.')
     parser.add_argument('--loso_subject_number', type=str, help='LOSO subject number', default="1")
     parser.add_argument('--guidance_scales', type=str, help='Guidance scale to load', default="5,15,25,50")
-    parser.add_argument('--dataset', type=str, help='Dataset to load', default="Ozdemir")
+    parser.add_argument('--dataset', type=str, help='Dataset to load', default="OzdemirEMG")
+    parser.add_argument('--images_dir', type=str, help='Input directory for images', default="LOSOimages_zarr_generated-from-diffusion/OzdemirEMG/cwt_256/")
     
     args = parser.parse_args()
     
     gesture_names = None
-    if args.dataset == "Ozdemir":
+    if args.dataset == "OzdemirEMG":
         import utils_OzdemirEMG as utils
         gesture_names = utils.gesture_labels_partial
 
-    image_groups, labels = load_images(args.loso_subject_number, args.guidance_scales.split(","), gesture_names)
+    image_groups, labels = load_images(args.loso_subject_number, args.guidance_scales.split(","), gesture_names, args.images_dir)
     total_number_of_images = sum([len(img_group) for img_group in image_groups])
     print(f"Loaded {len(image_groups)} image datasets, which have a total of {total_number_of_images} images.")
 
