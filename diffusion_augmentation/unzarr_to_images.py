@@ -107,14 +107,19 @@ process_ranges = []
 total_number_of_subjects=args.total_subjects
 number_of_subjects_per_process, remainder = divmod(total_number_of_subjects, num_processes)
 
+start = 0
+end = 0
 for i in range(num_processes):
-    start = number_of_subjects_per_process * i
-    end = number_of_subjects_per_process * (i + 1)
+    start = end
+    end = start + number_of_subjects_per_process
     # This remainder is used to distribute the remaining subjects to the first few processes
     if remainder > 0:
         end += 1
         remainder -= 1
+
     process_ranges.append((start, end))
+
+print("Process ranges:", process_ranges)
 
 # Create a pool of processes
 pool = multiprocessing.Pool(processes=num_processes)

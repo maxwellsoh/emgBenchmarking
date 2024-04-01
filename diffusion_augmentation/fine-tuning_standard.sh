@@ -35,11 +35,10 @@ for i in "${SPECIFIC_SUBJECTS[@]}"; do
   # Setup folder
   IFS=,; ./diffusion_augmentation/folder_setup.sh ${i} ${INSTANCE_DIR_GESTURE} "${GESTURE_ARRAY[*]}"
 
-    # Use the corrected syntax for variable expansion and command execution
-    # TODO: change following link to run script
+  # Use the corrected syntax for variable expansion and command execution
   accelerate launch diffusion_augmentation/train_text_to_image.py \
       --pretrained_model_name_or_path="$MODEL_NAME" \
-      --dataset_name="$INSTANCE_DIR_GESTURE" \
+      --dataset_name="$INSTANCE_DIR_GESTURE/all_data_except" \
       --use_ema \
       --output_dir="$SUBJECT_OUTPUT_DIR" \
       --train_batch_size=1 \
@@ -56,6 +55,6 @@ for i in "${SPECIFIC_SUBJECTS[@]}"; do
 
   echo "Done training for subject left out ${i}"
   # Delete temporate folder
-  rm -rf ${INSTANCE_DIR_GESTURE}/all_data_except
+  # rm -rf ${INSTANCE_DIR_GESTURE}/all_data_except
 done
 
