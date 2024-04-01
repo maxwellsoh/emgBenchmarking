@@ -8,10 +8,14 @@ from diffusers import DiffusionPipeline
 
 
 args = argparse.ArgumentParser()
-args.add_argument("--loso_subject_number", type=int, default=5)
+args.add_argument("--loso_subject_number", type=int, default=1)
 args.add_argument("--seed", type=int, default=0)
 args.add_argument("--num_images_per_prompt", type=int, default=20)
 args.add_argument("--number_of_total_images_per_gesture", type=int, default=1000)
+args.add_argument("--pretrained_model_path", type=str, default="diffusion_augmentation/custom_models/emg-loso-model/cwt_256/")
+args.add_argument("--output_base_folder", type=str, default="LOSOimages_generated-from-diffusion/")
+args.add_argument("--gesture_labels", type=str, default="Rest,Extension,Flexion,Ulnar_Deviation,Radial_Deviation,Grip,Abduction")
+args.add_argument("--guidance_scales", type=str, default="5,15,25,50")
 args = args.parse_args()
 
 
@@ -19,17 +23,19 @@ args = args.parse_args()
 start_time = time.time()
 
 # Load your pipeline
-pipeline = DiffusionPipeline.from_pretrained(f"examples/text_to_image/custom_models/emg-loso-model_subject-{args.loso_subject_number}",
+pipeline = DiffusionPipeline.from_pretrained(f"{args.pretrained_model_path}subject-{args.loso_subject_number}",
                                              torch_dtype=torch.float16,
                                              use_safetensors=True).to("cuda")
 
-output_folder = f"examples/dreambooth/emg_images_generated-from-diffusion/emg-loso-model_subject-{args.loso_subject_number}/"
+# Define the output folder
+specific_folder = '/'.join(args.pretrained_model_path.split('/')[2:])
+output_folder = f"{args.output_base_folder}{specific_folder}subject-{args.loso_subject_number}/"
 # create folder if it doesn't exist
 os.makedirs(output_folder, exist_ok=True)
 
 # Define gestures and guidance scales
-gestures = ["Rest", "Flexion", "Abduction", "Extension", "Grip", "Radial_Deviation", "Ulnar_Deviation"]
-guidance_scales = [5, 15, 25, 50]
+gestures = args.gesture_labels.split(',')
+guidance_scales = [int(i) for i in args.guidance_scales.split(',')]
 
 NUMBER_IMAGES_PER_PROMPT = args.num_images_per_prompt
 NUMBER_IMAGES_PER_GESTURE = args.number_of_total_images_per_gesture
