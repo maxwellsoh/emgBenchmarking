@@ -35,6 +35,7 @@ You will follow this up with running the python notebooks `dataset_processing_[D
 
 ## Diffusion Augmentation
 Go to the `diffusion_augmentation` folder and run the scripts as specified in that `README.md`.
+In `CNN_EMG.py` run with argument `--load_diffusion_generated_images=True`. Set `--guidance_scales` if desired.
 
 # Troubleshooting
 If you run into an error, `OSError: [Errno 24] Too many open files`
