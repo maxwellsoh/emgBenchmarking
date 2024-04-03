@@ -33,6 +33,10 @@ Currently, to download the datasets, you will have to go to the website that hos
 
 You will follow this up with running the python notebooks `dataset_processing_[DATASET-NAME].ipynb` in order to process the dataset into hdf5 files (with the exception of Jehan's dataset, which is already in hdf5 format). 
 
+## Diffusion Augmentation
+Go to the `diffusion_augmentation` folder and run the scripts as specified in that `README.md`.
+In `CNN_EMG.py` run with argument `--load_diffusion_generated_images=True`. Set `--guidance_scales` if desired.
+
 # Troubleshooting
 If you run into an error, `OSError: [Errno 24] Too many open files`
 Run the command 

@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
+import diffusion_generated_zarr_loading as dgzl
 
 
 # Define a custom argument type for a list of integers
@@ -84,10 +85,21 @@ parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 1e-4 by default.', default=1e-4)
 # Add argument to specify which gpu to use (if any gpu exists)
 parser.add_argument('--gpu', type=int, help='which gpu to use. Set to 0 by default.', default=0)
+# Add argument to specify whether to load diffusion generated images
+parser.add_argument('--load_diffusion_generated_images', type=utils.str2bool, help='whether or not to load diffusion generated images. Set to False by default.', default=False)
+# Add argument to specify guidance scales for diffusion generated images
+parser.add_argument('--guidance_scales', type=str, help='guidance scales for diffusion generated images. Set to 5,15,25,50 by default.', default="5,15,25,50")
+# Add argument for loading just a few images from dataset for debugging
+parser.add_argument('--load_few_images', type=utils.str2bool, help='whether or not to load just a few images from dataset for debugging. Set to False by default.', default=False)
+# Add argument for reducing training data size while remaining stratified in terms of gestures and amount of data from each subject
+parser.add_argument('--reduce_training_data_size', type=utils.str2bool, help='whether or not to reduce training data size while remaining stratified in terms of gestures and amount of data from each subject. Set to False by default.', default=False)
+# Add argument for size of reduced training data
+parser.add_argument('--reduced_training_data_size', type=int, help='size of reduced training data. Set to 56000 by default.', default=56000)
 # Add argument to leve n subjects out randomly
 parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
 # use target domain for normalization
 parser.add_argument('--target_normalize', type=utils.str2bool, help='use a leftout window for normalization. Set to False by default.', default=False)
+
 # Parse the arguments
 args = parser.parse_args()
 
@@ -160,6 +172,8 @@ if args.turn_on_magnitude:
     print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
 if exercises:
     print(f"The value of --exercises is {args.exercises}")
+    
+args.guidance_scales = args.guidance_scales.split(",")
 
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
 print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
@@ -170,6 +184,13 @@ print(f"The value of --save_images is {args.save_images}")
 print(f"The value of --turn_off_scaler_normalization is {args.turn_off_scaler_normalization}")
 print(f"The value of --learning_rate is {args.learning_rate}")
 print(f"The value of --gpu is {args.gpu}")
+print(f"The value of --load_diffusion_generated_images is {args.load_diffusion_generated_images}")
+print(f"The value of --guidance_scales is {args.guidance_scales}")
+
+print(f"The value of --load_few_images is {args.load_few_images}")
+print(f"The value of --reduce_training_data_size is {args.reduce_training_data_size}")
+print(f"The value of --reduced_training_data_size is {args.reduced_training_data_size}")
+
 print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_out_randomly}")
     
 # Add date and time to filename
@@ -497,7 +518,10 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
         # Load the dataset
         dataset = zarr.open(foldername_zarr, mode='r')
         print(f"Loaded dataset for subject {x} from {foldername_zarr}")
-        data += [dataset[:]]
+        if args.load_few_images:
+            data += [dataset[:10]]
+        else: 
+            data += [dataset[:]]
     else:
         # Get images and create the dataset
         if (args.target_normalize):
@@ -560,7 +584,7 @@ else:
         del combined_labels
         del data
         del emg
-
+        
         X_train = torch.from_numpy(X_train).to(torch.float16)
         Y_train = torch.from_numpy(Y_train).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
@@ -574,19 +598,33 @@ else:
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
     else:
-            
+        if args.reduce_training_data_size:
+            reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
+
         X_validation = np.array(data.pop(leaveOut-1))
         Y_validation = np.array(labels.pop(leaveOut-1))
-        X_train = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
-        Y_train = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+        for i in range(len(data)):
+            current_data = np.array(data[i])
+            current_labels = np.array(labels[i])
+
+            if args.reduce_training_data_size:
+                proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
+                current_data, _, current_labels, _ = model_selection.train_test_split(current_data, current_labels, 
+                                                                                            train_size=proportion_to_keep, stratify=current_labels, 
+                                                                                            random_state=args.seed, shuffle=True)
+
+            if i == 0:
+                X_train = current_data
+                Y_train = current_labels
+            else:
+                X_train = np.concatenate((X_train, current_data), axis=0)
+                Y_train = np.concatenate((Y_train, current_labels), axis=0)
+            print("Appended subject", i+1, "to training data")
+
         X_train = torch.from_numpy(X_train).to(torch.float16)
         Y_train = torch.from_numpy(Y_train).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-        print("Size of X_train:", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_train:", Y_train.size()) # (SAMPLE, GESTURE)
-        print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
 
 model_name = args.model
 if args.model == 'resnet50_custom':
@@ -661,6 +699,22 @@ for name, param in model.named_parameters():
         param.requires_grad = True
     else:
         param.requires_grad = False
+        
+if args.load_diffusion_generated_images:
+    zarr_foldername = f'LOSOimages_zarr_generated-from-diffusion/{args.dataset}/'
+    if args.turn_on_cwt:
+        zarr_foldername += 'cwt/'
+    elif args.turn_on_hht:
+        zarr_foldername += 'hht/'
+    elif args.turn_on_spectrogram:
+        zarr_foldername += 'spectrogram/'
+    
+    generated_images_grouped, generated_group_labels = dgzl.load_images(args.leftout_subject, args.guidance_scales, utils.gesture_labels, zarr_foldername)
+    
+    # Because images and labels are stored as tensors in a list, we need to append them to X_train and Y_train
+    for i in range(len(generated_images_grouped)):
+        X_train = torch.cat((X_train, generated_images_grouped[i].transpose(1, 3).to(torch.float16)))
+        Y_train = torch.cat((Y_train, generated_group_labels[i]))
 
 batch_size = 64
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
@@ -721,6 +775,10 @@ if args.turn_on_hht:
     wandb_runname += '_hht'
 if args.learning_rate != 1e-4:
     wandb_runname += '_lr-'+str(args.learning_rate)
+if args.load_diffusion_generated_images:
+    wandb_runname += '_diffusion-generated' + '_guidance-scales-' + '_'.join(args.guidance_scales)
+if args.reduce_training_data_size:
+    wandb_runname += '_reduced-training-data-size-' + str(args.reduced_training_data_size)
 if args.leave_n_subjects_out_randomly != 0:
     wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
 if args.turn_off_scaler_normalization:
@@ -735,6 +793,7 @@ if (leaveOut == 0):
         project_name += '_heldout'
 else:
     project_name += '_LOSO'
+
 project_name += args.project_name_suffix
 
 run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
@@ -881,7 +940,7 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     validation_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=int(X_validation.shape[0]/10))), desc="Validation Batch Loading"):  # Or some other number that fits in memory
+    for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=batch_size)), desc="Validation Batch Loading"):  # Or some other number that fits in memory
         batch = batch.to(device).to(torch.float32)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
@@ -895,7 +954,7 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     train_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/utils.num_subjects))), desc="Training Batch Loading"):  # Or some other number that fits in memory
+    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=batch_size)), desc="Training Batch Loading"):  # Or some other number that fits in memory
         batch = batch.to(device).to(torch.float32)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
