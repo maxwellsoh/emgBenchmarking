@@ -5,6 +5,7 @@ import os
 import re
 
 def load_images(subject_number, guidance_scales, gesture_names=None, images_dir=None):
+
     # Construct the base path for the images
     base_path = f"{images_dir}subject-{subject_number}"
     
@@ -42,6 +43,71 @@ def load_images(subject_number, guidance_scales, gesture_names=None, images_dir=
                     print(f"Loaded {key}, which has shape {img_array.shape}")
     
     return loaded_image_groups, labels
+
+def load_images_generated_from_diffusion(subject_number, guidance_scales, gesture_names=None, images_dir=None, validation_or_training=None):
+
+    assert validation_or_training == "validation" or validation_or_training == "training", "validation_or_training must be either 'validation' or 'training'"
+    # Construct the base path for the images
+    base_path = f"{images_dir}subject-{subject_number}_{validation_or_training}-img2img"
+    
+    gesture_to_number = {key: value for value, key in enumerate(gesture_names)}
+
+    # Initialize a list to hold the loaded images and labels
+    loaded_image_groups = []
+    labels = []
+                
+    # Open the Zarr group to explore available datasets
+    if os.path.exists(base_path):
+        if validation_or_training == "validation":
+            z_group = zarr.open_group(base_path, mode="r")
+        
+            # Use regular expression to find matches for gesture types and scales
+            pattern = re.compile(r"(.+)_guidance_scale-(\d+)")
+            
+            for key in z_group.array_keys():
+                match = pattern.match(key)
+                if match:
+                    gesture, scale = match.groups()
+                    img_array = None
+                    if scale in guidance_scales:  
+                        img_array = z_group[key][:]
+                        # Convert numpy array to PyTorch tensor
+                        img_tensor = torch.tensor(img_array)
+                        loaded_image_groups.append(img_tensor)
+                        # Append the correct number label to the labels list
+                        # labels.append(f"{gesture}_{scale}")
+                        label_numbers = gesture_to_number[gesture]*torch.ones(img_tensor.shape[0], dtype=torch.long)
+                        # Encode into one-hot
+                        label_numbers = torch.nn.functional.one_hot(label_numbers, num_classes=len(gesture_to_number))
+                        labels.append(label_numbers)
+                    if img_array is not None:
+                        print(f"Loaded {key}, which has shape {img_array.shape}")
+
+        else:
+            # open each folder in base path as different zarr groups
+            for subject_folder in os.listdir(base_path):
+                z_group = zarr.open_group(subject_folder, mode="r")
+                # Use regular expression to find matches for gesture types and scales
+                pattern = re.compile(r"(.+)_guidance_scale-(\d+)")
+                
+                for key in z_group.array_keys():
+                    match = pattern.match(key)
+                    if match:
+                        gesture, scale = match.groups()
+                        img_array = None
+                        if scale in guidance_scales:  
+                            img_array = z_group[key][:]
+                            # Convert numpy array to PyTorch tensor
+                            img_tensor = torch.tensor(img_array)
+                            loaded_image_groups.append(img_tensor)
+                            # Append the correct number label to the labels list
+                            # labels.append(f"{gesture}_{scale}")
+                            label_numbers = gesture_to_number[gesture]*torch.ones(img_tensor.shape[0], dtype=torch.long)
+                            # Encode into one-hot
+                            label_numbers = torch.nn.functional.one_hot(label_numbers, num_classes=len(gesture_to_number))
+                            labels.append(label_numbers)
+                        if img_array is not None:
+                            print(f"From subject folder {subject_folder}, Loaded {key}, which has shape {img_array.shape}")
 
 def main():
     parser = argparse.ArgumentParser(description='Load Zarr images into PyTorch.')
