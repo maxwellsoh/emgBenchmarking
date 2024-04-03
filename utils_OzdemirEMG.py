@@ -93,7 +93,7 @@ def contract(R):
     return labels
 
 def filter(emg):
-    # sixth-order Butterworth highpass filter
+    # sixth-order Butterworth bandpass filter
     b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=2000.0)
     emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 

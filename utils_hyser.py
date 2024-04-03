@@ -14,74 +14,22 @@ from sklearn.metrics import confusion_matrix
 import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from scipy import io
+import h5py
+import os
 
-fs = 2000 #Hz
-wLen = 250 # ms
+numGestures = 34
+fs = 2048.0 # Hz (actually 2048 Hz but was "decimated" to 512? unclear)
+wLen = 250.0 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 100 #50 ms
-numElectrodes = 12
-num_subjects = 40
+stepLen = int(50.0 / 1000 * fs) # 50 ms
+numElectrodes = 256
+num_subjects = 20
 cmap = mpl.colormaps['viridis']
-# Gesture Labels
-gesture_labels = {}
-gesture_labels['Rest'] = ['Rest'] # Shared between exercises
+# Gesture Labels (add names if found - labels are 1 through 34)
+gesture_labels = [str(i+1) for i in range(numGestures)]
 
-gesture_labels[1] = ['Index Flexion', 'Index Extension', 'Middle Flexion', 'Middle Extension', 'Ring Flexion', 'Ring Extension',
-                    'Little Finger Flexion', 'Little Finger Extension', 'Thumb Adduction', 'Thumb Abduction', 'Thumb Flexion',
-                    'Thumb Extension'] # End exercise A
-
-gesture_labels[2] = ['Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction',
-                    'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation',
-                    'Ulnar Deviation', 'Wrist Extension Fist'] # End exercise B
-
-gesture_labels[3] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook Grasp', 'Index Finger Extension Grasp', 'Medium Wrap',
-                    'Ring Grasp', 'Prismatic Four Fingers Grasp', 'Stick Grasp', 'Writing Tripod Grasp', 'Power Sphere Grasp', 'Three Finger Sphere Grasp', 'Precision Sphere Grasp',
-                    'Tripod Grasp', 'Prismatic Pinch Grasp', 'Tip Pinch Grasp', 'Quadrupod Grasp', 'Lateral Grasp', 'Parallel Extension Grasp', 'Extension Type Grasp', 'Power Disk Grasp',
-                    'Open A Bottle With A Tripod Grasp', 'Turn A Screw', 'Cut Something'] # End exercise C
-
-class CustomDataset_swav(Dataset):
-    def __init__(self, data, labels=None, transform=None):
-        self.data = data
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        x = self.data[idx]
-        y = self.labels[idx]
-        
-        if self.transform:
-            x = self.transform(x)
-        
-        return x, y
-    
-class CustomDataset_Simclr(Dataset):
-    def __init__(self, data, labels=None, transform=None):
-        self.data = data
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        x = self.data[idx]
-        if self.transform:
-            x_i = self.transform(x)
-            x_j = self.transform(x)
-        else:
-            x_i = x_j = x
-        
-        if self.labels is not None:
-            y = self.labels[idx]
-            return (x_i, x_j), y
-        return (x_i, x_j)
-    
 class CustomDataset(Dataset):
-    def __init__(self, data, labels=None, transform=None):
+    def __init__(self, data, labels, transform=None):
         self.data = data
         self.labels = labels
         self.transform = transform
@@ -92,12 +40,12 @@ class CustomDataset(Dataset):
     def __getitem__(self, idx):
         x = self.data[idx]
         y = self.labels[idx]
-        
+
         if self.transform:
             x = self.transform(x)
-        
+
         return x, y
-        
+
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -113,51 +61,93 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance (restimulus):
-    numZero = 0
-    indices = []
-    #print(restimulus.shape)
-    for x in range (len(restimulus)):
-        L = torch.chunk(restimulus[x], 2, dim=1)
-        if torch.equal(L[0], L[1]):
-            if L[0][0][0] == 0:
-                if (numZero < 550):
-                    #print("working")
-                    indices += [x]
-                numZero += 1
-            else:
-                indices += [x]
-    return indices
-
 def contract(R):
-    numGestures = R.max() + 1
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
     for x in range(len(R)):
-        labels[x][int(R[x][0][0])] = 1.0
+        labels[x][int(R[x]) - 1] = 1.0
     return labels
 
 def filter(emg):
-    # sixth-order Butterworth highpass filter
-    b, a = butter(N=1, Wn=999.0, btype='lowpass', analog=False, fs=2000.0)
-    return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
+    # sixth-order Butterworth bandpass filter
+    b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=fs)
+    emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy()).to(dtype=torch.float32)
 
-def getRestim (n: int, exercise: int = 2):
-    restim = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['restimulus'])
-    return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+    #second-order notch filter at 50 Hz
+    b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
+    return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy()).to(dtype=torch.float32)
 
-def getEMG (args):
-    n, exercise = args
-    restim = getRestim(n, exercise)
-    #emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
-    #emg = torch.tensor(emg.values)
-    emg = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['emg'])
-    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+# partition data by channel
+def format_emg (data):
+    emg = np.zeros((len(data) // numElectrodes, numElectrodes))
+    for i in range(len(data) // numElectrodes):
+        for j in range(numElectrodes):
+            emg[i][j] = data[i * numElectrodes + j]
+    return emg
 
-def getLabels (args):
-    n, exercise = args
-    restim = getRestim(n, exercise)
-    return contract(restim[balance(restim)])
+def getEMG_help (sub, session):
+    emg = []
+
+    currFile = 1
+    while (os.path.isfile(f'hyser/subject{sub}_session{session}/dynamic_raw_sample{currFile}.dat')):
+        print(currFile)
+        data = np.fromfile(f'hyser/subject{sub}_session{session}/dynamic_raw_sample{currFile}.dat', dtype=np.int16).reshape((256, -1)).astype(np.float32)
+
+        adjustment = []
+        with open(f'hyser/subject{sub}_session{session}/dynamic_raw_sample{currFile}.hea', 'r') as file:
+            ignoreFirst = True
+            for line in file:
+                if (ignoreFirst):
+                    ignoreFirst = False
+                else:
+                    values = line.split(" ")[2].split("(")
+                    adjustment.append((float(values[0]), float(values[1].split(")")[0])))
+
+        for col in range(len(data)):
+            data[col] = (data[col] - adjustment[col][1]) / (adjustment[col][0])
+
+        emg.append(torch.from_numpy(data.transpose((1, 0))).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
+        currFile += 1
+    print(emg[0].dtype)
+    return emg
+
+def getEMG (n):
+    emg = []
+    
+    if (n < 10):
+        sub = f'0{n}'
+    else:
+        sub = f'{n}'
+
+    print("start")
+    emg = getEMG_help(sub, "1") + getEMG_help(sub, "2")
+    print("end")
+
+    return filter(torch.cat(emg, dim=0))
+
+def getLabels (n):
+    labels = []
+
+    if (n < 10):
+        sub = f'0{n}'
+    else:
+        sub = f'{n}'
+
+    file = open(f'hyser/subject{sub}_session1/label_dynamic.txt', 'r')
+    vals = file.readline().split(',')
+    for v in vals:
+        for i in range(16):
+            labels.append(int(v))
+    file.close()
+
+    file = open(f'hyser/subject{sub}_session2/label_dynamic.txt', 'r')
+    vals = file.readline().split(',')
+    for v in vals:
+        for i in range(16):
+            labels.append(int(v))
+    file.close()
+
+    return contract(labels)
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
@@ -169,10 +159,9 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
     
     # Split image and resize
     imageL, imageR = np.split(image, 2, axis=2)
-    #resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-    #                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    #imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
-    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
     
     # Clamp between 0 and 1 using torch.clamp
     imageL, imageR = map(lambda img: torch.clamp(img, 0, 1), (imageL, imageR))
@@ -194,10 +183,9 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     
     # Split image and resize
     imageL, imageR = np.split(image, 2, axis=2)
-    #resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-    #                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    #imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
-    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
     
     # Get max and min values after interpolation
     max_val = max(imageL.max(), imageR.max())
@@ -216,12 +204,14 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None):
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_cwt=False,
+              turn_on_hht=False, global_min=None, global_max=None):
+
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
     else:
         emg = np.array(emg.view(len(emg), length*width))
-
+        
     # Use RMS preprocessing
     if turn_on_rms:
         emg = emg.reshape(len(emg), length, width)
@@ -240,18 +230,39 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         resize_length_factor = 3
     native_resnet_size = 224
 
-    with multiprocessing.Pool(processes=5) as pool:
+    with multiprocessing.Pool(processes=32) as pool:
         args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
         images_async = pool.starmap_async(optimized_makeOneImage, args)
         images = images_async.get()
 
     if turn_on_magnitude:
-        with multiprocessing.Pool(processes=5) as pool:
+        with multiprocessing.Pool(processes=32) as pool:
             args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
             images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
             images_magnitude = images_async.get()
         images = np.concatenate((images, images_magnitude), axis=2)
+
+    elif turn_on_spectrogram:
+        with multiprocessing.Pool(processes=32) as pool:
+            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+            images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
+            images_spectrogram = images_async.get()
+        images = images_spectrogram
+
+    elif turn_on_cwt:
+        with multiprocessing.Pool(processes=32) as pool:
+            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+            images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
+            images_cwt = images_async.get()
+        images = images_cwt
     
+    elif turn_on_hht:
+        with multiprocessing.Pool(processes=32) as pool:
+            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+            images_async = pool.starmap_async(optimized_makeOneHilbertHuangImage, args)
+            images_hilbert_huang = images_async.get()
+        images = images_hilbert_huang
+        
     return images
 
 def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):
@@ -310,8 +321,6 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     # Calculate average image of each gesture
     average_images = []
     print(f"Plotting average {partition_name} images...")
-    numGestures = len(gesture_labels)
-
     for i in range(numGestures):
         # Find indices
         gesture_indices = np.where(true_np == i)[0]
@@ -343,7 +352,7 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
 
     # Parameters for plotting
     rows_per_gesture = 15
-    total_gestures = len(gesture_labels)  # Replace with the actual number of gestures
+    total_gestures = numGestures  # Replace with the actual number of gestures
 
     # Create subplots
     fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))
