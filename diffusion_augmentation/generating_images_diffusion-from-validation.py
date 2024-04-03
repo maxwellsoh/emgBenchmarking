@@ -39,7 +39,7 @@ os.makedirs(output_folder, exist_ok=True)
 gestures = args.gesture_labels.split(',')
 guidance_scales = [int(i) for i in args.guidance_scales.split(',')]
 
-validation_images_subject_folder = f"{args.validation_images_folder}/LOSO_subject{args.loso_subject_number}/"
+validation_images_subject_folder = f"{args.validation_images_folder}LOSO_subject{args.loso_subject_number}/"
 
 for scale in guidance_scales:
     for gesture in gestures:

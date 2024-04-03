@@ -40,7 +40,7 @@ gestures = args.gesture_labels.split(',')
 guidance_scales = [int(i) for i in args.guidance_scales.split(',')]
 
 # list all training folders for subjects other than the loso subject
-training_images_subject_folders = [f"{args.training_images_folder}/LOSO_subject{i}/" for i in range(0, 40) if i != args.loso_subject_number]
+training_images_subject_folders = [f"{args.training_images_folder}LOSO_subject{i}/" for i in range(0, 40) if i != args.loso_subject_number]
 
 for training_images_subject_folder in training_images_subject_folders:
     subject_output_folder = os.path.join(output_folder, f"subject-{training_images_subject_folder.split('/')[-2]}")
