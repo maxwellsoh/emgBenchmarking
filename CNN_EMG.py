@@ -99,6 +99,8 @@ parser.add_argument('--reduced_training_data_size', type=int, help='size of redu
 parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
 # use target domain for normalization
 parser.add_argument('--target_normalize', type=utils.str2bool, help='use a leftout window for normalization. Set to False by default.', default=False)
+# Add argument for whether or not to use diffusion generated images from img2img
+parser.add_argument('--use_img2img', type=utils.str2bool, help='whether or not to use diffusion generated images from img2img. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -597,7 +599,7 @@ else:
         print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
-    else:
+    else:            
         if args.reduce_training_data_size:
             reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
 
@@ -701,6 +703,7 @@ for name, param in model.named_parameters():
         param.requires_grad = False
         
 if args.load_diffusion_generated_images:
+    print("Loading images generated from the diffusion model for data augmentation")
     zarr_foldername = f'LOSOimages_zarr_generated-from-diffusion/{args.dataset}/'
     if args.turn_on_cwt:
         zarr_foldername += 'cwt/'
@@ -715,6 +718,37 @@ if args.load_diffusion_generated_images:
     for i in range(len(generated_images_grouped)):
         X_train = torch.cat((X_train, generated_images_grouped[i].transpose(1, 3).to(torch.float16)))
         Y_train = torch.cat((Y_train, generated_group_labels[i]))
+
+if args.use_img2img:
+    print("Loading images generated from the diffusion model for data augmentation from the img2img generation")
+    # Load the images generated from the diffusion model
+    zarr_foldername = f'LOSOimages_zarr_generated-from-diffusion/{args.dataset}/'
+    if args.turn_on_cwt:
+        zarr_foldername += 'cwt/'
+    elif args.turn_on_hht:
+        zarr_foldername += 'hht/'
+    elif args.turn_on_spectrogram:
+        zarr_foldername += 'spectrogram/'
+
+    generated_images_grouped_validation, generated_group_labels_validation = dgzl.load_images(args.leftout_subject, args.guidance_scales, utils.gesture_labels, zarr_foldername, validation_or_training='validation')
+    generated_images_grouped_training, generated_group_labels_training = dgzl.load_images(args.leftout_subject, args.guidance_scales, utils.gesture_labels, zarr_foldername, validation_or_training='training')
+    
+    print("Note that the generated images for img2img replace the original images for training and validation")
+    # Because images and labels are stored as tensors in a list, we need to append them to X_train and Y_train
+    for i in range(len(generated_images_grouped_training)):
+        if i == 0:
+            X_train = generated_images_grouped_training[i].transpose(1, 3).to(torch.float16)
+            Y_train = generated_group_labels_training[i]
+        else:
+            X_train = torch.cat((X_train, generated_images_grouped_training[i].transpose(1, 3).to(torch.float16)))
+            Y_train = torch.cat((Y_train, generated_group_labels_training[i]))
+    for i in range(len(generated_images_grouped_validation)):
+        if i == 0:
+            X_validation = generated_images_grouped_validation[i].transpose(1, 3).to(torch.float16)
+            Y_validation = generated_group_labels_validation[i]
+        else:
+            X_validation = torch.cat((X_validation, generated_images_grouped_validation[i].transpose(1, 3).to(torch.float16)))
+            Y_validation = torch.cat((Y_validation, generated_group_labels_validation[i]))
 
 batch_size = 64
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
@@ -785,6 +819,8 @@ if args.turn_off_scaler_normalization:
     wandb_runname += '_no-scaler-normalization'
 if args.target_normalize:
     wandb_runname += '_target-normalize'
+if args.use_img2img:
+    wandb_runname += '_img2img'
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
