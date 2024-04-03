@@ -8,8 +8,8 @@ from PIL import Image
 
 
 args = argparse.ArgumentParser()
-args.add_argument("--zarr_path", type=str, default="LOSOimages_zarr/OzdemirEMG/LOSO_no_scaler_normalization/cwt_256/")
-args.add_argument("--save_dir", type=str,  default="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/cwt_256/")
+args.add_argument("--zarr_path", type=str, default="LOSOimages_zarr/OzdemirEMG/LOSO_no_scaler_normalization/cwt/")
+args.add_argument("--save_dir", type=str,  default="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/cwt/")
 args.add_argument("--gesture_labels", type=str, default="Rest,Extension,Flexion,Ulnar_Deviation,Radial_Deviation,Grip,Abduction")
 args.add_argument("--total_subjects", type=int, default=40)
 args = args.parse_args()
