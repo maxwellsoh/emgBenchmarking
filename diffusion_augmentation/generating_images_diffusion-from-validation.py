@@ -66,6 +66,17 @@ for scale in guidance_scales:
                              seed=args.seed).images
 
             for j, image in enumerate(images):
+                # if image is all black, regenerate image
+                while not image.getbbox():
+                    images = pipeline(prompt = prompt_list[0],
+                                    image=validation_images_tensor[i*args.batch_size+j],
+                                    num_inference_steps=50,
+                                    guidance_scale=scale,
+                                    strength=0.35,
+                                    #  num_images_per_prompt=NUMBER_IMAGES_PER_PROMPT,
+                                    seed=args.seed).images
+                    image = images[0]
+
                 image = image.resize((224,224))
                 image_number = i*args.batch_size + j
 
