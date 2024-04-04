@@ -3,6 +3,7 @@ import zarr
 import torch
 import os
 import re
+from tqdm import tqdm
 
 def load_images(subject_number, guidance_scales, gesture_names=None, images_dir=None):
 
@@ -23,7 +24,8 @@ def load_images(subject_number, guidance_scales, gesture_names=None, images_dir=
         # Use regular expression to find matches for gesture types and scales
         pattern = re.compile(r"(.+)_guidance_scale-(\d+)")
         
-        for key in z_group.array_keys():
+        # use tqdm
+        for key in tqdm(z_group.array_keys(), total=len(z_group), desc="Loading images"):
             match = pattern.match(key)
             if match:
                 gesture, scale = match.groups()
@@ -44,7 +46,8 @@ def load_images(subject_number, guidance_scales, gesture_names=None, images_dir=
     
     return loaded_image_groups, labels
 
-def load_images_generated_from_diffusion(subject_number, guidance_scales, gesture_names=None, images_dir=None, validation_or_training=None):
+def load_images_generated_from_img2img(subject_number, guidance_scales, gesture_names=None, images_dir=None, validation_or_training=None):
+
 
     assert validation_or_training == "validation" or validation_or_training == "training", "validation_or_training must be either 'validation' or 'training'"
     # Construct the base path for the images
@@ -64,7 +67,7 @@ def load_images_generated_from_diffusion(subject_number, guidance_scales, gestur
             # Use regular expression to find matches for gesture types and scales
             pattern = re.compile(r"(.+)_guidance_scale-(\d+)")
             
-            for key in z_group.array_keys():
+            for key in tqdm(z_group.array_keys(), total=len(z_group), desc=f"Loading {validation_or_training} images"):
                 match = pattern.match(key)
                 if match:
                     gesture, scale = match.groups()
@@ -83,14 +86,17 @@ def load_images_generated_from_diffusion(subject_number, guidance_scales, gestur
                     if img_array is not None:
                         print(f"Loaded {key}, which has shape {img_array.shape}")
 
-        else:
-            # open each folder in base path as different zarr groups
-            for subject_folder in os.listdir(base_path):
-                z_group = zarr.open_group(subject_folder, mode="r")
+        else: # loading training
+            # open the base_path as a zarr group with different subject subgroups
+            z_parent_group = zarr.open_group(base_path, mode="r")
+            # iterate through the subject subgroups
+            for subject_folder in z_parent_group.keys():
+            # for subject_folder in os.listdir(base_path):
+                z_group = zarr.open_group(f"{base_path}/{subject_folder}", mode="r")
                 # Use regular expression to find matches for gesture types and scales
                 pattern = re.compile(r"(.+)_guidance_scale-(\d+)")
                 
-                for key in z_group.array_keys():
+                for key in tqdm(z_group.array_keys(), total=len(z_group), desc=f"Loading {validation_or_training} images"):
                     match = pattern.match(key)
                     if match:
                         gesture, scale = match.groups()
@@ -109,12 +115,15 @@ def load_images_generated_from_diffusion(subject_number, guidance_scales, gestur
                         if img_array is not None:
                             print(f"From subject folder {subject_folder}, Loaded {key}, which has shape {img_array.shape}")
 
+        return loaded_image_groups, labels
+
 def main():
     parser = argparse.ArgumentParser(description='Load Zarr images into PyTorch.')
     parser.add_argument('--loso_subject_number', type=str, help='LOSO subject number', default="1")
     parser.add_argument('--guidance_scales', type=str, help='Guidance scale to load', default="5,15,25,50")
     parser.add_argument('--dataset', type=str, help='Dataset to load', default="OzdemirEMG")
-    parser.add_argument('--images_dir', type=str, help='Input directory for images', default="LOSOimages_zarr_generated-from-diffusion/OzdemirEMG/cwt_256/")
+    parser.add_argument('--images_dir', type=str, help='Input directory for images', default="LOSOimages_zarr_generated-from-diffusion/OzdemirEMG/cwt/")
+    parser.add_argument('--validation_or_training', type=str, help='Validation or training', default=None)
     
     args = parser.parse_args()
     
@@ -123,9 +132,13 @@ def main():
         import utils_OzdemirEMG as utils
         gesture_names = utils.gesture_labels_partial
 
-    image_groups, labels = load_images(args.loso_subject_number, args.guidance_scales.split(","), gesture_names, args.images_dir)
+    if args.validation_or_training is not None:
+        image_groups, labels = load_images_generated_from_img2img(args.loso_subject_number, args.guidance_scales.split(","), gesture_names, args.images_dir, args.validation_or_training)
+    else:
+        image_groups, labels = load_images(args.loso_subject_number, args.guidance_scales.split(","), gesture_names, args.images_dir)
     total_number_of_images = sum([len(img_group) for img_group in image_groups])
     print(f"Loaded {len(image_groups)} image datasets, which have a total of {total_number_of_images} images.")
 
 if __name__ == "__main__":
     main()
+    
