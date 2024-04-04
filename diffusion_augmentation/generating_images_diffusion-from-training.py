@@ -18,6 +18,7 @@ args.add_argument("--output_base_folder", type=str, default="LOSOimages_generate
 args.add_argument("--training_images_folder", type=str, default="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/cwt/")
 args.add_argument("--gesture_labels", type=str, default="Rest,Extension,Flexion,Ulnar_Deviation,Radial_Deviation,Grip,Abduction")
 args.add_argument("--guidance_scales", type=str, default="0")
+args.add_argument("--strength", type=float, default=0.35)
 args = args.parse_args()
 
 
@@ -64,7 +65,7 @@ for training_images_subject_folder in training_images_subject_folders:
                                 image=training_images_tensor[i*args.batch_size:(i+1)*args.batch_size],
                                 num_inference_steps=50,
                                 guidance_scale=scale,
-                                strength=0.35,
+                                strength=args.strength,
                                 #  num_images_per_prompt=NUMBER_IMAGES_PER_PROMPT,
                                 seed=args.seed).images
 
@@ -75,7 +76,7 @@ for training_images_subject_folder in training_images_subject_folders:
                                         image=training_images_tensor[i*args.batch_size+j],
                                         num_inference_steps=50,
                                         guidance_scale=scale,
-                                        strength=0.35,
+                                        strength=args.strength,
                                         #  num_images_per_prompt=NUMBER_IMAGES_PER_PROMPT,
                                         seed=args.seed).images
                         image = images[0]
