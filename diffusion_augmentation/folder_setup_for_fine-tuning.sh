@@ -10,7 +10,7 @@ fi
 
 # Default values
 DEFAULT_SUBJECT_NUMBER="1"
-DEFAULT_SRC_DIR="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/cwt_256"
+DEFAULT_SRC_DIR="LOSOimages/OzdemirEMG/LOSO_no_scaler_normalization/cwt"
 DEFAULT_GESTURE_ARRAY="Rest,Extension,Flexion,Ulnar_Deviation,Radial_Deviation,Grip,Abduction"
 
 # Processing inputs

@@ -14,3 +14,7 @@
     The following is an example of arguments used for nested training folders: `python diffusion_augmentation/zarr_images.py --image_directory=LOSOimages_generated-from-diffusion/OzdemirEMG/cwt/ --output_directory=LOSOimages_zarr_generated-from-diffusion/OzdemirEMG/cwt/ --subject_folder_suffix=_training-img2img --loso_subject_number=13 --guidance_scales=0 --nested_folder=True`. 
 
     The following is an example of arguments used for the validation folder: `python diffusion_augmentation/zarr_images.py --image_directory=LOSOimages_generated-from-diffusion/OzdemirEMG/cwt/ --output_directory=LOSOimages_zarr_generated-from-diffusion/OzdemirEMG/cwt/ --subject_folder_suffix=_validation-img2img --loso_subject_number=13 --guidance_scales=0`
+
+## Generate Image to Image with ControlNet
+
+2. Run `fine-tuning_subject-to-subject.sh`.

@@ -53,7 +53,7 @@ dataset = load_dataset(config.dataset_name, split="train")
 SHOW_TRAINING_IMAGES = False
 if SHOW_TRAINING_IMAGES:
     fig, axs = plt.subplots(1, 4, figsize=(20, 5))
-    for i, image in enumerate(dataset[:4]["image"]):
+    for i, image in enumerate(dataset[:4]["input_image"]):
         axs[i].imshow(image)
         axs[i].set_axis_off()
     fig.show()
@@ -65,8 +65,10 @@ preprocess = transforms.Compose([
 ])
 
 def transform(examples):
-    images = [preprocess(image.convert("RGB")) for image in examples["image"]]
-    return {"image": images}
+    # Assume `examples` has 'input_image' and 'target_image' fields
+    inputs = [preprocess(image.convert("RGB")) for image in examples["input_image"]]
+    targets = [preprocess(image.convert("RGB")) for image in examples["target_image"]]
+    return {"input_image": inputs, "target_image": targets}
 
 dataset.set_transform(transform)
 
@@ -96,7 +98,7 @@ model = UNet2DModel(
     ),
 )
 
-sample_image = dataset[0]["image"].unsqueeze(0)
+sample_image = dataset[0]["input_image"].unsqueeze(0)
 print("Input shape:", sample_image.shape)
 
 print("Output shape:", model(sample_image, timestep=0).sample.shape)
@@ -162,25 +164,27 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
         progress_bar.set_description(f"Epoch {epoch}")
 
         for step, batch in enumerate(train_dataloader):
-            clean_images = batch["image"]
+            # clean_images = batch["image"]
+            input_images = batch["input_image"]
+            target_images = batch["target_image"]
             # Sample noise to add to the images
-            noise = torch.randn(clean_images.shape, device=clean_images.device)
-            bs = clean_images.shape[0]
-
+            noise = torch.randn(input_images.shape, device=input_images.device)
+            bs = input_images.shape[0]
+            
             # Sample a random timestep for each image
             timesteps = torch.randint(
-                0, noise_scheduler.config.num_train_timesteps, (bs,), device=clean_images.device,
+                0, noise_scheduler.config.num_train_timesteps, (bs,), device=input_images.device,
                 dtype=torch.int64
             )
 
             # Add noise to the clean images according to the noise magnitude at each timestep
             # (this is the forward diffusion process)
-            noisy_images = noise_scheduler.add_noise(clean_images, noise, timesteps)
+            noisy_images = noise_scheduler.add_noise(input_images, noise, timesteps)
 
             with accelerator.accumulate(model):
                 # Predict the noise residual
-                noise_pred = model(noisy_images, timesteps, return_dict=False)[0]
-                loss = F.mse_loss(noise_pred, noise)
+                predicted_target_image = model(noisy_images, timesteps, return_dict=False)[0]
+                loss = F.mse_loss(target_images, predicted_target_image)
                 accelerator.backward(loss)
 
                 accelerator.clip_grad_norm_(model.parameters(), 1.0)
