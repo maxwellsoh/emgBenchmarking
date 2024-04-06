@@ -99,6 +99,8 @@ parser.add_argument('--reduced_training_data_size', type=int, help='size of redu
 parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
 # use target domain for normalization
 parser.add_argument('--target_normalize', type=utils.str2bool, help='use a leftout window for normalization. Set to False by default.', default=False)
+# Add argument for whether or not to use diffusion generated images from img2img
+parser.add_argument('--use_img2img', type=utils.str2bool, help='whether or not to use diffusion generated images from img2img. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -192,6 +194,8 @@ print(f"The value of --reduce_training_data_size is {args.reduce_training_data_s
 print(f"The value of --reduced_training_data_size is {args.reduced_training_data_size}")
 
 print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_out_randomly}")
+print(f"The value of --target_normalize is {args.target_normalize}")
+print(f"The value of --use_img2img is {args.use_img2img}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -485,7 +489,7 @@ else:
     if leaveOut == 0:
         base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
     else:
-        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_subject' + str(leaveOut) + '/'
+        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
 
 if args.turn_off_scaler_normalization:
     if args.leave_n_subjects_out_randomly != 0:
@@ -496,6 +500,8 @@ if args.turn_off_scaler_normalization:
         else: 
             base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
     scaler = None
+else:
+    base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(leaveOut) + '/'
 
 if args.turn_on_rms:
     base_foldername_zarr += 'RMS_input_windowsize_' + str(args.RMS_input_windowsize) + '/'
@@ -510,9 +516,10 @@ if args.save_images:
         os.makedirs(base_foldername_zarr)
 
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    subject_folder = f'subject{x}/'
+    subject_folder = f'LOSO_subject{x}/'
     foldername_zarr = base_foldername_zarr + subject_folder
-    
+
+    print("Looking in folder: ", foldername_zarr)
     # Check if the folder (dataset) exists, load if yes, else create and save
     if os.path.exists(foldername_zarr):
         # Load the dataset
@@ -597,32 +604,33 @@ else:
         print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
-    else:
+    else:            
         if args.reduce_training_data_size:
             reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
 
-        X_validation = np.array(data.pop(leaveOut-1))
-        Y_validation = np.array(labels.pop(leaveOut-1))
+        X_validation = np.array(data[leaveOut-1])
+        Y_validation = np.array(labels[leaveOut-1])
+
+        X_train_list = []
+        Y_train_list = []
+
         for i in range(len(data)):
+            if i == leaveOut-1:
+                continue
             current_data = np.array(data[i])
             current_labels = np.array(labels[i])
 
             if args.reduce_training_data_size:
                 proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
                 current_data, _, current_labels, _ = model_selection.train_test_split(current_data, current_labels, 
-                                                                                            train_size=proportion_to_keep, stratify=current_labels, 
-                                                                                            random_state=args.seed, shuffle=True)
+                                                                                        train_size=proportion_to_keep, stratify=current_labels, 
+                                                                                        random_state=args.seed, shuffle=True)
 
-            if i == 0:
-                X_train = current_data
-                Y_train = current_labels
-            else:
-                X_train = np.concatenate((X_train, current_data), axis=0)
-                Y_train = np.concatenate((Y_train, current_labels), axis=0)
-            print("Appended subject", i+1, "to training data")
+            X_train_list.append(current_data)
+            Y_train_list.append(current_labels)
 
-        X_train = torch.from_numpy(X_train).to(torch.float16)
-        Y_train = torch.from_numpy(Y_train).to(torch.float16)
+        X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
+        Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
 
@@ -701,6 +709,7 @@ for name, param in model.named_parameters():
         param.requires_grad = False
         
 if args.load_diffusion_generated_images:
+    print("Loading images generated from the diffusion model for data augmentation")
     zarr_foldername = f'LOSOimages_zarr_generated-from-diffusion/{args.dataset}/'
     if args.turn_on_cwt:
         zarr_foldername += 'cwt/'
@@ -716,7 +725,52 @@ if args.load_diffusion_generated_images:
         X_train = torch.cat((X_train, generated_images_grouped[i].transpose(1, 3).to(torch.float16)))
         Y_train = torch.cat((Y_train, generated_group_labels[i]))
 
+if args.use_img2img:
+    print("Loading images generated from the diffusion model from img2img generation")
+    # Load the images generated from the diffusion model
+    zarr_foldername = f'LOSOimages_zarr_generated-from-diffusion/{args.dataset}/'
+    if args.turn_on_cwt:
+        zarr_foldername += 'cwt/'
+    elif args.turn_on_hht:
+        zarr_foldername += 'hht/'
+    elif args.turn_on_spectrogram:
+        zarr_foldername += 'spectrogram/'
+
+    del X_train
+    del Y_train
+
+    del X_validation
+    del Y_validation
+
+    generated_images_grouped_validation, generated_group_labels_validation = dgzl.load_images_generated_from_img2img(args.leftout_subject, args.guidance_scales, utils.gesture_labels, zarr_foldername, validation_or_training='validation')
+    generated_images_grouped_training, generated_group_labels_training = dgzl.load_images_generated_from_img2img(args.leftout_subject, args.guidance_scales, utils.gesture_labels, zarr_foldername, validation_or_training='training')
+    
+    print("Note that the generated images for img2img replace the original images for training and validation")
+    # TODO DEBUG THIS. Why do validation and training images that are plotted to wandb look the same as the original pictures? Is there shuffling going on (data leaking) that has put some validation data 
+    # into the training set? Getting suspiciously high accuracies right now. 
+    
+    # Optimize training data concatenation
+    X_train_list = [np.transpose(generated_images_grouped_training[i], (0, 3, 1, 2)).to(torch.float16) for i in tqdm(range(len(generated_images_grouped_training)))]
+    Y_train_list = [generated_group_labels_training[i] for i in range(len(generated_images_grouped_training))]
+
+    X_train = torch.cat(X_train_list)
+    Y_train = torch.cat(Y_train_list)
+
+    del X_train_list
+    del Y_train_list
+
+    # Similarly, optimize validation data concatenation
+    X_validation_list = [np.transpose(generated_images_grouped_validation[i], (0, 3, 1, 2)).to(torch.float16) for i in tqdm(range(len(generated_images_grouped_validation)))]
+    Y_validation_list = [generated_group_labels_validation[i] for i in range(len(generated_images_grouped_validation))]
+
+    X_validation = torch.cat(X_validation_list)
+    Y_validation = torch.cat(Y_validation_list)
+
+    del X_validation_list
+    del Y_validation_list
+
 batch_size = 64
+
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 if (leaveOut == 0):
@@ -785,6 +839,8 @@ if args.turn_off_scaler_normalization:
     wandb_runname += '_no-scaler-normalization'
 if args.target_normalize:
     wandb_runname += '_target-normalize'
+if args.use_img2img:
+    wandb_runname += '_img2img'
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
@@ -796,7 +852,7 @@ else:
 
 project_name += args.project_name_suffix
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
+run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
 if args.leave_n_subjects_out_randomly != 0:
     wandb.config.left_out_subjects = leaveOutIndices
