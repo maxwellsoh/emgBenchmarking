@@ -698,7 +698,8 @@ def make_train_dataset(args, tokenizer, accelerator):
 
     def preprocess_train(examples):
         
-        images = [image.convert("RGB") for image in examples[image_column]]
+        images = [Image.open(image).convert("RGB") for image in examples[image_column]]
+        # images = [image.convert("RGB") for image in examples[image_column]]
         images = [image_transforms(image) for image in images]
         
         conditioning_images = [Image.open(image).convert("RGB") for image in examples[conditioning_image_column]]
@@ -1153,6 +1154,7 @@ def main(args):
             if global_step >= args.max_train_steps:
                 break
 
+    os.chdir(original_directory)
     # Create the pipeline using using the trained modules and save it.
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
@@ -1161,6 +1163,7 @@ def main(args):
 
         # Run a final round of validation.
         image_logs = None
+        os.chdir(original_directory)
         if args.validation_prompt is not None:
             image_logs = log_validation(
                 vae=vae,

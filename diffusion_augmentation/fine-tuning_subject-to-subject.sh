@@ -43,18 +43,38 @@ for i in "${SPECIFIC_SUBJECTS[@]}"; do
       --output_dir=$SUBJECT_OUTPUT_DIR  \
       --dataset_name="$INSTANCE_DIR_GESTURE/all_data_except"  \
       --learning_rate=1e-5  \
-      --validation_image "${INSTANCE_DIR_GESTURE}/LOSO_subject${i}/Abduction/image_2880_subject${i}.png" "${INSTANCE_DIR_GESTURE}/LOSO_subject${i}/Rest/image_0_subject${i}.png"  \
+      --resolution=224 \
+      --validation_image "${INSTANCE_DIR_GESTURE}/LOSO_subject${i}/Abduction/image_2880_subject${i}.png" "${INSTANCE_DIR_GESTURE}/LOSO_subject${i}/Extension/image_480_subject${i}.png"  \
+      "${INSTANCE_DIR_GESTURE}/LOSO_subject${i}/Flexion/image_960_subject${i}.png" "${INSTANCE_DIR_GESTURE}/LOSO_subject${i}/Grip/image_2400_subject${i}.png" \
+      "${INSTANCE_DIR_GESTURE}/LOSO_subject${i}/Radial_Deviation/image_1920_subject${i}.png" "${INSTANCE_DIR_GESTURE}/LOSO_subject${i}/Rest/image_0_subject${i}.png" \
+      "${INSTANCE_DIR_GESTURE}/LOSO_subject${i}/Ulnar_Deviation/image_1440_subject${i}.png" \
+      "${INSTANCE_DIR_GESTURE}/LOSO_subject0/Abduction/image_2880_subject0.png" "${INSTANCE_DIR_GESTURE}/LOSO_subject0/Extension/image_480_subject0.png"  \
+      "${INSTANCE_DIR_GESTURE}/LOSO_subject0/Radial_Deviation/image_1920_subject0.png" "${INSTANCE_DIR_GESTURE}/LOSO_subject0/Rest/image_0_subject0.png" \
+      "${INSTANCE_DIR_GESTURE}/LOSO_subject0/Flexion/image_960_subject0.png" "${INSTANCE_DIR_GESTURE}/LOSO_subject0/Grip/image_2400_subject0.png" \
+      "${INSTANCE_DIR_GESTURE}/LOSO_subject0/Ulnar_Deviation/image_1440_subject0.png" \
       --validation_prompt "heatmap transformation for loso-cv subject" "heatmap transformation for loso-cv subject"  \
-      --train_batch_size=2 \
+      "heatmap transformation for loso-cv subject" "heatmap transformation for loso-cv subject" \
+      "heatmap transformation for loso-cv subject" "heatmap transformation for loso-cv subject" \
+      "heatmap transformation for loso-cv subject" \
+      "heatmap transformation for loso-cv subject" "heatmap transformation for loso-cv subject"  \
+      "heatmap transformation for loso-cv subject" "heatmap transformation for loso-cv subject" \
+      "heatmap transformation for loso-cv subject" "heatmap transformation for loso-cv subject" \
+      "heatmap transformation for loso-cv subject" \
+      --train_batch_size=3 \
       --gradient_accumulation_steps=2 \
       --gradient_checkpointing \
       --use_8bit_adam \
       --seed=0 \
       --checkpointing_steps=1000 \
-      --checkpoints_total_limit=3 
+      --checkpoints_total_limit=3  \
+      --report_to=wandb \
+      --validation_steps=500 \
+      --image_column="target_image" \
+      --lr_scheduler="cosine_with_restarts" \
+      --num_train_epochs=1
 
   echo "Done training for subject left out ${i}"
   # Delete temporate folder
-  # rm -rf ${INSTANCE_DIR_GESTURE}/all_data_except
+  rm -rf ${INSTANCE_DIR_GESTURE}/all_data_except
 done
 

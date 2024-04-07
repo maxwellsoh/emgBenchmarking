@@ -56,7 +56,7 @@ for gesture in "${GESTURE_ARRAY[@]}"; do
   for image_path in "${OUTPUT_GESTURE_DIR}"/*.png; do
     image_file=$(basename "$image_path")
     # Append new entry to the metadata string
-    metadata_entries+="{\"text\": \"heatmap transformation for loso-cv subject\", \"image\": \"all_data_except_subject${SUBJECT_NUMBER_LEFT_OUT}_${gesture}/${image_file}\", \"conditioning_image\": \"all_data_except_subject${SUBJECT_NUMBER_LEFT_OUT}_${gesture}/${image_file}\",  \"file_name\": \"all_data_except_subject${SUBJECT_NUMBER_LEFT_OUT}_${gesture}/${image_file}\"}"$'\n'
+    metadata_entries+="{\"text\": \"heatmap transformation for loso-cv subject\", \"target_image\": \"all_data_except_subject${SUBJECT_NUMBER_LEFT_OUT}_${gesture}/${image_file}\", \"conditioning_image\": \"all_data_except_subject${SUBJECT_NUMBER_LEFT_OUT}_${gesture}/${image_file}\",  \"file_name\": \"all_data_except_subject${SUBJECT_NUMBER_LEFT_OUT}_${gesture}/${image_file}\"}"$'\n'
   done
 done
 
