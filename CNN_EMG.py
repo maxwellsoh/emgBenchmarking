@@ -494,6 +494,8 @@ if args.leave_n_subjects_out_randomly != 0:
 else:
     if leaveOut == 0:
         base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
+    elif args.turn_off_scaler_normalization:
+        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
     else:
         base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_subject' + str(leaveOut) + '/'
 
@@ -520,9 +522,13 @@ if args.save_images:
         os.makedirs(base_foldername_zarr)
 
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    subject_folder = f'subject{x}/'
+    if leaveOut == 0:
+        subject_folder = f'subject{x}/'
+    else:
+        subject_folder = f'LOSO_subject{x}/'
     foldername_zarr = base_foldername_zarr + subject_folder
     
+    print("Attempting to load dataset for subject", x, "from", foldername_zarr)
     # Check if the folder (dataset) exists, load if yes, else create and save
     if os.path.exists(foldername_zarr):
         # Load the dataset
@@ -613,7 +619,7 @@ else:
 
         X_validation = np.array(data.pop(leaveOut-1))
         Y_validation = np.array(labels.pop(leaveOut-1))
-        for i in range(len(data)):
+        for i in tqdm(range(len(data)), desc="Appended Number of Subjects "):
             current_data = np.array(data[i])
             current_labels = np.array(labels[i])
 
@@ -629,7 +635,6 @@ else:
             else:
                 X_train = np.concatenate((X_train, current_data), axis=0)
                 Y_train = np.concatenate((Y_train, current_labels), axis=0)
-            print("Appended subject", i+1, "to training data")
 
         if args.transfer_learning:
             
@@ -822,6 +827,8 @@ if args.transfer_learning:
     wandb_runname += '_transfer-learning'
 if args.cross_validation_for_time_series:   
     wandb_runname += '_cross-validation-for-time-series'
+if args.use_diffusion_for_transfer_learning:
+    wandb_runname += '_use-diffusion-for-transfer-learning'
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
