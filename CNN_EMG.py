@@ -28,7 +28,7 @@ import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
 import diffusion_generated_zarr_loading as dgzl
-
+import cross_validation_utilities
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -99,6 +99,12 @@ parser.add_argument('--reduced_training_data_size', type=int, help='size of redu
 parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
 # use target domain for normalization
 parser.add_argument('--target_normalize', type=utils.str2bool, help='use a leftout window for normalization. Set to False by default.', default=False)
+# Test with transfer learning by using some data from the validation dataset
+parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
+# Add argument for cross validation for time series
+parser.add_argument('--cross_validation_for_time_series', type=utils.str2bool, help='whether or not to use cross validation for time series. Set to False by default.', default=False)
+# Add argument for using diffusion to generate more images with transfer learning
+parser.add_argument('--use_diffusion_for_transfer_learning', type=utils.str2bool, help='whether or not to use diffusion to generate more images with transfer learning. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -192,6 +198,10 @@ print(f"The value of --reduce_training_data_size is {args.reduce_training_data_s
 print(f"The value of --reduced_training_data_size is {args.reduced_training_data_size}")
 
 print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_out_randomly}")
+print(f"The value of --target_normalize is {args.target_normalize}")
+print(f"The value of --transfer_learning is {args.transfer_learning}")
+print(f"The value of --cross_validation_for_time_series is {args.cross_validation_for_time_series}")
+print(f"The value of --use_diffusion_for_transfer_learning is {args.use_diffusion_for_transfer_learning}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -621,6 +631,27 @@ else:
                 Y_train = np.concatenate((Y_train, current_labels), axis=0)
             print("Appended subject", i+1, "to training data")
 
+        if args.transfer_learning:
+            
+            if args.cross_validation_for_time_series:
+                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = cross_validation_utilities.train_test_split(
+                    X_validation, Y_validation, test_size=1/12, stratify=Y_validation, random_state=args.seed, shuffle=False)
+            else:
+                # Split the validation data into train and validation subsets
+                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = cross_validation_utilities.train_test_split(
+                    X_validation, Y_validation, test_size=1/12, stratify=Y_validation, random_state=args.seed, shuffle=True)
+                
+            # Append the partial validation data to the training data
+            X_train = np.concatenate((X_train, X_train_partial), axis=0)
+            Y_train = np.concatenate((Y_train, Y_train_partial), axis=0)
+
+            print("Appended 1/12th of the data from each gesture in the validation dataset to the training data")
+
+            # Update the validation data
+            X_validation = X_validation_partial
+            Y_validation = Y_validation_partial
+
+
         X_train = torch.from_numpy(X_train).to(torch.float16)
         Y_train = torch.from_numpy(Y_train).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
@@ -785,6 +816,12 @@ if args.turn_off_scaler_normalization:
     wandb_runname += '_no-scaler-normalization'
 if args.target_normalize:
     wandb_runname += '_target-normalize'
+if args.load_few_images:
+    wandb_runname += '_load-few-images'
+if args.transfer_learning:
+    wandb_runname += '_transfer-learning'
+if args.cross_validation_for_time_series:   
+    wandb_runname += '_cross-validation-for-time-series'
 
 if (leaveOut == 0):
     if args.turn_on_kfold:
