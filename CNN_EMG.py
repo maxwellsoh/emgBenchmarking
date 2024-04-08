@@ -28,7 +28,13 @@ import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
 import diffusion_generated_zarr_loading as dgzl
-import cross_validation_utilities
+import cross_validation_utilities.train_test_split as tts
+from torchvision.utils import save_image
+import json
+from diffusion_augmentation import train_dreambooth
+from diffusers import DiffusionPipeline
+import shutil
+
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -637,20 +643,85 @@ else:
                 Y_train = np.concatenate((Y_train, current_labels), axis=0)
 
         if args.transfer_learning:
-            
+            proportion_to_keep = 1 / 12
+
             if args.cross_validation_for_time_series:
-                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = cross_validation_utilities.train_test_split(
-                    X_validation, Y_validation, test_size=1/12, stratify=Y_validation, random_state=args.seed, shuffle=False)
+                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = tts.train_test_split(
+                    X_validation, Y_validation, test_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=False)
             else:
                 # Split the validation data into train and validation subsets
-                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = cross_validation_utilities.train_test_split(
-                    X_validation, Y_validation, test_size=1/12, stratify=Y_validation, random_state=args.seed, shuffle=True)
+                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = tts.train_test_split(
+                    X_validation, Y_validation, test_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=True)
                 
+            if args.use_diffusion_for_transfer_learning:
+                # save partial training images in a temporary folder in a Huggingface dataset format
+                temporary_foldername = f'LOSOimages_for_transfer_learning_temporary/{args.dataset}/'
+                metadata = []
+                for i, (img_tensor, label) in enumerate(zip(X_train_partial, Y_train_partial)):
+                    gesture_label = utils.gesture_labels[label]
+                    save_image(img_tensor, f'{temporary_foldername}/train/{gesture_label}/{i}.png')
+                    # write a metadata.jsonl file that contains a line for each image in the temporary folder
+                    metadata.append({'file_name': f'{gesture_label}/{i}.png', 'text': f'zqv for {gesture_label}'})
+                
+                with open(f'{temporary_foldername}/train/metadata.jsonl', 'w') as f:
+                    for item in metadata:
+                        f.write("%s\n" % item)
+
+                dreambooth_args = train_dreambooth.parse_args([ f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5",
+                                                                f"--instance_data_dir={temporary_foldername}/train/",
+                                                                f"--output_dir={temporary_foldername}/output/",
+                                                                f"--instance_prompt='zqv for Extension'",
+                                                                f"--resolution=512",
+                                                                f"--train_batch_size=1",
+                                                                f"--gradient_accumulation_steps=1",
+                                                                f"--learning_rate=5e-6",
+                                                                f"--lr_scheduler='constant'",
+                                                                f"--lr_warmup_steps=0",
+                                                                f"--max_train_steps=400"])
+                train_dreambooth.main(dreambooth_args)
+
+                pipeline = DiffusionPipeline.from_pretrained(f'{temporary_foldername}/output/')
+
+                total_number_to_generate = X_train_partial.shape[0] * (1 - proportion_to_keep)
+                for gesture in utils.gesture_labels:
+                    number_to_generate_at_once = 20
+                    guidance_scale_to_use = 7.5
+                    for i in range(total_number_to_generate) // number_to_generate_at_once:
+                        # generate images using the diffusion model
+                        generated_images = pipeline(f"zqv for {gesture}", 
+                                                    num_inference_steps=50, 
+                                                    guidance_scale=guidance_scale_to_use,
+                                                    num_images_per_prompt=number_to_generate_at_once,
+                                                    seed=args.seed).images
+                        
+                        for j, image in enumerate(generated_images):
+                            # if image is all black, regenerate image
+                            while not image.getbbox():
+                                generated_images = pipeline(prompt =f"zqv for {gesture}",
+                                                                    num_inference_steps=50,
+                                                                    guidance_scale=guidance_scale_to_use,
+                                                                    num_images_per_prompt=1,
+                                                                    seed=args.seed).images
+                                image = generated_images[0]
+
+                            image = image.resize((224,224))
+                            X_train_partial = np.concatenate((X_train_partial, np.array(image).reshape(1, 3, 224, 224)), axis=0)
+                            Y_train_to_add = np.array(utils.gesture_labels.index(gesture)).reshape(1,)
+                            # one hot encoding
+                            Y_train_to_add = np.eye(numGestures)[Y_train_to_add]
+                            Y_train_partial = np.concatenate((Y_train_partial, Y_train_to_add), axis=0)
+
+                # remove the temporary folder
+                shutil.rmtree(temporary_foldername)
+
             # Append the partial validation data to the training data
             X_train = np.concatenate((X_train, X_train_partial), axis=0)
             Y_train = np.concatenate((Y_train, Y_train_partial), axis=0)
 
-            print("Appended 1/12th of the data from each gesture in the validation dataset to the training data")
+            if not args.use_diffusion_for_transfer_learning:
+                print("Appended 1/12th of the data from each gesture in the validation dataset to the training data")
+            else:
+                print("Appended generated images to the training data for transfer learning")
 
             # Update the validation data
             X_validation = X_validation_partial
@@ -840,7 +911,7 @@ else:
 
 project_name += args.project_name_suffix
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
+run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
 if args.leave_n_subjects_out_randomly != 0:
     wandb.config.left_out_subjects = leaveOutIndices
