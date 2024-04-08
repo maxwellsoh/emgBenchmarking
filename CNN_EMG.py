@@ -651,6 +651,10 @@ else:
             if args.cross_validation_for_time_series:
                 X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = tts.train_test_split(
                     X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=False)
+                if len(Y_train_partial.shape) == 1:
+                    Y_train_partial = np.eye(numGestures)[Y_train_partial]
+                if len(Y_validation_partial.shape) == 1:
+                    Y_validation_partial = np.eye(numGestures)[Y_validation_partial]
             else:
                 # Split the validation data into train and validation subsets
                 X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = tts.train_test_split(
