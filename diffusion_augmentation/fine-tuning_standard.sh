@@ -33,7 +33,7 @@ for i in "${SPECIFIC_SUBJECTS[@]}"; do
   SUBJECT_OUTPUT_DIR="${OUTPUT_DIR}/subject-${i}"
 
   # Setup folder
-  IFS=,; ./diffusion_augmentation/folder_setup.sh ${i} ${INSTANCE_DIR_GESTURE} "${GESTURE_ARRAY[*]}"
+  IFS=,; ./diffusion_augmentation/folder_setup_for_fine-tuning.sh ${i} ${INSTANCE_DIR_GESTURE} "${GESTURE_ARRAY[*]}"
 
   # Use the corrected syntax for variable expansion and command execution
   accelerate launch diffusion_augmentation/train_text_to_image.py \
