@@ -629,7 +629,7 @@ else:
         print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
-    else:            
+    else: # Running LOSO
         if args.reduce_training_data_size:
             reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
 
@@ -638,6 +638,7 @@ else:
 
         X_train_list = []
         Y_train_list = []
+        
 
         for i in range(len(data)):
             if i == leaveOut-1:
@@ -651,12 +652,8 @@ else:
                                                                                         train_size=proportion_to_keep, stratify=current_labels, 
                                                                                         random_state=args.seed, shuffle=True)
 
-            if i == 0:
-                X_train = current_data
-                Y_train = current_labels
-            else:
-                X_train = np.concatenate((X_train, current_data), axis=0)
-                Y_train = np.concatenate((Y_train, current_labels), axis=0)
+            X_train_list.append(current_data)
+            Y_train_list.append(current_labels)
 
         if args.transfer_learning:
             proportion_to_keep = 1 / 12
