@@ -28,6 +28,12 @@ import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
 import diffusion_generated_zarr_loading as dgzl
+import cross_validation_utilities.train_test_split as tts
+from torchvision.utils import save_image
+import json
+from diffusion_augmentation import train_dreambooth
+from diffusers import DiffusionPipeline
+import shutil
 
 
 # Define a custom argument type for a list of integers
@@ -99,6 +105,14 @@ parser.add_argument('--reduced_training_data_size', type=int, help='size of redu
 parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
 # use target domain for normalization
 parser.add_argument('--target_normalize', type=utils.str2bool, help='use a leftout window for normalization. Set to False by default.', default=False)
+# Test with transfer learning by using some data from the validation dataset
+parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
+# Add argument for cross validation for time series
+parser.add_argument('--cross_validation_for_time_series', type=utils.str2bool, help='whether or not to use cross validation for time series. Set to False by default.', default=False)
+# Add argument for using diffusion to generate more images with transfer learning
+parser.add_argument('--use_diffusion_for_transfer_learning', type=utils.str2bool, help='whether or not to use diffusion to generate more images with transfer learning. Set to False by default.', default=False)
+# Add argument for amount for reducing number of data to generate for transfer learning
+parser.add_argument('--reduce_data_for_transfer_learning', type=int, help='amount for reducing number of data to generate for transfer learning. Set to 1 by default.', default=1)
 # Add argument for whether or not to use diffusion generated images from img2img
 parser.add_argument('--use_img2img', type=utils.str2bool, help='whether or not to use diffusion generated images from img2img. Set to False by default.', default=False)
 
@@ -195,6 +209,10 @@ print(f"The value of --reduced_training_data_size is {args.reduced_training_data
 
 print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_out_randomly}")
 print(f"The value of --target_normalize is {args.target_normalize}")
+print(f"The value of --transfer_learning is {args.transfer_learning}")
+print(f"The value of --cross_validation_for_time_series is {args.cross_validation_for_time_series}")
+print(f"The value of --use_diffusion_for_transfer_learning is {args.use_diffusion_for_transfer_learning}")
+print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
 print(f"The value of --use_img2img is {args.use_img2img}")
     
 # Add date and time to filename
@@ -488,6 +506,8 @@ if args.leave_n_subjects_out_randomly != 0:
 else:
     if leaveOut == 0:
         base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
+    elif args.turn_off_scaler_normalization:
+        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
     else:
         base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
 
@@ -516,8 +536,13 @@ if args.save_images:
         os.makedirs(base_foldername_zarr)
 
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    subject_folder = f'LOSO_subject{x}/'
+    if leaveOut == 0:
+        subject_folder = f'subject{x}/'
+    else:
+        subject_folder = f'LOSO_subject{x}/'
     foldername_zarr = base_foldername_zarr + subject_folder
+    
+    print("Attempting to load dataset for subject", x, "from", foldername_zarr)
 
     print("Looking in folder: ", foldername_zarr)
     # Check if the folder (dataset) exists, load if yes, else create and save
@@ -626,13 +651,142 @@ else:
                                                                                         train_size=proportion_to_keep, stratify=current_labels, 
                                                                                         random_state=args.seed, shuffle=True)
 
-            X_train_list.append(current_data)
-            Y_train_list.append(current_labels)
+            if i == 0:
+                X_train = current_data
+                Y_train = current_labels
+            else:
+                X_train = np.concatenate((X_train, current_data), axis=0)
+                Y_train = np.concatenate((Y_train, current_labels), axis=0)
+
+        if args.transfer_learning:
+            proportion_to_keep = 1 / 12
+
+            if args.cross_validation_for_time_series:
+                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = tts.train_test_split(
+                    X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=False)
+                if len(Y_train_partial.shape) == 1:
+                    Y_train_partial = np.eye(numGestures)[Y_train_partial]
+                if len(Y_validation_partial.shape) == 1:
+                    Y_validation_partial = np.eye(numGestures)[Y_validation_partial]
+            else:
+                # Split the validation data into train and validation subsets
+                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = tts.train_test_split(
+                    X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=True)
+                
+            if args.use_diffusion_for_transfer_learning:
+                # save partial training images in a temporary folder in a Huggingface dataset format
+                temporary_foldername = f'LOSOimages_for_transfer_learning_temporary/{args.dataset}/'
+                metadata = []
+                if not os.path.exists(temporary_foldername):
+                    os.makedirs(temporary_foldername)
+                    os.makedirs(f'{temporary_foldername}/train/')
+                    for gesture in utils.gesture_labels:
+                        os.makedirs(f'{temporary_foldername}/train/{gesture}')
+
+                for i, (img_tensor, label) in tqdm(enumerate(zip(X_train_partial, Y_train_partial)), desc="Saving Images for Transfer Learning"):
+                    label = np.argmax(label)
+                    gesture_label = utils.gesture_labels[label]
+                    img_tensor = torch.tensor(img_tensor)
+                    denormalized_image = utils.denormalize(img_tensor)
+                    save_image(denormalized_image, f'{temporary_foldername}/train/{gesture_label}/{i}.png')
+                    # write a metadata.jsonl file that contains a line for each image in the temporary folder
+                    metadata.append({'file_name': f'{gesture_label}/{i}.png', 'text': f'zqv for {gesture_label}'})
+                
+                with open(f'{temporary_foldername}/train/metadata.jsonl', 'w') as f:
+                    for item in metadata:
+                        f.write("%s\n" % item)
+
+                for i, gesture in tqdm(enumerate(utils.gesture_labels)):
+                    print(f"Number of images for {gesture}: {len(os.listdir(f'{temporary_foldername}/train/{gesture}'))}")
+                    pretrained_model_name_or_path = f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5"
+                    dreambooth_args = train_dreambooth.parse_args([ pretrained_model_name_or_path,
+                                                                    f"--instance_data_dir={temporary_foldername}/train/{gesture}",
+                                                                    f"--output_dir={temporary_foldername}/output/",
+                                                                    f"--instance_prompt=\"zqv multiple heatmaps for loso-cv subject {gesture}\"",
+                                                                    f"--resolution=512",
+                                                                    f"--train_batch_size=2",
+                                                                    f"--gradient_accumulation_steps=1",
+                                                                    f"--learning_rate=5e-6",
+                                                                    f"--lr_scheduler=constant",
+                                                                    f"--lr_warmup_steps=0",
+                                                                    f"--max_train_steps=400",
+                                                                    f"--gradient_checkpointing",
+                                                                    f"--use_8bit_adam", 
+                                                                    f"--snr_gamma=5.0"])
+                    train_dreambooth.main(dreambooth_args)
+
+                    pipeline = DiffusionPipeline.from_pretrained(f'{temporary_foldername}/output/')
+                    if torch.cuda.is_available():
+                        pipeline = pipeline.to('cuda')
+
+                    total_number_to_generate_reducer = args.reduce_data_for_transfer_learning
+                    total_number_to_generate_per_gesture = int(X_validation_partial.shape[0] // len(utils.gesture_labels) // total_number_to_generate_reducer) 
+
+                    wandb.init(project=project_name+"_diffusion-images", name=f"Diffusion Transfer Learning for {args.dataset}, Images")
+
+                    number_to_generate_at_once = 10
+                    guidance_scale_to_use = 7.5
+
+                    cycles_for_generating = int(total_number_to_generate_per_gesture // number_to_generate_at_once)
+                    for i in range(cycles_for_generating):
+                        # generate images using the diffusion model
+                        generated_images = pipeline(f"zqv multiple heatmaps for loso-cv subject {gesture}", 
+                                                    num_inference_steps=50, 
+                                                    guidance_scale=guidance_scale_to_use,
+                                                    num_images_per_prompt=number_to_generate_at_once,
+                                                    seed=args.seed).images
+                        
+                        for j, image in enumerate(generated_images):
+                            # if image is all black, regenerate image
+                            while not image.getbbox():
+                                generated_images = pipeline(prompt =f"zqv multiple heatmaps for loso-cv subject {gesture}",
+                                                                    num_inference_steps=50,
+                                                                    guidance_scale=guidance_scale_to_use,
+                                                                    num_images_per_prompt=1,
+                                                                    seed=args.seed).images
+                                image = generated_images[0]
+
+                            image = image.resize((224,224))
+                            image = utils.normalize(transforms.ToTensor()(image))
+                            X_train_partial = np.concatenate((X_train_partial, np.array(image).reshape(1, 3, 224, 224)), axis=0)
+                            Y_train_to_add = np.array(utils.gesture_labels.index(gesture)).reshape(1,)
+                            # one hot encoding
+                            Y_train_to_add = np.eye(numGestures)[Y_train_to_add]
+                            Y_train_partial = np.concatenate((Y_train_partial, Y_train_to_add), axis=0)
+
+                            if (i * number_to_generate_at_once + j) % 15 == 0:
+                                print(f"Generated {i * number_to_generate_at_once + j}th image for {gesture}")
+                                wandb.log({f"{i * number_to_generate_at_once + j}th generated image for {gesture}": wandb.Image(image)})
+                wandb.finish()
+
+                # remove the temporary folder
+                shutil.rmtree(temporary_foldername)
+
+            print("Size of X_train_partial:     ", X_train_partial.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+            print("Size of Y_train_partial:     ", Y_train_partial.shape) # (SAMPLE, GESTURE)
+
+            # Append the partial validation data to the training data
+            X_train = np.concatenate((X_train, X_train_partial), axis=0)
+            Y_train = np.concatenate((Y_train, Y_train_partial), axis=0)
+
+            if not args.use_diffusion_for_transfer_learning:
+                print("Appended 1/12th of the data from each gesture in the validation dataset to the training data")
+            else:
+                print("Appended generated images to the training data for transfer learning")
+
+            # Update the validation data
+            X_validation = X_validation_partial
+            Y_validation = Y_validation_partial
 
         X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
         Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+
+        print("Size of X_train:     ", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_train:     ", Y_train.size()) # (SAMPLE, GESTURE)
+        print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
 
 model_name = args.model
 if args.model == 'resnet50_custom':
@@ -839,6 +993,16 @@ if args.turn_off_scaler_normalization:
     wandb_runname += '_no-scaler-normalization'
 if args.target_normalize:
     wandb_runname += '_target-normalize'
+if args.load_few_images:
+    wandb_runname += '_load-few-images'
+if args.transfer_learning:
+    wandb_runname += '_transfer-learning'
+if args.cross_validation_for_time_series:   
+    wandb_runname += '_cross-validation-for-time-series'
+if args.use_diffusion_for_transfer_learning:
+    wandb_runname += '_use-diffusion-for-transfer-learning'
+if args.reduce_data_for_transfer_learning != 1:
+    wandb_runname += '_reduce-data-for-transfer-learning-' + str(args.reduce_data_for_transfer_learning)
 if args.use_img2img:
     wandb_runname += '_img2img'
 
