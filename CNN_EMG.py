@@ -654,6 +654,11 @@ else:
 
             X_train_list.append(current_data)
             Y_train_list.append(current_labels)
+            
+        X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
+        Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
+        X_validation = torch.from_numpy(X_validation).to(torch.float16)
+        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
 
         if args.transfer_learning:
             proportion_to_keep = 1 / 12
@@ -775,15 +780,10 @@ else:
             X_validation = X_validation_partial
             Y_validation = Y_validation_partial
 
-        X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
-        Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
-        X_validation = torch.from_numpy(X_validation).to(torch.float16)
-        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-
-        print("Size of X_train:     ", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_train:     ", Y_train.size()) # (SAMPLE, GESTURE)
-        print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
+        print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE)
+        print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
 
 model_name = args.model
 if args.model == 'resnet50_custom':
@@ -1036,6 +1036,12 @@ if (exercises):
         gesture_labels = gesture_labels + utils.gesture_labels[exercise_set]
 else:
     gesture_labels = utils.gesture_labels
+
+# Convert data to tensor
+X_train = torch.tensor(X_train)
+Y_train = torch.tensor(Y_train)
+X_validation = torch.tensor(X_validation)
+Y_validation = torch.tensor(Y_validation)
 
 if leaveOut == 0:
     # Plot and log images
