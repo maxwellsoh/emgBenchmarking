@@ -47,8 +47,10 @@ parser = argparse.ArgumentParser(description="Include arguments for running diff
 
 # Add argument for dataset
 parser.add_argument('--dataset', help='dataset to test. Set to OzdemirEMG by default', default="OzdemirEMG")
+# Add argument for doing leave-one-subject-out
+parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
 # Add argument for leftout subject
-parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
+parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation, starting from subject 1', default=0)
 # Add parser for seed
 parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0 by default.', default=0)
 # Add number of epochs to train for
@@ -166,11 +168,7 @@ print(f"The value of --seed is {args.seed}")
 print(f"The value of --epochs is {args.epochs}")
 print(f"The model to use is {args.model}")
 if args.turn_on_kfold:
-    if args.leftout_subject == 0:
-        print(f"The value of --turn_on_kfold is {args.turn_on_kfold}")
-    else: 
-        print("Cannot turn on kfold if leftout_subject is not 0")
-        exit()
+    print(f"The value of --turn_on_kfold is {args.turn_on_kfold}")
     print(f"The value of --kfold is {args.kfold}")
     print(f"The value of --fold_index is {args.fold_index}")
     
@@ -237,16 +235,6 @@ if torch.cuda.is_available():
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-# with  multiprocessing.Pool(processes=16) as pool:
-#     if args.dataset =="ninapro-db2":
-#         emg_async = pool.map_async(utils.getEMG, zip([(i+1) for i in range(utils.num_subjects)], [args.exercises for i in range(utils.num_subjects)]))
-#         labels_async = pool.map_async(utils.getLabels, zip([(i+1) for i in range(utils.num_subjects)], [args.exercises for i in range(utils.num_subjects)]))
-#     else:
-#         emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
-#         labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
-        
-#     emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-#     labels = labels_async.get()
     
 if (exercises):
     emg = []
@@ -309,7 +297,6 @@ if (exercises):
     labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
 
 else:
-    # assumes operating in LOSO
     if (args.target_normalize):
         mins, maxes = utils.getExtrema(args.leftout_subject + 1)
         with multiprocessing.Pool() as pool:
@@ -354,7 +341,7 @@ else:
     
 leaveOutIndices = []
 # Generate scaler for normalization
-if args.leave_n_subjects_out_randomly != 0:
+if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not args.target_normalize):
     leaveOut = args.leave_n_subjects_out_randomly
     print(f"Leaving out {leaveOut} subjects randomly")
     # subject indices to leave out randomly
@@ -388,7 +375,7 @@ if args.leave_n_subjects_out_randomly != 0:
     del emg_reshaped
 
 else: # Not leave n subjects out randomly
-    if (leaveOut == 0):
+    if (not args.leave_one_subject_out):
         if args.turn_on_kfold:
             skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
             
@@ -472,7 +459,7 @@ else: # Not leave n subjects out randomly
             del emg_in_by_electrode
             del emg_reshaped
 
-    else: # Running LOSO
+    elif (not args.turn_off_scaler_normalization and not args.target_normalize): # Running LOSO standardization
         emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
         # s = preprocessing.StandardScaler().fit(emg_in)
         global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
@@ -500,7 +487,11 @@ else: # Not leave n subjects out randomly
         del emg_in_by_electrode
         del emg_reshaped
 
-
+    else: 
+        global_low_value = None
+        global_high_value = None
+        scaler = None
+        
 data = []
 
 # add tqdm to show progress bar
@@ -510,7 +501,7 @@ print("Length of EMG data: ", length)
 if args.leave_n_subjects_out_randomly != 0:
     base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
 else:
-    if leaveOut == 0:
+    if not args.leave_one_subject_out:
         base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
     elif args.turn_off_scaler_normalization:
         base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
@@ -521,7 +512,7 @@ if args.turn_off_scaler_normalization:
     if args.leave_n_subjects_out_randomly != 0:
         base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
     else: 
-        if leaveOut == 0:
+        if not args.leave_one_subject_out:
             base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
         else: 
             base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
@@ -530,7 +521,7 @@ else:
     base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(leaveOut) + '/'
 
 if args.turn_on_rms:
-    base_foldername_zarr += 'RMS_input_windowsize_' + str(args.RMS_input_windowsize) + '/'
+    base_foldername_zarr += 'RMS_input_windowsize_' + str(args.rms_input_windowsize) + '/'
 elif args.turn_on_spectrogram:
     base_foldername_zarr += 'spectrogram/'
 elif args.turn_on_cwt:
@@ -542,7 +533,7 @@ if args.save_images:
         os.makedirs(base_foldername_zarr)
 
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    if leaveOut == 0:
+    if not args.leave_one_subject_out:
         subject_folder = f'subject{x}/'
     else:
         subject_folder = f'LOSO_subject{x}/'
@@ -561,6 +552,7 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
         else: 
             data += [dataset[:]]
     else:
+        print(f"Could not find dataset for subject {x} at {foldername_zarr}")
         # Get images and create the dataset
         if (args.target_normalize):
             scaler = None
@@ -610,7 +602,7 @@ if args.leave_n_subjects_out_randomly != 0:
     del labels
 
 else: 
-    if leaveOut == 0:
+    if not args.leave_one_subject_out:
         combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
         combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
         X_train = combined_images[train_indices]
@@ -930,7 +922,7 @@ batch_size = 64
 
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
-if (leaveOut == 0):
+if (not args.leave_one_subject_out):
     test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 
 # Define the loss function and optimizer
@@ -1009,7 +1001,7 @@ if args.reduce_data_for_transfer_learning != 1:
 if args.use_img2img:
     wandb_runname += '_img2img'
 
-if (leaveOut == 0):
+if (not args.leave_one_subject_out):
     if args.turn_on_kfold:
         project_name += '_k-fold-'+str(args.kfold)
     else:
@@ -1049,7 +1041,7 @@ Y_train = torch.tensor(Y_train)
 X_validation = torch.tensor(X_validation)
 Y_validation = torch.tensor(Y_validation)
 
-if leaveOut == 0:
+if not args.leave_one_subject_out:
     # Plot and log images
     utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
     utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
@@ -1128,7 +1120,7 @@ torch.save(model.state_dict(), model_filename)
 wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
 # Testing
-if (leaveOut == 0):
+if (not args.leave_one_subject_out):
     pred = []
     true = []
 
