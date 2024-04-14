@@ -10,6 +10,7 @@ import seaborn as sn
 import pandas as pd
 import matplotlib.pyplot as plt
 import scipy
+import gc
 
 # mat to tensor
 wLen = 250.0 #ms
@@ -136,16 +137,11 @@ train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, sh
 val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size)
 test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size)
 
-
-
-
-
 criterion = nn.CrossEntropyLoss()
 learn = 0.0003
 optimizer = torch.optim.Adam(model.parameters(), lr=learn)
 
 # Training loop
-import gc
 gc.collect()
 torch.cuda.empty_cache()
 

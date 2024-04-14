@@ -237,12 +237,17 @@ if torch.cuda.is_available():
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-with  multiprocessing.Pool(processes=16) as pool:
-    emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
-    emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+# with  multiprocessing.Pool(processes=16) as pool:
+#     if args.dataset =="ninapro-db2":
+#         emg_async = pool.map_async(utils.getEMG, zip([(i+1) for i in range(utils.num_subjects)], [args.exercises for i in range(utils.num_subjects)]))
+#         labels_async = pool.map_async(utils.getLabels, zip([(i+1) for i in range(utils.num_subjects)], [args.exercises for i in range(utils.num_subjects)]))
+#     else:
+#         emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
+#         labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
+        
+#     emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+#     labels = labels_async.get()
     
-    labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
-    labels = labels_async.get()
 if (exercises):
     emg = []
     labels = []
@@ -326,8 +331,9 @@ else:
     print("subject 1 mean", torch.mean(emg[0]))
     numGestures = utils.numGestures
 
-length = len(emg[0][0])
-width = len(emg[0][0][0])
+length = emg[0].shape[1]
+width = emg[0].shape[2]
+print("Number of Samples (across all participants): ", sum([e.shape[0] for e in emg]))
 print("Number of Electrode Channels: ", length)
 print("Number of Timesteps per Trial:", width)
 
