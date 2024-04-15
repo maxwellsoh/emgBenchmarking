@@ -116,16 +116,58 @@ def getEMG (n):
             data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
             emg.append(data[:, :-1][balance(data[:, -1])])
             restim.append(data[:, -1][balance(data[:, -1])])
-        except:
+        except Exception as e:
             print("Error reading file", file, "Subject", n)
+            print(e)
     if numGestures == 6:
         for i in range(len(restim)):
             emg[i] = emg[i][torch.all(restim[i] != 7, axis=1)]
         return torch.cat(emg, dim=0)
     return torch.cat(emg, dim=0)
 
+def getEMG_separateSessions(args):
+    subject_number, session_number = args
+    emg = [] 
+    restim = []  
+    n = "{:02d}".format(subject_number)
+    for file in os.listdir(f"uciEMG/{n}/"):
+        try: 
+            if file[0] == str(session_number):
+                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                emg.append(data[:, :-1][balance(data[:, -1])])
+                restim.append(data[:, -1][balance(data[:, -1])])
+        except Exception as e:
+            print("Error reading file", file, "Subject", n)
+            print(e)
+    if numGestures == 6:
+        for i in range(len(restim)):
+            emg[i] = emg[i][torch.all(restim[i] != 7, axis=1)]
+        return torch.cat(emg, dim=0)
+    return torch.cat(emg, dim=0)
+
+def getRestim_separateSessions(args):
+    subject_number, session_number = args
+    restim = []
+    n = "{:02d}".format(subject_number)
+    for file in os.listdir(f"uciEMG/{n}/"):
+        try:
+            if file[0] == str(session_number):
+                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                restim.append(data[:, -1][balance(data[:, -1])])
+        except:
+            print("Error reading file", file, "Subject", n)
+    if numGestures == 6:
+        for i in range(len(restim)):
+            restim[i] = restim[i][torch.all(restim[i] != 7, axis=1)]
+        return torch.cat(restim, dim=0)
+    return torch.cat(restim, dim=0)
+
 def getLabels (n):
     return contract(getRestim(n))
+
+def getLabels_separateSessions(args):
+    subject_number, session_number = args
+    return contract(getRestim_separateSessions((subject_number, session_number)))
 
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
     emg_sample = data

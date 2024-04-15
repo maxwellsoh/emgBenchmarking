@@ -34,6 +34,8 @@ import json
 from diffusion_augmentation import train_dreambooth
 from diffusers import DiffusionPipeline
 import shutil
+import gc
+import datetime
 
 
 # Define a custom argument type for a list of integers
@@ -117,6 +119,12 @@ parser.add_argument('--use_diffusion_for_transfer_learning', type=utils.str2bool
 parser.add_argument('--reduce_data_for_transfer_learning', type=int, help='amount for reducing number of data to generate for transfer learning. Set to 1 by default.', default=1)
 # Add argument for whether or not to use diffusion generated images from img2img
 parser.add_argument('--use_img2img', type=utils.str2bool, help='whether or not to use diffusion generated images from img2img. Set to False by default.', default=False)
+# Add argument for whether to do leave-one-session-out
+parser.add_argument('--leave_one_session_out', type=utils.str2bool, help='whether or not to leave one session out. Set to False by default.', default=False)
+# Add argument for whether to do held_out test
+parser.add_argument('--held_out_test', type=utils.str2bool, help='whether or not to do held out test. Set to False by default.', default=False)
+# Add argument for whether to use only the subject left out for training in leave out session test
+parser.add_argument('--one_subject_for_training_set_for_session_test', type=utils.str2bool, help='whether or not to use only the subject left out for training in leave out session test. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -133,17 +141,23 @@ elif (args.dataset == "ninapro-db2"):
     print(f"The dataset being tested is ninapro-db2")
     project_name = 'emg_benchmarking_ninapro-db2'
     exercises = True
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
 
 elif (args.dataset == "ninapro-db5"):
     import utils_NinaproDB5 as utils
     print(f"The dataset being tested is ninapro-db5")
     project_name = 'emg_benchmarking_ninapro-db5'
     exercises = True
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
 
 elif (args.dataset == "M_dataset"):
     import utils_M_dataset as utils
     print(f"The dataset being tested is M_dataset")
     project_name = 'emg_benchmarking_M_dataset'
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for M_dataset; only one session exists")
 
 elif (args.dataset == "hyser"):
     import utils_hyser as utils
@@ -161,6 +175,8 @@ else:
         print(f"Using the partial dataset for Ozdemir EMG")
         utils.gesture_labels = utils.gesture_labels_partial
         utils.numGestures = len(utils.gesture_labels)
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for OzdemirEMG; only one session exists")
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
@@ -212,6 +228,7 @@ print(f"The value of --cross_validation_for_time_series is {args.cross_validatio
 print(f"The value of --use_diffusion_for_transfer_learning is {args.use_diffusion_for_transfer_learning}")
 print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
 print(f"The value of --use_img2img is {args.use_img2img}")
+print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -296,10 +313,12 @@ if (exercises):
     emg = [torch.from_numpy(emg_np) for emg_np in new_emg]
     labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
 
-else:
+else: # Not exercises
     if (args.target_normalize):
         mins, maxes = utils.getExtrema(args.leftout_subject + 1)
         with multiprocessing.Pool() as pool:
+            if args.leave_one_session_out:
+                NotImplementedError("leave-one-session-out not implemented with target_normalize yet")
             emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
             emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
             
@@ -309,11 +328,23 @@ else:
     else:
         #with multiprocessing.pool.ThreadPool() as pool:
         with multiprocessing.Pool() as pool:
-            emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
-            emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-            
-            labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
-            labels = labels_async.get()
+            if args.leave_one_session_out: # based on 2 sessions for each subject
+                number_of_sessions = 2
+                emg = []
+                labels = []
+                for i in range(1, number_of_sessions+1):
+                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
+                    emg.extend(emg_async.get())
+                    
+                    labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
+                    labels.extend(labels_async.get())
+                
+            else:
+                emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
+                emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+                
+                labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
+                labels = labels_async.get()
 
     print("subject 1 mean", torch.mean(emg[0]))
     numGestures = utils.numGestures
@@ -375,7 +406,7 @@ if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normali
     del emg_reshaped
 
 else: # Not leave n subjects out randomly
-    if (not args.leave_one_subject_out):
+    if (args.held_out_test):
         if args.turn_on_kfold:
             skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
             
@@ -501,18 +532,20 @@ print("Length of EMG data: ", length)
 if args.leave_n_subjects_out_randomly != 0:
     base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
 else:
-    if not args.leave_one_subject_out:
+    if args.held_out_test:
         base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
+    elif args.leave_one_session_out:
+        base_foldername_zarr = f'Leave_one_session_out_images_zarr/{args.dataset}/'
     elif args.turn_off_scaler_normalization:
         base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
-    else:
+    elif args.leave_one_subject_out:
         base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
 
 if args.turn_off_scaler_normalization:
     if args.leave_n_subjects_out_randomly != 0:
         base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
     else: 
-        if not args.leave_one_subject_out:
+        if args.held_out_test:
             base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
         else: 
             base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
@@ -528,12 +561,13 @@ elif args.turn_on_cwt:
     base_foldername_zarr += 'cwt/'
 elif args.turn_on_hht:
     base_foldername_zarr += 'hht/'
+    
 if args.save_images: 
     if not os.path.exists(base_foldername_zarr):
         os.makedirs(base_foldername_zarr)
 
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    if not args.leave_one_subject_out:
+    if args.held_out_test:
         subject_folder = f'subject{x}/'
     else:
         subject_folder = f'LOSO_subject{x}/'
@@ -602,7 +636,7 @@ if args.leave_n_subjects_out_randomly != 0:
     del labels
 
 else: 
-    if not args.leave_one_subject_out:
+    if args.held_out_test:
         combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
         combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
         X_train = combined_images[train_indices]
@@ -627,7 +661,63 @@ else:
         print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
-    else: # Running LOSO
+    elif args.leave_one_session_out:
+        number_of_sessions = 2
+        if leaveOut == 0: # Test with the second session for all subjects
+            print("test message leaveout = 0")
+            X_train = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects)], axis=0, dtype=np.float16)
+            Y_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects)], axis=0, dtype=np.float16)
+            X_validation = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects, number_of_sessions*utils.num_subjects)], axis=0, dtype=np.float16)
+            Y_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects, number_of_sessions*utils.num_subjects)], axis=0, dtype=np.float16)
+            
+            X_train = torch.from_numpy(X_train).to(torch.float16)
+            Y_train = torch.from_numpy(Y_train).to(torch.float16)
+            X_validation = torch.from_numpy(X_validation).to(torch.float16)
+            Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+            
+            print("Size of X_train:     ", X_train.size())
+            print("Size of Y_train:     ", Y_train.size())
+            print("Size of X_validation:", X_validation.size())
+            print("Size of Y_validation:", Y_validation.size())
+        elif args.one_subject_for_training_set_for_session_test:
+            print("test message")
+            left_out_subject_and_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+            X_train = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_and_session_index], axis=0, dtype=np.float16)
+            Y_train = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_and_session_index], axis=0, dtype=np.float16)
+            X_validation = np.array(data[left_out_subject_and_session_index])
+            Y_validation = np.array(labels[left_out_subject_and_session_index])
+            
+            X_train = torch.from_numpy(X_train).to(torch.float16)
+            Y_train = torch.from_numpy(Y_train).to(torch.float16)
+            X_validation = torch.from_numpy(X_validation).to(torch.float16)
+            Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+            
+            print("Size of X_train:     ", X_train.size())
+            print("Size of Y_train:     ", Y_train.size())
+            print("Size of X_validation:", X_validation.size())
+            print("Size of Y_validation:", Y_validation.size())
+        else: 
+            print("test message?")
+            left_out_subject_and_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+            X_train = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_and_session_index], axis=0, dtype=np.float16)
+            Y_train = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_and_session_index], axis=0, dtype=np.float16)
+            X_validation = np.array(data[left_out_subject_and_session_index])
+            Y_validation = np.array(labels[left_out_subject_and_session_index])
+            
+            X_train = torch.from_numpy(X_train).to(torch.float16)
+            Y_train = torch.from_numpy(Y_train).to(torch.float16)
+            X_validation = torch.from_numpy(X_validation).to(torch.float16)
+            Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+            
+            print("Size of X_train:     ", X_train.size())
+            print("Size of Y_train:     ", Y_train.size())
+            print("Size of X_validation:", X_validation.size())
+            print("Size of Y_validation:", Y_validation.size())
+        del data
+        del emg
+        del labels
+        
+    elif args.leave_one_subject_out: # Running LOSO
         if args.reduce_training_data_size:
             reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
 
@@ -637,7 +727,6 @@ else:
         X_train_list = []
         Y_train_list = []
         
-
         for i in range(len(data)):
             if i == leaveOut-1:
                 continue
@@ -782,6 +871,8 @@ else:
         print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE)
         print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
+    else: 
+        ValueError("Please specify the type of test you want to run")
 
 model_name = args.model
 if args.model == 'resnet50_custom':
@@ -922,7 +1013,7 @@ batch_size = 64
 
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
-if (not args.leave_one_subject_out):
+if (args.held_out_test):
     test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 
 # Define the loss function and optimizer
@@ -944,8 +1035,6 @@ elif args.turn_on_cyclical_lr:
     scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
 
 # Training loop
-import gc
-import datetime
 gc.collect()
 torch.cuda.empty_cache()
 
@@ -1000,14 +1089,23 @@ if args.reduce_data_for_transfer_learning != 1:
     wandb_runname += '_reduce-data-for-transfer-learning-' + str(args.reduce_data_for_transfer_learning)
 if args.use_img2img:
     wandb_runname += '_img2img'
+if args.leave_one_session_out:
+    wandb_runname += '_leave-one-session-out'
+if args.leave_one_subject_out:
+    wandb_runname += '_leave-one-subject-out'
+if args.one_subject_for_training_set_for_session_test:
+    wandb_runname += '_one-subject-for-training-set-for-session-test'
 
-if (not args.leave_one_subject_out):
+if (args.held_out_test):
     if args.turn_on_kfold:
         project_name += '_k-fold-'+str(args.kfold)
     else:
         project_name += '_heldout'
-else:
+elif args.leave_one_subject_out:
     project_name += '_LOSO'
+elif args.leave_one_session_out:
+    project_name += '_leave-one-session-out'
+    
 
 project_name += args.project_name_suffix
 
@@ -1035,13 +1133,7 @@ if (exercises):
 else:
     gesture_labels = utils.gesture_labels
 
-# Convert data to tensor
-X_train = torch.tensor(X_train)
-Y_train = torch.tensor(Y_train)
-X_validation = torch.tensor(X_validation)
-Y_validation = torch.tensor(Y_validation)
-
-if not args.leave_one_subject_out:
+if args.held_out_test:
     # Plot and log images
     utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
     utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
@@ -1120,7 +1212,7 @@ torch.save(model.state_dict(), model_filename)
 wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
 # Testing
-if (not args.leave_one_subject_out):
+if (args.held_out_test):
     pred = []
     true = []
 
