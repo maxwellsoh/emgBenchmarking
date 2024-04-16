@@ -125,6 +125,8 @@ parser.add_argument('--leave_one_session_out', type=utils.str2bool, help='whethe
 parser.add_argument('--held_out_test', type=utils.str2bool, help='whether or not to do held out test. Set to False by default.', default=False)
 # Add argument for whether to use only the subject left out for training in leave out session test
 parser.add_argument('--one_subject_for_training_set_for_session_test', type=utils.str2bool, help='whether or not to use only the subject left out for training in leave out session test. Set to False by default.', default=False)
+# Add argument for pretraining on all data from other subjects, and fine-tuning on some data from left out subject
+parser.add_argument('--pretrain_and_finetune', type=utils.str2bool, help='whether or not to pretrain on all data from other subjects, and fine-tune on some data from left out subject. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -229,6 +231,9 @@ print(f"The value of --use_diffusion_for_transfer_learning is {args.use_diffusio
 print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
 print(f"The value of --use_img2img is {args.use_img2img}")
 print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
+print(f"The value of --held_out_test is {args.held_out_test}")
+print(f"The value of --one_subject_for_training_set_for_session_test is {args.one_subject_for_training_set_for_session_test}")
+print(f"The value of --pretrain_and_finetune is {args.pretrain_and_finetune}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -663,12 +668,13 @@ else:
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
     elif args.leave_one_session_out:
         number_of_sessions = 2
-        if leaveOut == 0: # Test with the second session for all subjects
-            print("test message leaveout = 0")
-            X_train = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects)], axis=0, dtype=np.float16)
-            Y_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects)], axis=0, dtype=np.float16)
-            X_validation = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects, number_of_sessions*utils.num_subjects)], axis=0, dtype=np.float16)
-            Y_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects, number_of_sessions*utils.num_subjects)], axis=0, dtype=np.float16)
+        if args.one_subject_for_training_set_for_session_test:
+            left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+            left_out_subject_first_n_sessions_indices = [i for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
+            X_train = np.concatenate([np.array(data[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            Y_train = np.concatenate([np.array(labels[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            X_validation = np.array(data[left_out_subject_last_session_index])
+            Y_validation = np.array(labels[left_out_subject_last_session_index])
             
             X_train = torch.from_numpy(X_train).to(torch.float16)
             Y_train = torch.from_numpy(Y_train).to(torch.float16)
@@ -679,30 +685,37 @@ else:
             print("Size of Y_train:     ", Y_train.size())
             print("Size of X_validation:", X_validation.size())
             print("Size of Y_validation:", Y_validation.size())
-        elif args.one_subject_for_training_set_for_session_test:
-            print("test message")
-            left_out_subject_and_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
-            X_train = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_and_session_index], axis=0, dtype=np.float16)
-            Y_train = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_and_session_index], axis=0, dtype=np.float16)
-            X_validation = np.array(data[left_out_subject_and_session_index])
-            Y_validation = np.array(labels[left_out_subject_and_session_index])
+        elif args.pretrain_and_finetune:
+            left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+            left_out_subject_first_n_sessions_indices = [i for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
+            print("left_out_subject_last_session_index:", left_out_subject_last_session_index)
+            print("left_out_subject_first_n_sessions_indices:", left_out_subject_first_n_sessions_indices)
+            X_pretrain = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            Y_pretrain = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            X_finetune = np.concatenate([np.array(data[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            Y_finetune = np.concatenate([np.array(labels[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            X_validation = np.array(data[left_out_subject_last_session_index])
+            Y_validation = np.array(labels[left_out_subject_last_session_index])
             
-            X_train = torch.from_numpy(X_train).to(torch.float16)
-            Y_train = torch.from_numpy(Y_train).to(torch.float16)
+            X_train = torch.from_numpy(X_pretrain).to(torch.float16)
+            Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
+            X_finetune = torch.from_numpy(X_finetune).to(torch.float16)
+            Y_finetune = torch.from_numpy(Y_finetune).to(torch.float16)
             X_validation = torch.from_numpy(X_validation).to(torch.float16)
             Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
             
             print("Size of X_train:     ", X_train.size())
             print("Size of Y_train:     ", Y_train.size())
+            print("Size of X_finetune:  ", X_finetune.size())
+            print("Size of Y_finetune:  ", Y_finetune.size())
             print("Size of X_validation:", X_validation.size())
             print("Size of Y_validation:", Y_validation.size())
         else: 
-            print("test message?")
-            left_out_subject_and_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
-            X_train = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_and_session_index], axis=0, dtype=np.float16)
-            Y_train = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_and_session_index], axis=0, dtype=np.float16)
-            X_validation = np.array(data[left_out_subject_and_session_index])
-            Y_validation = np.array(labels[left_out_subject_and_session_index])
+            left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+            X_train = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index], axis=0, dtype=np.float16)
+            Y_train = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index], axis=0, dtype=np.float16)
+            X_validation = np.array(data[left_out_subject_last_session_index])
+            Y_validation = np.array(labels[left_out_subject_last_session_index])
             
             X_train = torch.from_numpy(X_train).to(torch.float16)
             Y_train = torch.from_numpy(Y_train).to(torch.float16)
@@ -713,6 +726,7 @@ else:
             print("Size of Y_train:     ", Y_train.size())
             print("Size of X_validation:", X_validation.size())
             print("Size of Y_validation:", Y_validation.size())
+        
         del data
         del emg
         del labels
@@ -1095,6 +1109,10 @@ if args.leave_one_subject_out:
     wandb_runname += '_leave-one-subject-out'
 if args.one_subject_for_training_set_for_session_test:
     wandb_runname += '_one-subject-for-training-set-for-session-test'
+if args.held_out_test:
+    wandb_runname += '_held-out-test'
+if args.pretrain_and_finetune:
+    wandb_runname += '_pretrain-and-finetune'
 
 if (args.held_out_test):
     if args.turn_on_kfold:
@@ -1211,6 +1229,73 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
 torch.save(model.state_dict(), model_filename)
 wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
+if args.pretrain_and_finetune:
+    # train more on X_finetune and Y_finetune
+    finetune_loader = DataLoader(list(zip(X_finetune, Y_finetune)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
+        model.train()
+        train_acc = 0.0
+        train_loss = 0.0
+        with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+            for X_batch, Y_batch in t:
+                X_batch = X_batch.to(device).to(torch.float32)
+                Y_batch = Y_batch.to(device).to(torch.float32)
+
+                optimizer.zero_grad()
+                output = model(X_batch)
+                loss = criterion(output, Y_batch)
+                loss.backward()
+                optimizer.step()
+
+                train_loss += loss.item()
+                preds = torch.argmax(output, dim=1)
+                Y_batch_long = torch.argmax(Y_batch, dim=1)
+                train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+
+                # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
+                # Update the inner tqdm loop with metrics
+                # Only set_postfix every 10 batches to avoid slowing down the loop
+                if t.n % 10 == 0:
+                    t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
+
+                del X_batch, Y_batch, output, preds
+                torch.cuda.empty_cache()
+
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        val_acc = 0.0
+        with torch.no_grad():
+            for X_batch, Y_batch in val_loader:
+                X_batch = X_batch.to(device).to(torch.float32)
+                Y_batch = Y_batch.to(device).to(torch.float32)
+
+                #output = model(X_batch).logits
+                output = model(X_batch)
+                val_loss += criterion(output, Y_batch).item()
+                preds = torch.argmax(output, dim=1)
+                Y_batch_long = torch.argmax(Y_batch, dim=1)
+
+                val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+
+                del X_batch, Y_batch
+                torch.cuda.empty_cache()
+
+        train_loss /= len(finetune_loader)
+        train_acc /= len(finetune_loader)
+        val_loss /= len(val_loader)
+        val_acc /= len(val_loader)
+
+        print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+        print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+        wandb.log({
+            "Finetuning Epoch": epoch,
+            "Train Loss": train_loss,
+            "Train Acc": train_acc,
+            "Valid Loss": val_loss,
+            "Valid Acc": val_acc, 
+            "Learning Rate": optimizer.param_groups[0]['lr']})
+        
 # Testing
 if (args.held_out_test):
     pred = []
