@@ -15,6 +15,7 @@ import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from scipy import io
+from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
 
 fs = 2000 #Hz
 wLen = 250 # ms
@@ -184,40 +185,42 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
     return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
 
 def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size):
-    # Contrast normalize and convert data
-    # NOTE: Should this be contrast normalized? Then only patterns of data will be visible, not absolute values
+    # Normalize and convert data to a usable color map
     data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
-    image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
+    image_data = np.reshape(rgb_data, (length, width, 3))
     image = np.transpose(image_data, (2, 0, 1))
     
-    # Split image and resize
-    imageL, imageR = np.split(image, 2, axis=2)
-    #resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-    #                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    #imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
-    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
+    # Resize the whole image instead of splitting
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image = resize(torch.from_numpy(image))
     
-    # Get max and min values after interpolation
-    max_val = max(imageL.max(), imageR.max())
-    min_val = min(imageL.min(), imageR.min())
-    
-    # Contrast normalize again after interpolation
-    imageL, imageR = map(lambda img: (img - min_val) / (max_val - min_val), (imageL, imageR))
-    
-    # Normalize with standard ImageNet normalization
+    # Normalize using ImageNet standards after resizing
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    imageL, imageR = map(normalize, (imageL, imageR))
+    image = normalize(image)
     
-    return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
+    return image.numpy().astype(np.float32)
+
 
 def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
-    return np.sqrt(np.mean(array_2d**2))
+    return np.sqrt(np.mean(array_2d**2, axis=-1))
+
+def process_chunk(data_chunk):
+    return np.apply_along_axis(calculate_rms, -1, data_chunk)
+
+def process_optimized_makeOneImage(args_tuple):
+    return optimized_makeOneImage(*args_tuple)
+
+def process_optimized_makeOneMagnitudeImage(args_tuple):
+    return optimized_makeOneMagnitudeImage(*args_tuple)
 
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None,
               turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
+    
+    
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
     else:
@@ -229,40 +232,68 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         # Reshape data for RMS calculation: (SAMPLES, 16, 5, 10)
         emg = emg.reshape(len(emg), length, rms_windows, width // rms_windows)
         
+        num_splits = multiprocessing.cpu_count()
+        data_chunks = np.array_split(emg, num_splits)
+        
+        emg_rms = process_map(process_chunk, data_chunks, chunksize=1, max_workers=num_splits, desc="Calculating RMS")
         # Apply RMS calculation along the last axis (axis=-1)
-        emg_rms = np.apply_along_axis(calculate_rms, -1, emg)
-        emg = emg_rms  # Resulting shape will be (SAMPLES, 16, 5)
+        # emg_rms = np.apply_along_axis(calculate_rms, -1, emg)
+        emg = np.concatenate(emg_rms)  # Resulting shape will be (SAMPLES, 16, 5)
         width = rms_windows
         emg = emg.reshape(len(emg), length*width)
+        
+        del emg_rms
+        del data_chunks
 
     # Parameters that don't change can be set once
     resize_length_factor = 6
     if turn_on_magnitude:
         resize_length_factor = 3
     native_resnet_size = 224
-
-    with multiprocessing.Pool(processes=5) as pool:
-        args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-        images_async = pool.starmap_async(optimized_makeOneImage, args)
-        images = images_async.get()
+    
+    args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+    # Using process_map instead of multiprocessing.Pool directly
+    images = process_map(process_optimized_makeOneImage, args, chunksize=1, max_workers=4)
 
     if turn_on_magnitude:
-        with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
-            images_magnitude = images_async.get()
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
+        images_magnitude = process_map(process_optimized_makeOneMagnitudeImage, args, chunksize=1, max_workers=32)
         images = np.concatenate((images, images_magnitude), axis=2)
-        
+    
     if turn_on_cwt:
-        NotImplementedError("CWT is not implemented yet.")
-        
+        raise NotImplementedError("CWT is not implemented yet.")
+    
     if turn_on_spectrogram:
-        NotImplementedError("Spectrogram is not implemented yet.")
-        
+        raise NotImplementedError("Spectrogram is not implemented yet.")
+    
     if turn_on_hht:
-        NotImplementedError("HHT is not implemented yet.")
+        raise NotImplementedError("HHT is not implemented yet.")
     
     return images
+        
+
+    # with multiprocessing.Pool(processes=32) as pool:
+    #     args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+    #     images_async = pool.starmap_async(optimized_makeOneImage, args)
+    #     images = images_async.get()
+
+    # if turn_on_magnitude:
+    #     with multiprocessing.Pool(processes=32) as pool:
+    #         args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
+    #         images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
+    #         images_magnitude = images_async.get()
+    #     images = np.concatenate((images, images_magnitude), axis=2)
+        
+    # if turn_on_cwt:
+    #     NotImplementedError("CWT is not implemented yet.")
+        
+    # if turn_on_spectrogram:
+    #     NotImplementedError("Spectrogram is not implemented yet.")
+        
+    # if turn_on_hht:
+    #     NotImplementedError("HHT is not implemented yet.")
+    
+    # return images
 
 def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):
     periodLength = 0
