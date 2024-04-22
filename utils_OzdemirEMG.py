@@ -526,6 +526,17 @@ def denormalize(images):
     return images
 
 
+def normalize(images):
+    # Define mean and std from imageNet
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+    
+    # Normalize
+    images = (images - mean) / std
+    
+    return images
+
+
 def plot_average_images(image_data, true, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
     # Convert true to numpy for quick indexing
     true_np = np.array(true)        

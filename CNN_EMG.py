@@ -28,6 +28,15 @@ import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
 import psutil
+import diffusion_generated_zarr_loading as dgzl
+import cross_validation_utilities.train_test_split as tts
+from torchvision.utils import save_image
+import json
+from diffusion_augmentation import train_dreambooth
+from diffusers import DiffusionPipeline
+import shutil
+import gc
+import datetime
 
 
 # Define a custom argument type for a list of integers
@@ -41,8 +50,10 @@ parser = argparse.ArgumentParser(description="Include arguments for running diff
 
 # Add argument for dataset
 parser.add_argument('--dataset', help='dataset to test. Set to OzdemirEMG by default', default="OzdemirEMG")
+# Add argument for doing leave-one-subject-out
+parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
 # Add argument for leftout subject
-parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation. Set to 0 to run standard random held-out test. Set to 0 by default.', default=0)
+parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation, starting from subject 1', default=0)
 # Add parser for seed
 parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0 by default.', default=0)
 # Add number of epochs to train for
@@ -85,10 +96,39 @@ parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 1e-4 by default.', default=1e-4)
 # Add argument to specify which gpu to use (if any gpu exists)
 parser.add_argument('--gpu', type=int, help='which gpu to use. Set to 0 by default.', default=0)
+# Add argument to specify whether to load diffusion generated images
+parser.add_argument('--load_diffusion_generated_images', type=utils.str2bool, help='whether or not to load diffusion generated images. Set to False by default.', default=False)
+# Add argument to specify guidance scales for diffusion generated images
+parser.add_argument('--guidance_scales', type=str, help='guidance scales for diffusion generated images. Set to 5,15,25,50 by default.', default="5,15,25,50")
+# Add argument for loading just a few images from dataset for debugging
+parser.add_argument('--load_few_images', type=utils.str2bool, help='whether or not to load just a few images from dataset for debugging. Set to False by default.', default=False)
+# Add argument for reducing training data size while remaining stratified in terms of gestures and amount of data from each subject
+parser.add_argument('--reduce_training_data_size', type=utils.str2bool, help='whether or not to reduce training data size while remaining stratified in terms of gestures and amount of data from each subject. Set to False by default.', default=False)
+# Add argument for size of reduced training data
+parser.add_argument('--reduced_training_data_size', type=int, help='size of reduced training data. Set to 56000 by default.', default=56000)
 # Add argument to leve n subjects out randomly
 parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
 # use target domain for normalization
 parser.add_argument('--target_normalize', type=utils.str2bool, help='use a leftout window for normalization. Set to False by default.', default=False)
+# Test with transfer learning by using some data from the validation dataset
+parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
+# Add argument for cross validation for time series
+parser.add_argument('--cross_validation_for_time_series', type=utils.str2bool, help='whether or not to use cross validation for time series. Set to False by default.', default=False)
+# Add argument for using diffusion to generate more images with transfer learning
+parser.add_argument('--use_diffusion_for_transfer_learning', type=utils.str2bool, help='whether or not to use diffusion to generate more images with transfer learning. Set to False by default.', default=False)
+# Add argument for amount for reducing number of data to generate for transfer learning
+parser.add_argument('--reduce_data_for_transfer_learning', type=int, help='amount for reducing number of data to generate for transfer learning. Set to 1 by default.', default=1)
+# Add argument for whether or not to use diffusion generated images from img2img
+parser.add_argument('--use_img2img', type=utils.str2bool, help='whether or not to use diffusion generated images from img2img. Set to False by default.', default=False)
+# Add argument for whether to do leave-one-session-out
+parser.add_argument('--leave_one_session_out', type=utils.str2bool, help='whether or not to leave one session out. Set to False by default.', default=False)
+# Add argument for whether to do held_out test
+parser.add_argument('--held_out_test', type=utils.str2bool, help='whether or not to do held out test. Set to False by default.', default=False)
+# Add argument for whether to use only the subject left out for training in leave out session test
+parser.add_argument('--one_subject_for_training_set_for_session_test', type=utils.str2bool, help='whether or not to use only the subject left out for training in leave out session test. Set to False by default.', default=False)
+# Add argument for pretraining on all data from other subjects, and fine-tuning on some data from left out subject
+parser.add_argument('--pretrain_and_finetune', type=utils.str2bool, help='whether or not to pretrain on all data from other subjects, and fine-tune on some data from left out subject. Set to False by default.', default=False)
+
 # Parse the arguments
 args = parser.parse_args()
 
@@ -104,17 +144,23 @@ elif (args.dataset == "ninapro-db2"):
     print(f"The dataset being tested is ninapro-db2")
     project_name = 'emg_benchmarking_ninapro-db2'
     exercises = True
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
 
 elif (args.dataset == "ninapro-db5"):
     import utils_NinaproDB5 as utils
     print(f"The dataset being tested is ninapro-db5")
     project_name = 'emg_benchmarking_ninapro-db5'
     exercises = True
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
 
 elif (args.dataset == "M_dataset"):
     import utils_M_dataset as utils
     print(f"The dataset being tested is M_dataset")
     project_name = 'emg_benchmarking_M_dataset'
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for M_dataset; only one session exists")
 
 elif (args.dataset == "hyser"):
     import utils_hyser as utils
@@ -132,6 +178,8 @@ else:
         print(f"Using the partial dataset for Ozdemir EMG")
         utils.gesture_labels = utils.gesture_labels_partial
         utils.numGestures = len(utils.gesture_labels)
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for OzdemirEMG; only one session exists")
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
@@ -139,11 +187,7 @@ print(f"The value of --seed is {args.seed}")
 print(f"The value of --epochs is {args.epochs}")
 print(f"The model to use is {args.model}")
 if args.turn_on_kfold:
-    if args.leftout_subject == 0:
-        print(f"The value of --turn_on_kfold is {args.turn_on_kfold}")
-    else: 
-        print("Cannot turn on kfold if leftout_subject is not 0")
-        exit()
+    print(f"The value of --turn_on_kfold is {args.turn_on_kfold}")
     print(f"The value of --kfold is {args.kfold}")
     print(f"The value of --fold_index is {args.fold_index}")
     
@@ -161,6 +205,8 @@ if args.turn_on_magnitude:
     print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
 if exercises:
     print(f"The value of --exercises is {args.exercises}")
+    
+args.guidance_scales = args.guidance_scales.split(",")
 
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
 print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
@@ -171,7 +217,24 @@ print(f"The value of --save_images is {args.save_images}")
 print(f"The value of --turn_off_scaler_normalization is {args.turn_off_scaler_normalization}")
 print(f"The value of --learning_rate is {args.learning_rate}")
 print(f"The value of --gpu is {args.gpu}")
+print(f"The value of --load_diffusion_generated_images is {args.load_diffusion_generated_images}")
+print(f"The value of --guidance_scales is {args.guidance_scales}")
+
+print(f"The value of --load_few_images is {args.load_few_images}")
+print(f"The value of --reduce_training_data_size is {args.reduce_training_data_size}")
+print(f"The value of --reduced_training_data_size is {args.reduced_training_data_size}")
+
 print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_out_randomly}")
+print(f"The value of --target_normalize is {args.target_normalize}")
+print(f"The value of --transfer_learning is {args.transfer_learning}")
+print(f"The value of --cross_validation_for_time_series is {args.cross_validation_for_time_series}")
+print(f"The value of --use_diffusion_for_transfer_learning is {args.use_diffusion_for_transfer_learning}")
+print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
+print(f"The value of --use_img2img is {args.use_img2img}")
+print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
+print(f"The value of --held_out_test is {args.held_out_test}")
+print(f"The value of --one_subject_for_training_set_for_session_test is {args.one_subject_for_training_set_for_session_test}")
+print(f"The value of --pretrain_and_finetune is {args.pretrain_and_finetune}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -242,7 +305,7 @@ if torch.cuda.is_available():
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-
+    
 if (exercises):
     emg = []
     labels = []
@@ -303,11 +366,12 @@ if (exercises):
     emg = [torch.from_numpy(emg_np) for emg_np in new_emg]
     labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
 
-else:
-    # assumes operating in LOSO
+else: # Not exercises
     if (args.target_normalize):
         mins, maxes = utils.getExtrema(args.leftout_subject + 1)
-        with multiprocessing.Pool(processes=10) as pool:
+        with multiprocessing.Pool() as pool:
+            if args.leave_one_session_out:
+                NotImplementedError("leave-one-session-out not implemented with target_normalize yet")
             emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
             emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
             
@@ -315,29 +379,31 @@ else:
             labels = labels_async.get()
 
     else:
-        #with multiprocessing.pool.ThreadPool() as pool:
-        emg = []
-        labels = []
-
-        for i in range(utils.num_subjects):
-            print(i, psutil.sensors_temperatures())
-            emg.append(utils.getEMG(i+1))
-            labels.append(utils.getLabels(i+1))
-
-        '''
-        with multiprocessing.Pool(processes=10) as pool:
-            emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
-            emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-            
-            labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
-            labels = labels_async.get()
-        '''
+        with multiprocessing.Pool() as pool:
+            if args.leave_one_session_out: # based on 2 sessions for each subject
+                number_of_sessions = 2
+                emg = []
+                labels = []
+                for i in range(1, number_of_sessions+1):
+                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
+                    emg.extend(emg_async.get())
+                    
+                    labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
+                    labels.extend(labels_async.get())
+                
+            else:
+                emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
+                emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+                
+                labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
+                labels = labels_async.get()
 
     print("subject 1 mean", torch.mean(emg[0]))
     numGestures = utils.numGestures
 
-length = len(emg[0][0])
-width = len(emg[0][0][0])
+length = emg[0].shape[1]
+width = emg[0].shape[2]
+print("Number of Samples (across all participants): ", sum([e.shape[0] for e in emg]))
 print("Number of Electrode Channels: ", length)
 print("Number of Timesteps per Trial:", width)
 
@@ -358,7 +424,7 @@ else:
     
 leaveOutIndices = []
 # Generate scaler for normalization
-if args.leave_n_subjects_out_randomly != 0:
+if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not args.target_normalize):
     leaveOut = args.leave_n_subjects_out_randomly
     print(f"Leaving out {leaveOut} subjects randomly")
     # subject indices to leave out randomly
@@ -392,7 +458,7 @@ if args.leave_n_subjects_out_randomly != 0:
     del emg_reshaped
 
 else: # Not leave n subjects out randomly
-    if (leaveOut == 0):
+    if (args.held_out_test):
         if args.turn_on_kfold:
             skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
             
@@ -476,7 +542,7 @@ else: # Not leave n subjects out randomly
             del emg_in_by_electrode
             del emg_reshaped
 
-    else: # Running LOSO
+    elif (not args.turn_off_scaler_normalization and not args.target_normalize): # Running LOSO standardization
         emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
         # s = preprocessing.StandardScaler().fit(emg_in)
         global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
@@ -504,7 +570,11 @@ else: # Not leave n subjects out randomly
         del emg_in_by_electrode
         del emg_reshaped
 
-
+    else: 
+        global_low_value = None
+        global_high_value = None
+        scaler = None
+        
 data = []
 
 # add tqdm to show progress bar
@@ -514,20 +584,26 @@ print("Length of EMG data: ", length)
 if args.leave_n_subjects_out_randomly != 0:
     base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
 else:
-    if leaveOut == 0:
+    if args.held_out_test:
         base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
-    else:
-        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/LOSO_subject' + str(leaveOut) + '/'
+    elif args.leave_one_session_out:
+        base_foldername_zarr = f'Leave_one_session_out_images_zarr/{args.dataset}/'
+    elif args.turn_off_scaler_normalization:
+        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
+    elif args.leave_one_subject_out:
+        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
 
 if args.turn_off_scaler_normalization:
     if args.leave_n_subjects_out_randomly != 0:
         base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
     else: 
-        if leaveOut == 0:
+        if args.held_out_test:
             base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
         else: 
             base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
     scaler = None
+else:
+    base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(leaveOut) + '/'
 
 if args.turn_on_rms:
     base_foldername_zarr += 'RMS_input_windowsize_' + str(args.rms_input_windowsize) + '/'
@@ -537,21 +613,32 @@ elif args.turn_on_cwt:
     base_foldername_zarr += 'cwt/'
 elif args.turn_on_hht:
     base_foldername_zarr += 'hht/'
+    
 if args.save_images: 
     if not os.path.exists(base_foldername_zarr):
         os.makedirs(base_foldername_zarr)
 
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    subject_folder = f'subject{x}/'
+    if args.held_out_test:
+        subject_folder = f'subject{x}/'
+    else:
+        subject_folder = f'LOSO_subject{x}/'
     foldername_zarr = base_foldername_zarr + subject_folder
     
+    print("Attempting to load dataset for subject", x, "from", foldername_zarr)
+
+    print("Looking in folder: ", foldername_zarr)
     # Check if the folder (dataset) exists, load if yes, else create and save
     if os.path.exists(foldername_zarr):
         # Load the dataset
         dataset = zarr.open(foldername_zarr, mode='r')
         print(f"Loaded dataset for subject {x} from {foldername_zarr}")
-        data += [dataset[:]]
+        if args.load_few_images:
+            data += [dataset[:10]]
+        else: 
+            data += [dataset[:]]
     else:
+        print(f"Could not find dataset for subject {x} at {foldername_zarr}")
         # Get images and create the dataset
         if (args.target_normalize):
             scaler = None
@@ -601,7 +688,7 @@ if args.leave_n_subjects_out_randomly != 0:
     del labels
 
 else: 
-    if leaveOut == 0:
+    if args.held_out_test:
         combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
         combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
         X_train = combined_images[train_indices]
@@ -613,7 +700,7 @@ else:
         del combined_labels
         del data
         del emg
-
+        
         X_train = torch.from_numpy(X_train).to(torch.float16)
         Y_train = torch.from_numpy(Y_train).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
@@ -626,20 +713,227 @@ else:
         print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
-    else:
+    elif args.leave_one_session_out:
+        number_of_sessions = 2
+        if args.one_subject_for_training_set_for_session_test:
+            left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+            left_out_subject_first_n_sessions_indices = [i for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
+            X_train = np.concatenate([np.array(data[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            Y_train = np.concatenate([np.array(labels[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            X_validation = np.array(data[left_out_subject_last_session_index])
+            Y_validation = np.array(labels[left_out_subject_last_session_index])
             
-        X_validation = np.array(data.pop(leaveOut-1))
-        Y_validation = np.array(labels.pop(leaveOut-1))
-        X_train = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
-        Y_train = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-        X_train = torch.from_numpy(X_train).to(torch.float16)
-        Y_train = torch.from_numpy(Y_train).to(torch.float16)
+            X_train = torch.from_numpy(X_train).to(torch.float16)
+            Y_train = torch.from_numpy(Y_train).to(torch.float16)
+            X_validation = torch.from_numpy(X_validation).to(torch.float16)
+            Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+            
+            print("Size of X_train:     ", X_train.size())
+            print("Size of Y_train:     ", Y_train.size())
+            print("Size of X_validation:", X_validation.size())
+            print("Size of Y_validation:", Y_validation.size())
+        elif args.pretrain_and_finetune:
+            left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+            left_out_subject_first_n_sessions_indices = [i for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
+            print("left_out_subject_last_session_index:", left_out_subject_last_session_index)
+            print("left_out_subject_first_n_sessions_indices:", left_out_subject_first_n_sessions_indices)
+            X_pretrain = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            Y_pretrain = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            X_finetune = np.concatenate([np.array(data[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            Y_finetune = np.concatenate([np.array(labels[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+            X_validation = np.array(data[left_out_subject_last_session_index])
+            Y_validation = np.array(labels[left_out_subject_last_session_index])
+            
+            X_train = torch.from_numpy(X_pretrain).to(torch.float16)
+            Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
+            X_finetune = torch.from_numpy(X_finetune).to(torch.float16)
+            Y_finetune = torch.from_numpy(Y_finetune).to(torch.float16)
+            X_validation = torch.from_numpy(X_validation).to(torch.float16)
+            Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+            
+            print("Size of X_train:     ", X_train.size())
+            print("Size of Y_train:     ", Y_train.size())
+            print("Size of X_finetune:  ", X_finetune.size())
+            print("Size of Y_finetune:  ", Y_finetune.size())
+            print("Size of X_validation:", X_validation.size())
+            print("Size of Y_validation:", Y_validation.size())
+        else: 
+            left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+            X_train = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index], axis=0, dtype=np.float16)
+            Y_train = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index], axis=0, dtype=np.float16)
+            X_validation = np.array(data[left_out_subject_last_session_index])
+            Y_validation = np.array(labels[left_out_subject_last_session_index])
+            
+            X_train = torch.from_numpy(X_train).to(torch.float16)
+            Y_train = torch.from_numpy(Y_train).to(torch.float16)
+            X_validation = torch.from_numpy(X_validation).to(torch.float16)
+            Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+            
+            print("Size of X_train:     ", X_train.size())
+            print("Size of Y_train:     ", Y_train.size())
+            print("Size of X_validation:", X_validation.size())
+            print("Size of Y_validation:", Y_validation.size())
+        
+        del data
+        del emg
+        del labels
+        
+    elif args.leave_one_subject_out: # Running LOSO
+        if args.reduce_training_data_size:
+            reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
+
+        X_validation = np.array(data[leaveOut-1])
+        Y_validation = np.array(labels[leaveOut-1])
+
+        X_train_list = []
+        Y_train_list = []
+        
+        for i in range(len(data)):
+            if i == leaveOut-1:
+                continue
+            current_data = np.array(data[i])
+            current_labels = np.array(labels[i])
+
+            if args.reduce_training_data_size:
+                proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
+                current_data, _, current_labels, _ = model_selection.train_test_split(current_data, current_labels, 
+                                                                                        train_size=proportion_to_keep, stratify=current_labels, 
+                                                                                        random_state=args.seed, shuffle=True)
+
+            X_train_list.append(current_data)
+            Y_train_list.append(current_labels)
+            
+        X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
+        Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-        print("Size of X_train:", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_train:", Y_train.size()) # (SAMPLE, GESTURE)
-        print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
+
+        if args.transfer_learning:
+            proportion_to_keep = 1 / 12
+
+            if args.cross_validation_for_time_series:
+                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = tts.train_test_split(
+                    X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=False)
+                if len(Y_train_partial.shape) == 1:
+                    Y_train_partial = np.eye(numGestures)[Y_train_partial]
+                if len(Y_validation_partial.shape) == 1:
+                    Y_validation_partial = np.eye(numGestures)[Y_validation_partial]
+            else:
+                # Split the validation data into train and validation subsets
+                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = tts.train_test_split(
+                    X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=True)
+                
+            if args.use_diffusion_for_transfer_learning:
+                # save partial training images in a temporary folder in a Huggingface dataset format
+                temporary_foldername = f'LOSOimages_for_transfer_learning_temporary/{args.dataset}/'
+                metadata = []
+                if not os.path.exists(temporary_foldername):
+                    os.makedirs(temporary_foldername)
+                    os.makedirs(f'{temporary_foldername}/train/')
+                    for gesture in utils.gesture_labels:
+                        os.makedirs(f'{temporary_foldername}/train/{gesture}')
+
+                for i, (img_tensor, label) in tqdm(enumerate(zip(X_train_partial, Y_train_partial)), desc="Saving Images for Transfer Learning"):
+                    label = np.argmax(label)
+                    gesture_label = utils.gesture_labels[label]
+                    img_tensor = torch.tensor(img_tensor)
+                    denormalized_image = utils.denormalize(img_tensor)
+                    save_image(denormalized_image, f'{temporary_foldername}/train/{gesture_label}/{i}.png')
+                    # write a metadata.jsonl file that contains a line for each image in the temporary folder
+                    metadata.append({'file_name': f'{gesture_label}/{i}.png', 'text': f'zqv for {gesture_label}'})
+                
+                with open(f'{temporary_foldername}/train/metadata.jsonl', 'w') as f:
+                    for item in metadata:
+                        f.write("%s\n" % item)
+
+                for i, gesture in tqdm(enumerate(utils.gesture_labels)):
+                    print(f"Number of images for {gesture}: {len(os.listdir(f'{temporary_foldername}/train/{gesture}'))}")
+                    pretrained_model_name_or_path = f"--pretrained_model_name_or_path=runwayml/stable-diffusion-v1-5"
+                    dreambooth_args = train_dreambooth.parse_args([ pretrained_model_name_or_path,
+                                                                    f"--instance_data_dir={temporary_foldername}/train/{gesture}",
+                                                                    f"--output_dir={temporary_foldername}/output/",
+                                                                    f"--instance_prompt=\"zqv multiple heatmaps for loso-cv subject {gesture}\"",
+                                                                    f"--resolution=512",
+                                                                    f"--train_batch_size=2",
+                                                                    f"--gradient_accumulation_steps=1",
+                                                                    f"--learning_rate=5e-6",
+                                                                    f"--lr_scheduler=constant",
+                                                                    f"--lr_warmup_steps=0",
+                                                                    f"--max_train_steps=400",
+                                                                    f"--gradient_checkpointing",
+                                                                    f"--use_8bit_adam", 
+                                                                    f"--snr_gamma=5.0"])
+                    train_dreambooth.main(dreambooth_args)
+
+                    pipeline = DiffusionPipeline.from_pretrained(f'{temporary_foldername}/output/')
+                    if torch.cuda.is_available():
+                        pipeline = pipeline.to('cuda')
+
+                    total_number_to_generate_reducer = args.reduce_data_for_transfer_learning
+                    total_number_to_generate_per_gesture = int(X_validation_partial.shape[0] // len(utils.gesture_labels) // total_number_to_generate_reducer) 
+
+                    wandb.init(project=project_name+"_diffusion-images", name=f"Diffusion Transfer Learning for {args.dataset}, Images")
+
+                    number_to_generate_at_once = 10
+                    guidance_scale_to_use = 7.5
+
+                    cycles_for_generating = int(total_number_to_generate_per_gesture // number_to_generate_at_once)
+                    for i in range(cycles_for_generating):
+                        # generate images using the diffusion model
+                        generated_images = pipeline(f"zqv multiple heatmaps for loso-cv subject {gesture}", 
+                                                    num_inference_steps=50, 
+                                                    guidance_scale=guidance_scale_to_use,
+                                                    num_images_per_prompt=number_to_generate_at_once,
+                                                    seed=args.seed).images
+                        
+                        for j, image in enumerate(generated_images):
+                            # if image is all black, regenerate image
+                            while not image.getbbox():
+                                generated_images = pipeline(prompt =f"zqv multiple heatmaps for loso-cv subject {gesture}",
+                                                                    num_inference_steps=50,
+                                                                    guidance_scale=guidance_scale_to_use,
+                                                                    num_images_per_prompt=1,
+                                                                    seed=args.seed).images
+                                image = generated_images[0]
+
+                            image = image.resize((224,224))
+                            image = utils.normalize(transforms.ToTensor()(image))
+                            X_train_partial = np.concatenate((X_train_partial, np.array(image).reshape(1, 3, 224, 224)), axis=0)
+                            Y_train_to_add = np.array(utils.gesture_labels.index(gesture)).reshape(1,)
+                            # one hot encoding
+                            Y_train_to_add = np.eye(numGestures)[Y_train_to_add]
+                            Y_train_partial = np.concatenate((Y_train_partial, Y_train_to_add), axis=0)
+
+                            if (i * number_to_generate_at_once + j) % 15 == 0:
+                                print(f"Generated {i * number_to_generate_at_once + j}th image for {gesture}")
+                                wandb.log({f"{i * number_to_generate_at_once + j}th generated image for {gesture}": wandb.Image(image)})
+                wandb.finish()
+
+                # remove the temporary folder
+                shutil.rmtree(temporary_foldername)
+
+            print("Size of X_train_partial:     ", X_train_partial.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+            print("Size of Y_train_partial:     ", Y_train_partial.shape) # (SAMPLE, GESTURE)
+
+            # Append the partial validation data to the training data
+            X_train = np.concatenate((X_train, X_train_partial), axis=0)
+            Y_train = np.concatenate((Y_train, Y_train_partial), axis=0)
+
+            if not args.use_diffusion_for_transfer_learning:
+                print("Appended 1/12th of the data from each gesture in the validation dataset to the training data")
+            else:
+                print("Appended generated images to the training data for transfer learning")
+
+            # Update the validation data
+            X_validation = X_validation_partial
+            Y_validation = Y_validation_partial
+
+        print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE)
+        print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
+    else: 
+        ValueError("Please specify the type of test you want to run")
 
 model_name = args.model
 if args.model == 'resnet50_custom':
@@ -719,11 +1013,73 @@ for name, param in model.named_parameters():
         param.requires_grad = True
     else:
         param.requires_grad = False
+        
+if args.load_diffusion_generated_images:
+    print("Loading images generated from the diffusion model for data augmentation")
+    zarr_foldername = f'LOSOimages_zarr_generated-from-diffusion/{args.dataset}/'
+    if args.turn_on_cwt:
+        zarr_foldername += 'cwt/'
+    elif args.turn_on_hht:
+        zarr_foldername += 'hht/'
+    elif args.turn_on_spectrogram:
+        zarr_foldername += 'spectrogram/'
+    
+    generated_images_grouped, generated_group_labels = dgzl.load_images(args.leftout_subject, args.guidance_scales, utils.gesture_labels, zarr_foldername)
+    
+    # Because images and labels are stored as tensors in a list, we need to append them to X_train and Y_train
+    for i in range(len(generated_images_grouped)):
+        X_train = torch.cat((X_train, generated_images_grouped[i].transpose(1, 3).to(torch.float16)))
+        Y_train = torch.cat((Y_train, generated_group_labels[i]))
+
+if args.use_img2img:
+    print("Loading images generated from the diffusion model from img2img generation")
+    # Load the images generated from the diffusion model
+    zarr_foldername = f'LOSOimages_zarr_generated-from-diffusion/{args.dataset}/'
+    if args.turn_on_cwt:
+        zarr_foldername += 'cwt/'
+    elif args.turn_on_hht:
+        zarr_foldername += 'hht/'
+    elif args.turn_on_spectrogram:
+        zarr_foldername += 'spectrogram/'
+
+    del X_train
+    del Y_train
+
+    del X_validation
+    del Y_validation
+
+    generated_images_grouped_validation, generated_group_labels_validation = dgzl.load_images_generated_from_img2img(args.leftout_subject, args.guidance_scales, utils.gesture_labels, zarr_foldername, validation_or_training='validation')
+    generated_images_grouped_training, generated_group_labels_training = dgzl.load_images_generated_from_img2img(args.leftout_subject, args.guidance_scales, utils.gesture_labels, zarr_foldername, validation_or_training='training')
+    
+    print("Note that the generated images for img2img replace the original images for training and validation")
+    # TODO DEBUG THIS. Why do validation and training images that are plotted to wandb look the same as the original pictures? Is there shuffling going on (data leaking) that has put some validation data 
+    # into the training set? Getting suspiciously high accuracies right now. 
+    
+    # Optimize training data concatenation
+    X_train_list = [np.transpose(generated_images_grouped_training[i], (0, 3, 1, 2)).to(torch.float16) for i in tqdm(range(len(generated_images_grouped_training)))]
+    Y_train_list = [generated_group_labels_training[i] for i in range(len(generated_images_grouped_training))]
+
+    X_train = torch.cat(X_train_list)
+    Y_train = torch.cat(Y_train_list)
+
+    del X_train_list
+    del Y_train_list
+
+    # Similarly, optimize validation data concatenation
+    X_validation_list = [np.transpose(generated_images_grouped_validation[i], (0, 3, 1, 2)).to(torch.float16) for i in tqdm(range(len(generated_images_grouped_validation)))]
+    Y_validation_list = [generated_group_labels_validation[i] for i in range(len(generated_images_grouped_validation))]
+
+    X_validation = torch.cat(X_validation_list)
+    Y_validation = torch.cat(Y_validation_list)
+
+    del X_validation_list
+    del Y_validation_list
 
 batch_size = 64
+
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
-if (leaveOut == 0):
+if (args.held_out_test):
     test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 
 # Define the loss function and optimizer
@@ -745,12 +1101,85 @@ elif args.turn_on_cyclical_lr:
     scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
 
 # Training loop
-import gc
-import datetime
 gc.collect()
 torch.cuda.empty_cache()
 
+wandb_runname = 'CNN_seed-'+str(args.seed)
+if args.turn_on_kfold:
+    wandb_runname += '_k-fold-'+str(args.kfold)+'_fold-index-'+str(args.fold_index)
+if args.turn_on_cyclical_lr:
+    wandb_runname += '_cyclical-lr'
+if args.turn_on_cosine_annealing: 
+    wandb_runname += '_cosine-annealing'
+if args.turn_on_rms:
+    wandb_runname += '_rms-windows-'+str(args.rms_input_windowsize)
+if args.turn_on_magnitude:  
+    wandb_runname += '_magnitude'
+if args.leftout_subject != 0:
+    wandb_runname += '_LOSO-'+str(args.leftout_subject)
+wandb_runname += '_' + model_name
+if (exercises):
+    wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
+if args.dataset == "OzdemirEMG":
+    if args.full_dataset_ozdemir:
+        wandb_runname += '_full-dataset'
+    else:
+        wandb_runname += '_partial-dataset'
+if args.turn_on_spectrogram:
+    wandb_runname += '_spectrogram'
+if args.turn_on_cwt:
+    wandb_runname += '_cwt'
+if args.turn_on_hht:
+    wandb_runname += '_hht'
+if args.learning_rate != 1e-4:
+    wandb_runname += '_lr-'+str(args.learning_rate)
+if args.load_diffusion_generated_images:
+    wandb_runname += '_diffusion-generated' + '_guidance-scales-' + '_'.join(args.guidance_scales)
+if args.reduce_training_data_size:
+    wandb_runname += '_reduced-training-data-size-' + str(args.reduced_training_data_size)
+if args.leave_n_subjects_out_randomly != 0:
+    wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
+if args.turn_off_scaler_normalization:
+    wandb_runname += '_no-scaler-normalization'
+if args.target_normalize:
+    wandb_runname += '_target-normalize'
+if args.load_few_images:
+    wandb_runname += '_load-few-images'
+if args.transfer_learning:
+    wandb_runname += '_transfer-learning'
+if args.cross_validation_for_time_series:   
+    wandb_runname += '_cross-validation-for-time-series'
+if args.use_diffusion_for_transfer_learning:
+    wandb_runname += '_use-diffusion-for-transfer-learning'
+if args.reduce_data_for_transfer_learning != 1:
+    wandb_runname += '_reduce-data-for-transfer-learning-' + str(args.reduce_data_for_transfer_learning)
+if args.use_img2img:
+    wandb_runname += '_img2img'
+if args.leave_one_session_out:
+    wandb_runname += '_leave-one-session-out'
+if args.leave_one_subject_out:
+    wandb_runname += '_leave-one-subject-out'
+if args.one_subject_for_training_set_for_session_test:
+    wandb_runname += '_one-subject-for-training-set-for-session-test'
+if args.held_out_test:
+    wandb_runname += '_held-out-test'
+if args.pretrain_and_finetune:
+    wandb_runname += '_pretrain-and-finetune'
 
+if (args.held_out_test):
+    if args.turn_on_kfold:
+        project_name += '_k-fold-'+str(args.kfold)
+    else:
+        project_name += '_heldout'
+elif args.leave_one_subject_out:
+    project_name += '_LOSO'
+elif args.leave_one_session_out:
+    project_name += '_leave-one-session-out'
+    
+
+project_name += args.project_name_suffix
+
+run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = learn
 if args.leave_n_subjects_out_randomly != 0:
     wandb.config.left_out_subjects = leaveOutIndices
@@ -774,7 +1203,7 @@ if (exercises):
 else:
     gesture_labels = utils.gesture_labels
 
-if leaveOut == 0:
+if args.held_out_test:
     # Plot and log images
     utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
     utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
@@ -852,8 +1281,75 @@ for epoch in tqdm(range(num_epochs), desc="Epoch"):
 torch.save(model.state_dict(), model_filename)
 wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
+if args.pretrain_and_finetune:
+    # train more on X_finetune and Y_finetune
+    finetune_loader = DataLoader(list(zip(X_finetune, Y_finetune)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
+        model.train()
+        train_acc = 0.0
+        train_loss = 0.0
+        with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+            for X_batch, Y_batch in t:
+                X_batch = X_batch.to(device).to(torch.float32)
+                Y_batch = Y_batch.to(device).to(torch.float32)
+
+                optimizer.zero_grad()
+                output = model(X_batch)
+                loss = criterion(output, Y_batch)
+                loss.backward()
+                optimizer.step()
+
+                train_loss += loss.item()
+                preds = torch.argmax(output, dim=1)
+                Y_batch_long = torch.argmax(Y_batch, dim=1)
+                train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+
+                # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
+                # Update the inner tqdm loop with metrics
+                # Only set_postfix every 10 batches to avoid slowing down the loop
+                if t.n % 10 == 0:
+                    t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
+
+                del X_batch, Y_batch, output, preds
+                torch.cuda.empty_cache()
+
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        val_acc = 0.0
+        with torch.no_grad():
+            for X_batch, Y_batch in val_loader:
+                X_batch = X_batch.to(device).to(torch.float32)
+                Y_batch = Y_batch.to(device).to(torch.float32)
+
+                #output = model(X_batch).logits
+                output = model(X_batch)
+                val_loss += criterion(output, Y_batch).item()
+                preds = torch.argmax(output, dim=1)
+                Y_batch_long = torch.argmax(Y_batch, dim=1)
+
+                val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+
+                del X_batch, Y_batch
+                torch.cuda.empty_cache()
+
+        train_loss /= len(finetune_loader)
+        train_acc /= len(finetune_loader)
+        val_loss /= len(val_loader)
+        val_acc /= len(val_loader)
+
+        print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+        print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+        wandb.log({
+            "Finetuning Epoch": epoch,
+            "Train Loss": train_loss,
+            "Train Acc": train_acc,
+            "Valid Loss": val_loss,
+            "Valid Acc": val_acc, 
+            "Learning Rate": optimizer.param_groups[0]['lr']})
+        
 # Testing
-if (leaveOut == 0):
+if (args.held_out_test):
     pred = []
     true = []
 
@@ -894,7 +1390,7 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     validation_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=int(X_validation.shape[0]/10))), desc="Validation Batch Loading"):  # Or some other number that fits in memory
+    for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=batch_size)), desc="Validation Batch Loading"):  # Or some other number that fits in memory
         batch = batch.to(device).to(torch.float32)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
@@ -908,7 +1404,7 @@ torch.cuda.empty_cache()  # Clear cache if needed
 model.eval()
 with torch.no_grad():
     train_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=int(X_train.shape[0]/utils.num_subjects))), desc="Training Batch Loading"):  # Or some other number that fits in memory
+    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=batch_size)), desc="Training Batch Loading"):  # Or some other number that fits in memory
         batch = batch.to(device).to(torch.float32)
         outputs = model(batch)
         preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
