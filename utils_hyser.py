@@ -17,16 +17,18 @@ from tqdm import tqdm
 import h5py
 import os
 
-numGestures = 34
+numGestures = 10
 fs = 2048.0 # Hz (actually 2048 Hz but was "decimated" to 512? unclear)
 wLen = 250.0 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = int(50.0 / 1000 * fs) # 50 ms
+stepLen = int(125.0 / 1000 * fs) # 50 ms
 numElectrodes = 256
 num_subjects = 20
 cmap = mpl.colormaps['viridis']
-# Gesture Labels (add names if found - labels are 1 through 34)
-gesture_labels = [str(i+1) for i in range(numGestures)]
+# Gesture Labels
+gesture_nums = {'6' : 0, '7' : 1, '8' : 2, '9' : 3, '10' : 4, '11' : 5, '30' : 6, '31' : 7, '32' : 8, '34' : 9}
+gesture_labels = ["wrist flexion", "wrist extension", "wrist radial", "wrist ulnar", "wrist pronation", "wrist supination", 
+                    "hand close", "hand open", "thumb and index fingers pinch", "thumb and middle fingers pinch"]
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -65,7 +67,7 @@ def contract(R):
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
     for x in range(len(R)):
-        labels[x][int(R[x]) - 1] = 1.0
+        labels[x][gesture_nums[R[x]]] = 1.0
     return labels
 
 def filter(emg):
@@ -75,7 +77,9 @@ def filter(emg):
 
     #second-order notch filter at 50 Hz
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
-    return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy()).to(dtype=torch.float32)
+    emgNotch = torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy()).to(dtype=torch.float32)
+
+    return emgNotch
 
 # partition data by channel
 def format_emg (data):
@@ -89,8 +93,20 @@ def getEMG_help (sub, session):
     emg = []
 
     currFile = 1
+    select_gestures = set([])
+    with open(f'hyser/subject{sub}_session{session}/label_dynamic.txt', 'r') as file:
+        vals = file.readline().strip().split(',')
+        for v in vals:
+            if (v in gesture_nums):
+                select_gestures.add(currFile)
+            currFile += 1
+
+    currFile = 1
     while (os.path.isfile(f'hyser/subject{sub}_session{session}/dynamic_raw_sample{currFile}.dat')):
-        print(currFile)
+        if (currFile not in select_gestures):
+            currFile += 1
+            continue
+
         data = np.fromfile(f'hyser/subject{sub}_session{session}/dynamic_raw_sample{currFile}.dat', dtype=np.int16).reshape((256, -1)).astype(np.float32)
 
         adjustment = []
@@ -108,7 +124,7 @@ def getEMG_help (sub, session):
 
         emg.append(torch.from_numpy(data.transpose((1, 0))).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
         currFile += 1
-    print(emg[0].dtype)
+        
     return emg
 
 def getEMG (n):
@@ -119,11 +135,37 @@ def getEMG (n):
     else:
         sub = f'{n}'
 
-    print("start")
     emg = getEMG_help(sub, "1") + getEMG_help(sub, "2")
-    print("end")
 
-    return filter(torch.cat(emg, dim=0))
+    emg = filter(torch.cat(emg, dim=0))
+    
+    length = numElectrodes
+    width = 256 # 512 without downsampling
+    rms_windows = 256
+
+    '''
+    print("pre-downsample:", emg.shape)
+    # downsample
+    emg = emg[:][:][::2]
+    print("post-downsample:", emg.shape)
+
+    #emg = emg.reshape(len(emg), length, width)
+    # Reshape data for RMS calculation: (SAMPLES, 16, 5, 10)
+    emg = emg.reshape(len(emg), length, rms_windows, width // rms_windows)
+    print(n, emg.shape)
+    
+    # Apply RMS calculation along the last axis (axis=-1)
+    emg_rms = np.apply_along_axis(calculate_rms, -1, emg)
+    emg = emg_rms  # Resulting shape will be (SAMPLES, 16, 5)
+    width = rms_windows
+    emg = emg.reshape(len(emg), length, width)
+    #print("working 2")
+    '''
+    donwsampled_emg = np.zeros((len(emg), length, rms_windows))
+    for i in range(rms_windows):
+        donwsampled_emg[:, :, i] = emg[:, :, i*2]
+
+    return torch.from_numpy(donwsampled_emg)
 
 def getLabels (n):
     labels = []
@@ -133,19 +175,14 @@ def getLabels (n):
     else:
         sub = f'{n}'
 
-    file = open(f'hyser/subject{sub}_session1/label_dynamic.txt', 'r')
-    vals = file.readline().split(',')
-    for v in vals:
-        for i in range(16):
-            labels.append(int(v))
-    file.close()
-
-    file = open(f'hyser/subject{sub}_session2/label_dynamic.txt', 'r')
-    vals = file.readline().split(',')
-    for v in vals:
-        for i in range(16):
-            labels.append(int(v))
-    file.close()
+    for i in range(1, 3):
+        file = open(f'hyser/subject{sub}_session{i}/label_dynamic.txt', 'r')
+        vals = file.readline().strip().split(',')
+        for v in vals:
+            if (v in gesture_nums):
+                for i in range(7):
+                    labels.append(v)
+        file.close()
 
     return contract(labels)
 
@@ -180,12 +217,21 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     rgb_data = data_converted[:, :3]
     image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
     image = np.transpose(image_data, (2, 0, 1))
-    
+    #print("size:", image.shape)
+    #print("resize factor:", resize_length_factor)
+    #print(image[0][0])
+
     # Split image and resize
-    imageL, imageR = np.split(image, 2, axis=2)
+    imageL, imageR = np.split(image, 2, axis=1)
+    #print(imageL.shape)
+    '''
     resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
                                interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    #print("b")
     imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    '''
+    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
+    #print("c")
     
     # Get max and min values after interpolation
     max_val = max(imageL.max(), imageR.max())
@@ -193,12 +239,16 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     
     # Contrast normalize again after interpolation
     imageL, imageR = map(lambda img: (img - min_val) / (max_val - min_val), (imageL, imageR))
+    #print("b")
     
     # Normalize with standard ImageNet normalization
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    #print("c")
     imageL, imageR = map(normalize, (imageL, imageR))
+    #print("a")
+   #print(max_val)
     
-    return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
+    return torch.cat([imageL, imageR], dim=1).numpy().astype(np.float32)
 
 def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
@@ -209,9 +259,12 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
 
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+        #print("working")
     else:
         emg = np.array(emg.view(len(emg), length*width))
+        #print("error")
         
+    
     # Use RMS preprocessing
     if turn_on_rms:
         emg = emg.reshape(len(emg), length, width)
@@ -223,46 +276,37 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         emg = emg_rms  # Resulting shape will be (SAMPLES, 16, 5)
         width = rms_windows
         emg = emg.reshape(len(emg), length*width)
+        #print("working 2")
 
     # Parameters that don't change can be set once
-    resize_length_factor = 6
+    resize_length_factor = 1
     if turn_on_magnitude:
         resize_length_factor = 3
     native_resnet_size = 224
 
+    '''
     with multiprocessing.Pool(processes=32) as pool:
         args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        print("start")
         images_async = pool.starmap_async(optimized_makeOneImage, args)
+        print("end")
         images = images_async.get()
+        print("finish")
+    '''
+    images = []
+    for i in range(len(emg)):
+        images.append(optimized_makeOneImage(emg[i], cmap, length, width, resize_length_factor, native_resnet_size))
 
     if turn_on_magnitude:
-        with multiprocessing.Pool(processes=32) as pool:
+        with multiprocessing.Pool(processes=20) as pool:
             args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
+            
             images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
+            
             images_magnitude = images_async.get()
+            
         images = np.concatenate((images, images_magnitude), axis=2)
 
-    elif turn_on_spectrogram:
-        with multiprocessing.Pool(processes=32) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
-            images_spectrogram = images_async.get()
-        images = images_spectrogram
-
-    elif turn_on_cwt:
-        with multiprocessing.Pool(processes=32) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
-            images_cwt = images_async.get()
-        images = images_cwt
-    
-    elif turn_on_hht:
-        with multiprocessing.Pool(processes=32) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneHilbertHuangImage, args)
-            images_hilbert_huang = images_async.get()
-        images = images_hilbert_huang
-        
     return images
 
 def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):

@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
+import psutil
 
 
 # Define a custom argument type for a list of integers
@@ -176,6 +177,53 @@ print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_o
 current_datetime = datetime.datetime.now()
 formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
 
+wandb_runname = 'CNN_seed-'+str(args.seed)
+if args.turn_on_kfold:
+    wandb_runname += '_k-fold-'+str(args.kfold)+'_fold-index-'+str(args.fold_index)
+if args.turn_on_cyclical_lr:
+    wandb_runname += '_cyclical-lr'
+if args.turn_on_cosine_annealing: 
+    wandb_runname += '_cosine-annealing'
+if args.turn_on_rms:
+    wandb_runname += '_rms-windows-'+str(args.rms_input_windowsize)
+if args.turn_on_magnitude:  
+    wandb_runname += '_magnitude'
+if args.leftout_subject != 0:
+    wandb_runname += '_LOSO-'+str(args.leftout_subject)
+wandb_runname += '_' + args.model
+if (exercises):
+    wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
+if args.dataset == "OzdemirEMG":
+    if args.full_dataset_ozdemir:
+        wandb_runname += '_full-dataset'
+    else:
+        wandb_runname += '_partial-dataset'
+if args.turn_on_spectrogram:
+    wandb_runname += '_spectrogram'
+if args.turn_on_cwt:
+    wandb_runname += '_cwt'
+if args.turn_on_hht:
+    wandb_runname += '_hht'
+if args.learning_rate != 1e-4:
+    wandb_runname += '_lr-'+str(args.learning_rate)
+if args.leave_n_subjects_out_randomly != 0:
+    wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
+if args.turn_off_scaler_normalization:
+    wandb_runname += '_no-scaler-normalization'
+if args.target_normalize:
+    wandb_runname += '_target-normalize'
+
+if (int(args.leftout_subject) == 0):
+    if args.turn_on_kfold:
+        project_name += '_k-fold-'+str(args.kfold)
+    else:
+        project_name += '_heldout'
+else:
+    project_name += '_LOSO'
+project_name += args.project_name_suffix
+
+run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
+
 print("------------------------------------------------------------------------------------------------------------------------")
 print("Starting run at", formatted_datetime)
 print("------------------------------------------------------------------------------------------------------------------------")
@@ -194,12 +242,7 @@ if torch.cuda.is_available():
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-with  multiprocessing.Pool(processes=16) as pool:
-    emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
-    emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-    
-    labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
-    labels = labels_async.get()
+
 if (exercises):
     emg = []
     labels = []
@@ -264,7 +307,7 @@ else:
     # assumes operating in LOSO
     if (args.target_normalize):
         mins, maxes = utils.getExtrema(args.leftout_subject + 1)
-        with multiprocessing.Pool() as pool:
+        with multiprocessing.Pool(processes=10) as pool:
             emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
             emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
             
@@ -273,12 +316,22 @@ else:
 
     else:
         #with multiprocessing.pool.ThreadPool() as pool:
-        with multiprocessing.Pool() as pool:
+        emg = []
+        labels = []
+
+        for i in range(utils.num_subjects):
+            print(i, psutil.sensors_temperatures())
+            emg.append(utils.getEMG(i+1))
+            labels.append(utils.getLabels(i+1))
+
+        '''
+        with multiprocessing.Pool(processes=10) as pool:
             emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
             emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
             
             labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
             labels = labels_async.get()
+        '''
 
     print("subject 1 mean", torch.mean(emg[0]))
     numGestures = utils.numGestures
@@ -477,7 +530,7 @@ if args.turn_off_scaler_normalization:
     scaler = None
 
 if args.turn_on_rms:
-    base_foldername_zarr += 'RMS_input_windowsize_' + str(args.RMS_input_windowsize) + '/'
+    base_foldername_zarr += 'RMS_input_windowsize_' + str(args.rms_input_windowsize) + '/'
 elif args.turn_on_spectrogram:
     base_foldername_zarr += 'spectrogram/'
 elif args.turn_on_cwt:
@@ -596,13 +649,18 @@ if args.model == 'resnet50_custom':
     num_features = model[-1][-1].conv3.out_channels
     # #num_features = model.fc.in_features
     dropout = 0.5
+    hidden_size = 256
     model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
     model.add_module('flatten', nn.Flatten())
-    model.add_module('fc1', nn.Linear(num_features, 512))
+    model.add_module('fc1', nn.Linear(num_features, numGestures))
+    '''
+    model.add_module('fc1', nn.Linear(num_features, hidden_size))
+    model.add_module('batchnorm', nn.BatchNorm1d(hidden_size))
     model.add_module('relu', nn.ReLU())
     model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(512, numGestures))
+    model.add_module('fc3', nn.Linear(hidden_size, numGestures))
     model.add_module('softmax', nn.Softmax(dim=1))
+    '''
 elif args.model == 'resnet50':
     model = resnet50(weights=ResNet50_Weights.DEFAULT)
     # Replace the last fully connected layer
@@ -692,52 +750,7 @@ import datetime
 gc.collect()
 torch.cuda.empty_cache()
 
-wandb_runname = 'CNN_seed-'+str(args.seed)
-if args.turn_on_kfold:
-    wandb_runname += '_k-fold-'+str(args.kfold)+'_fold-index-'+str(args.fold_index)
-if args.turn_on_cyclical_lr:
-    wandb_runname += '_cyclical-lr'
-if args.turn_on_cosine_annealing: 
-    wandb_runname += '_cosine-annealing'
-if args.turn_on_rms:
-    wandb_runname += '_rms-windows-'+str(args.rms_input_windowsize)
-if args.turn_on_magnitude:  
-    wandb_runname += '_magnitude'
-if args.leftout_subject != 0:
-    wandb_runname += '_LOSO-'+str(args.leftout_subject)
-wandb_runname += '_' + model_name
-if (exercises):
-    wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
-if args.dataset == "OzdemirEMG":
-    if args.full_dataset_ozdemir:
-        wandb_runname += '_full-dataset'
-    else:
-        wandb_runname += '_partial-dataset'
-if args.turn_on_spectrogram:
-    wandb_runname += '_spectrogram'
-if args.turn_on_cwt:
-    wandb_runname += '_cwt'
-if args.turn_on_hht:
-    wandb_runname += '_hht'
-if args.learning_rate != 1e-4:
-    wandb_runname += '_lr-'+str(args.learning_rate)
-if args.leave_n_subjects_out_randomly != 0:
-    wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
-if args.turn_off_scaler_normalization:
-    wandb_runname += '_no-scaler-normalization'
-if args.target_normalize:
-    wandb_runname += '_target-normalize'
 
-if (leaveOut == 0):
-    if args.turn_on_kfold:
-        project_name += '_k-fold-'+str(args.kfold)
-    else:
-        project_name += '_heldout'
-else:
-    project_name += '_LOSO'
-project_name += args.project_name_suffix
-
-run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
 wandb.config.lr = learn
 if args.leave_n_subjects_out_randomly != 0:
     wandb.config.left_out_subjects = leaveOutIndices
