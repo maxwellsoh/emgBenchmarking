@@ -35,6 +35,8 @@ from diffusion_augmentation import train_dreambooth
 from diffusers import DiffusionPipeline
 import shutil
 
+from semilearn import get_dataset, get_data_loader, net_builder, get_algorithm, get_config, Trainer, split_ssl_data
+
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -117,6 +119,10 @@ parser.add_argument('--use_diffusion_for_transfer_learning', type=utils.str2bool
 parser.add_argument('--reduce_data_for_transfer_learning', type=int, help='amount for reducing number of data to generate for transfer learning. Set to 1 by default.', default=1)
 # Add argument for whether or not to use diffusion generated images from img2img
 parser.add_argument('--use_img2img', type=utils.str2bool, help='whether or not to use diffusion generated images from img2img. Set to False by default.', default=False)
+# Add argument for turning on unlabeled domain adaptation methods
+parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool, help='whether or not to turn on unlabeled domain adaptation methods. Set to False by default.', default=False)
+# Add argument to specify algorithm to use for unlabeled domain adaptation
+parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "flexmatch" by default.', default="flexmatch")
 
 # Parse the arguments
 args = parser.parse_args()
@@ -212,6 +218,9 @@ print(f"The value of --cross_validation_for_time_series is {args.cross_validatio
 print(f"The value of --use_diffusion_for_transfer_learning is {args.use_diffusion_for_transfer_learning}")
 print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
 print(f"The value of --use_img2img is {args.use_img2img}")
+
+print(f"The value of --turn_on_unlabeled_domain_adaptation is {args.turn_on_unlabeled_domain_adaptation}"
+      f"The value of --unlabeled_algorithm is {args.unlabeled_algorithm}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -784,6 +793,42 @@ else:
         print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
 
 model_name = args.model
+if args.turn_on_unlabeled_domain_adaptation:
+    semilearn_config = {
+    'algorithm': args.unlabeled_algorithm,
+    'net': model_name,
+    'use_pretrain': False,  # todo: add pretrain
+
+    # optimization configs
+    'epoch': 3,
+    'num_train_iter': 150,
+    'num_eval_iter': 50,
+    'optim': 'SGD',
+    'lr': args.learning_rate,
+    'momentum': 0.9,
+    'batch_size': args.batch_size,
+    'eval_batch_size': args.batch_size,
+
+    # dataset configs
+    'dataset': 'none',
+    'num_labels': 40,
+    'num_classes': utils.numGestures,
+    'input_size': 224,
+    'data_dir': './data',
+
+    # algorithm specific configs
+    'hard_label': True,
+    'uratio': 3,
+    'ulb_loss_ratio': 1.0,
+
+    # device configs
+    'gpu': 0,
+    'world_size': 1,
+    'distributed': False,
+    }
+    semilearn_config = get_config(semilearn_config)
+    semilearn_algorithm = get_algorithm(semilearn_config, net_builder(config.net, from_name=False), tb_log=None, logger=None)
+    
 if args.model == 'resnet50_custom':
     model = resnet50(weights=ResNet50_Weights.DEFAULT)
     model = nn.Sequential(*list(model.children())[:-4])
@@ -1000,6 +1045,9 @@ if args.reduce_data_for_transfer_learning != 1:
     wandb_runname += '_reduce-data-for-transfer-learning-' + str(args.reduce_data_for_transfer_learning)
 if args.use_img2img:
     wandb_runname += '_img2img'
+if args.turn_on_unlabeled_domain_adaptation:
+    wandb_runname += '_unlabeled-domain-adaptation'
+    wandb_runname += '-algorithm-' + args.unlabeled_domain_adaptation_algorithm
 
 if (not args.leave_one_subject_out):
     if args.turn_on_kfold:
