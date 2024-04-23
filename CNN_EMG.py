@@ -1,16 +1,13 @@
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from torchvision.models import resnet50, ResNet50_Weights
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing, model_selection
-from scipy.signal import butter,filtfilt,iirnotch
-#from PyEMD import EMD
 import wandb
 from sklearn.metrics import confusion_matrix
-import seaborn as sn
 import pandas as pd
 import multiprocessing
 from tqdm import tqdm
@@ -20,20 +17,17 @@ import utils_OzdemirEMG as utils
 from sklearn.model_selection import StratifiedKFold
 import os
 import datetime
-import matplotlib as mpl
 import logging
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
-import psutil
 import diffusion_generated_zarr_loading as dgzl
 import cross_validation_utilities.train_test_split as tts
 from torchvision.utils import save_image
-import json
-from diffusion_augmentation import train_dreambooth
-from diffusers import DiffusionPipeline
+#from diffusion_augmentation import train_dreambooth
+#from diffusers import DiffusionPipeline
 import shutil
 import gc
 import datetime
@@ -163,10 +157,21 @@ elif (args.dataset == "M_dataset"):
         ValueError("leave-one-session-out not implemented for M_dataset; only one session exists")
 
 elif (args.dataset == "hyser"):
-    import utils_hyser as utils
+    import utils_Hyser as utils
     print(f"The dataset being tested is hyser")
     project_name = 'emg_benchmarking_hyser'
-
+elif (args.dataset == "capgmyo"):
+    import utils_CapgMyo as utils
+    print(f"The dataset being tested is CapgMyo")
+    project_name = 'emg_benchmarking_capgmyo'
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for CapgMyo; only one session exists")
+elif (args.dataset == "jehan"):
+    import utils_JehanData as utils
+    print(f"The dataset being tested is JehanDataset")
+    project_name = 'emg_benchmarking_jehandataset'
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for JehanDataset; only one session exists")
 else:
     print(f"The dataset being tested is OzdemirEMG")
     project_name = 'emg_benchmarking_ozdemir'
@@ -580,6 +585,8 @@ data = []
 # add tqdm to show progress bar
 print("Width of EMG data: ", width)
 print("Length of EMG data: ", length)
+
+base_foldername_zarr = ""
 
 if args.leave_n_subjects_out_randomly != 0:
     base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
@@ -1179,7 +1186,7 @@ elif args.leave_one_session_out:
 
 project_name += args.project_name_suffix
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
+run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
 wandb.config.lr = learn
 if args.leave_n_subjects_out_randomly != 0:
     wandb.config.left_out_subjects = leaveOutIndices
