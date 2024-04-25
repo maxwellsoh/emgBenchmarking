@@ -28,7 +28,7 @@ import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
 import diffusion_generated_zarr_loading as dgzl
-import cross_validation_utilities.train_test_split as tts
+import cross_validation_utilities.train_test_split as tts # custom train test split to split stratified without shuffling
 from torchvision.utils import save_image
 import json
 from diffusion_augmentation import train_dreambooth
@@ -36,7 +36,7 @@ from diffusers import DiffusionPipeline
 import shutil
 import gc
 import datetime
-
+from semilearn import get_dataset, get_data_loader, net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -127,6 +127,10 @@ parser.add_argument('--held_out_test', type=utils.str2bool, help='whether or not
 parser.add_argument('--one_subject_for_training_set_for_session_test', type=utils.str2bool, help='whether or not to use only the subject left out for training in leave out session test. Set to False by default.', default=False)
 # Add argument for pretraining on all data from other subjects, and fine-tuning on some data from left out subject
 parser.add_argument('--pretrain_and_finetune', type=utils.str2bool, help='whether or not to pretrain on all data from other subjects, and fine-tune on some data from left out subject. Set to False by default.', default=False)
+# Add argument for whether or not to turn on unlabeled domain adaptation
+parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool, help='whether or not to turn on unlabeled domain adaptation methods. Set to False by default.', default=False)
+# Add argument to specify algorithm to use for unlabeled domain adaptation
+parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "flexmatch" by default.', default="flexmatch")
 
 # Parse the arguments
 args = parser.parse_args()
@@ -234,6 +238,9 @@ print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
 print(f"The value of --held_out_test is {args.held_out_test}")
 print(f"The value of --one_subject_for_training_set_for_session_test is {args.one_subject_for_training_set_for_session_test}")
 print(f"The value of --pretrain_and_finetune is {args.pretrain_and_finetune}")
+
+print(f"The value of --turn_on_unlabeled_domain_adaptation is {args.turn_on_unlabeled_domain_adaptation}")
+print(f"The value of --unlabeled_algorithm is {args.unlabeled_algorithm}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -765,15 +772,15 @@ else:
             proportion_to_keep = 1 / 12
 
             if args.cross_validation_for_time_series:
-                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = tts.train_test_split(
+                X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
                     X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=False)
-                if len(Y_train_partial.shape) == 1:
-                    Y_train_partial = np.eye(numGestures)[Y_train_partial]
-                if len(Y_validation_partial.shape) == 1:
-                    Y_validation_partial = np.eye(numGestures)[Y_validation_partial]
+                if len(Y_train_partial_leftout_subject.shape) == 1:
+                    Y_train_partial_leftout_subject = np.eye(numGestures)[Y_train_partial_leftout_subject]
+                if len(Y_validation_partial_leftout_subject.shape) == 1:
+                    Y_validation_partial_leftout_subject = np.eye(numGestures)[Y_validation_partial_leftout_subject]
             else:
                 # Split the validation data into train and validation subsets
-                X_train_partial, X_validation_partial, Y_train_partial, Y_validation_partial = tts.train_test_split(
+                X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
                     X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=True)
                 
             if args.use_diffusion_for_transfer_learning:
@@ -786,7 +793,7 @@ else:
                     for gesture in utils.gesture_labels:
                         os.makedirs(f'{temporary_foldername}/train/{gesture}')
 
-                for i, (img_tensor, label) in tqdm(enumerate(zip(X_train_partial, Y_train_partial)), desc="Saving Images for Transfer Learning"):
+                for i, (img_tensor, label) in tqdm(enumerate(zip(X_train_partial_leftout_subject, Y_train_partial_leftout_subject)), desc="Saving Images for Transfer Learning"):
                     label = np.argmax(label)
                     gesture_label = utils.gesture_labels[label]
                     img_tensor = torch.tensor(img_tensor)
@@ -823,7 +830,7 @@ else:
                         pipeline = pipeline.to('cuda')
 
                     total_number_to_generate_reducer = args.reduce_data_for_transfer_learning
-                    total_number_to_generate_per_gesture = int(X_validation_partial.shape[0] // len(utils.gesture_labels) // total_number_to_generate_reducer) 
+                    total_number_to_generate_per_gesture = int(X_validation_partial_leftout_subject.shape[0] // len(utils.gesture_labels) // total_number_to_generate_reducer) 
 
                     wandb.init(project=project_name+"_diffusion-images", name=f"Diffusion Transfer Learning for {args.dataset}, Images")
 
@@ -851,11 +858,11 @@ else:
 
                             image = image.resize((224,224))
                             image = utils.normalize(transforms.ToTensor()(image))
-                            X_train_partial = np.concatenate((X_train_partial, np.array(image).reshape(1, 3, 224, 224)), axis=0)
+                            X_train_partial_leftout_subject = np.concatenate((X_train_partial_leftout_subject, np.array(image).reshape(1, 3, 224, 224)), axis=0)
                             Y_train_to_add = np.array(utils.gesture_labels.index(gesture)).reshape(1,)
                             # one hot encoding
                             Y_train_to_add = np.eye(numGestures)[Y_train_to_add]
-                            Y_train_partial = np.concatenate((Y_train_partial, Y_train_to_add), axis=0)
+                            Y_train_partial_leftout_subject = np.concatenate((Y_train_partial_leftout_subject, Y_train_to_add), axis=0)
 
                             if (i * number_to_generate_at_once + j) % 15 == 0:
                                 print(f"Generated {i * number_to_generate_at_once + j}th image for {gesture}")
@@ -865,12 +872,12 @@ else:
                 # remove the temporary folder
                 shutil.rmtree(temporary_foldername)
 
-            print("Size of X_train_partial:     ", X_train_partial.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-            print("Size of Y_train_partial:     ", Y_train_partial.shape) # (SAMPLE, GESTURE)
+            print("Size of X_train_partial_leftout_subject:     ", X_train_partial_leftout_subject.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+            print("Size of Y_train_partial_leftout_subject:     ", Y_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE)
 
             # Append the partial validation data to the training data
-            X_train = np.concatenate((X_train, X_train_partial), axis=0)
-            Y_train = np.concatenate((Y_train, Y_train_partial), axis=0)
+            X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
+            Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
 
             if not args.use_diffusion_for_transfer_learning:
                 print("Appended 1/12th of the data from each gesture in the validation dataset to the training data")
@@ -878,8 +885,8 @@ else:
                 print("Appended generated images to the training data for transfer learning")
 
             # Update the validation data
-            X_validation = X_validation_partial
-            Y_validation = Y_validation_partial
+            X_validation = X_validation_partial_leftout_subject
+            Y_validation = Y_validation_partial_leftout_subject
 
         print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE)
@@ -889,68 +896,107 @@ else:
         ValueError("Please specify the type of test you want to run")
 
 model_name = args.model
-if args.model == 'resnet50_custom':
-    model = resnet50(weights=ResNet50_Weights.DEFAULT)
-    model = nn.Sequential(*list(model.children())[:-4])
-    # #model = nn.Sequential(*list(model.children())[:-4])
-    num_features = model[-1][-1].conv3.out_channels
-    # #num_features = model.fc.in_features
-    dropout = 0.5
-    model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
-    model.add_module('flatten', nn.Flatten())
-    model.add_module('fc1', nn.Linear(num_features, 512))
-    model.add_module('relu', nn.ReLU())
-    model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(512, numGestures))
-    model.add_module('softmax', nn.Softmax(dim=1))
-elif args.model == 'resnet50':
-    model = resnet50(weights=ResNet50_Weights.DEFAULT)
-    # Replace the last fully connected layer
-    num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
-    model.fc = nn.Linear(num_ftrs, utils.numGestures)  # Replace with a new linear layer
-elif args.model == 'convnext_tiny_custom':
-    # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
-    class LayerNorm2d(nn.LayerNorm):
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            x = x.permute(0, 2, 3, 1)
-            x = torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
-            x = x.permute(0, 3, 1, 2)
-            return x
 
-    n_inputs = 768
-    hidden_size = 128 # default is 2048
-    n_outputs = numGestures
+if args.turn_on_unlabeled_domain_adaptation:
+    assert (args.transfer_learning and args.cross_validation_for_time_series) or args.turn_on_leave_one_session_out, \
+        "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
+    semilearn_config = {
+    'algorithm': args.unlabeled_algorithm,
+    'net': model_name,
+    'use_pretrain': False,  # todo: add pretrain
 
-    # model = timm.create_model(model_name, pretrained=True, num_classes=10)
-    model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
-    #model = nn.Sequential(*list(model.children())[:-4])
-    #model = nn.Sequential(*list(model.children())[:-3])
-    #num_features = model[-1][-1].conv3.out_channels
-    #num_features = model.fc.in_features
-    dropout = 0.1 # was 0.5
+    # optimization configs
+    'epoch': 3,
+    'num_train_iter': 150,
+    'num_eval_iter': 50,
+    'optim': 'SGD',
+    'lr': args.learning_rate,
+    'momentum': 0.9,
+    'batch_size': args.batch_size,
+    'eval_batch_size': args.batch_size,
 
-    sequential_layers = nn.Sequential(
-        LayerNorm2d((n_inputs,), eps=1e-06, elementwise_affine=True),
-        nn.Flatten(start_dim=1, end_dim=-1),
-        nn.Linear(n_inputs, hidden_size, bias=True),
-        nn.BatchNorm1d(hidden_size),
-        nn.GELU(),
-        nn.Dropout(dropout),
-        nn.Linear(hidden_size, hidden_size),
-        nn.BatchNorm1d(hidden_size),
-        nn.GELU(),
-        nn.Linear(hidden_size, n_outputs),
-        nn.LogSoftmax(dim=1)
-    )
-    model.classifier = sequential_layers
+    # dataset configs
+    'dataset': 'none',
+    'num_labels': 40,
+    'num_classes': utils.numGestures,
+    'input_size': 224,
+    'data_dir': './data',
 
-else: 
-    # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
-    # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-    model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
-    # # Load the Vision Transformer model
-    # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
-    # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
+    # algorithm specific configs
+    'hard_label': True,
+    'uratio': 3,
+    'ulb_loss_ratio': 1.0,
+
+    # device configs
+    'gpu': 0,
+    'world_size': 1,
+    'distributed': False,
+    }
+    semilearn_config = get_config(semilearn_config)
+    semilearn_algorithm = get_algorithm(semilearn_config, net_builder(semilearn_config.net, from_name=True), tb_log=None, logger=None)
+else:
+    if args.model == 'resnet50_custom':
+        model = resnet50(weights=ResNet50_Weights.DEFAULT)
+        model = nn.Sequential(*list(model.children())[:-4])
+        # #model = nn.Sequential(*list(model.children())[:-4])
+        num_features = model[-1][-1].conv3.out_channels
+        # #num_features = model.fc.in_features
+        dropout = 0.5
+        model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
+        model.add_module('flatten', nn.Flatten())
+        model.add_module('fc1', nn.Linear(num_features, 512))
+        model.add_module('relu', nn.ReLU())
+        model.add_module('dropout1', nn.Dropout(dropout))
+        model.add_module('fc3', nn.Linear(512, numGestures))
+        model.add_module('softmax', nn.Softmax(dim=1))
+    elif args.model == 'resnet50':
+        model = resnet50(weights=ResNet50_Weights.DEFAULT)
+        # Replace the last fully connected layer
+        num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
+        model.fc = nn.Linear(num_ftrs, utils.numGestures)  # Replace with a new linear layer
+    elif args.model == 'convnext_tiny_custom':
+        # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
+        class LayerNorm2d(nn.LayerNorm):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.permute(0, 2, 3, 1)
+                x = torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+                x = x.permute(0, 3, 1, 2)
+                return x
+
+        n_inputs = 768
+        hidden_size = 128 # default is 2048
+        n_outputs = numGestures
+
+        # model = timm.create_model(model_name, pretrained=True, num_classes=10)
+        model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
+        #model = nn.Sequential(*list(model.children())[:-4])
+        #model = nn.Sequential(*list(model.children())[:-3])
+        #num_features = model[-1][-1].conv3.out_channels
+        #num_features = model.fc.in_features
+        dropout = 0.1 # was 0.5
+
+        sequential_layers = nn.Sequential(
+            LayerNorm2d((n_inputs,), eps=1e-06, elementwise_affine=True),
+            nn.Flatten(start_dim=1, end_dim=-1),
+            nn.Linear(n_inputs, hidden_size, bias=True),
+            nn.BatchNorm1d(hidden_size),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, hidden_size),
+            nn.BatchNorm1d(hidden_size),
+            nn.GELU(),
+            nn.Linear(hidden_size, n_outputs),
+            nn.LogSoftmax(dim=1)
+        )
+        model.classifier = sequential_layers
+
+    else: 
+        # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
+        # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
+        model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
+        # # Load the Vision Transformer model
+        # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
+        # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
 
 num = 0
 for name, param in model.named_parameters():
@@ -1113,6 +1159,9 @@ if args.held_out_test:
     wandb_runname += '_held-out-test'
 if args.pretrain_and_finetune:
     wandb_runname += '_pretrain-and-finetune'
+if args.turn_on_unlabeled_domain_adaptation:
+    wandb_runname += '_unlabeled-domain-adaptation'
+    wandb_runname += '-algorithm-' + args.unlabeled_domain_adaptation_algorithm
 
 if (args.held_out_test):
     if args.turn_on_kfold:
@@ -1161,6 +1210,7 @@ utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detac
 
 utils.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
 utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+
 for epoch in tqdm(range(num_epochs), desc="Epoch"):
     model.train()
     train_acc = 0.0
