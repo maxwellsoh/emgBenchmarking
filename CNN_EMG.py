@@ -35,7 +35,7 @@ from diffusion_augmentation import train_dreambooth
 from diffusers import DiffusionPipeline
 import shutil
 
-from semilearn import get_dataset, get_data_loader, net_builder, get_algorithm, get_config, Trainer, split_ssl_data
+from semilearn import get_dataset, get_data_loader, net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 
 
 # Define a custom argument type for a list of integers
@@ -794,6 +794,7 @@ else:
 
 model_name = args.model
 if args.turn_on_unlabeled_domain_adaptation:
+    assert (args.transfer_learning and args.cross_validation_for_time_series) or args.turn_on_leave_one_session_out, "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
     semilearn_config = {
     'algorithm': args.unlabeled_algorithm,
     'net': model_name,
@@ -827,70 +828,71 @@ if args.turn_on_unlabeled_domain_adaptation:
     'distributed': False,
     }
     semilearn_config = get_config(semilearn_config)
-    semilearn_algorithm = get_algorithm(semilearn_config, net_builder(config.net, from_name=False), tb_log=None, logger=None)
+    semilearn_algorithm = get_algorithm(semilearn_config, net_builder(semilearn_config.net, from_name=True), tb_log=None, logger=None)
     
-if args.model == 'resnet50_custom':
-    model = resnet50(weights=ResNet50_Weights.DEFAULT)
-    model = nn.Sequential(*list(model.children())[:-4])
-    # #model = nn.Sequential(*list(model.children())[:-4])
-    num_features = model[-1][-1].conv3.out_channels
-    # #num_features = model.fc.in_features
-    dropout = 0.5
-    model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
-    model.add_module('flatten', nn.Flatten())
-    model.add_module('fc1', nn.Linear(num_features, 512))
-    model.add_module('relu', nn.ReLU())
-    model.add_module('dropout1', nn.Dropout(dropout))
-    model.add_module('fc3', nn.Linear(512, numGestures))
-    model.add_module('softmax', nn.Softmax(dim=1))
-elif args.model == 'resnet50':
-    model = resnet50(weights=ResNet50_Weights.DEFAULT)
-    # Replace the last fully connected layer
-    num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
-    model.fc = nn.Linear(num_ftrs, utils.numGestures)  # Replace with a new linear layer
-elif args.model == 'convnext_tiny_custom':
-    # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
-    class LayerNorm2d(nn.LayerNorm):
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            x = x.permute(0, 2, 3, 1)
-            x = torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
-            x = x.permute(0, 3, 1, 2)
-            return x
-
-    n_inputs = 768
-    hidden_size = 128 # default is 2048
-    n_outputs = numGestures
-
-    # model = timm.create_model(model_name, pretrained=True, num_classes=10)
-    model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
-    #model = nn.Sequential(*list(model.children())[:-4])
-    #model = nn.Sequential(*list(model.children())[:-3])
-    #num_features = model[-1][-1].conv3.out_channels
-    #num_features = model.fc.in_features
-    dropout = 0.1 # was 0.5
-
-    sequential_layers = nn.Sequential(
-        LayerNorm2d((n_inputs,), eps=1e-06, elementwise_affine=True),
-        nn.Flatten(start_dim=1, end_dim=-1),
-        nn.Linear(n_inputs, hidden_size, bias=True),
-        nn.BatchNorm1d(hidden_size),
-        nn.GELU(),
-        nn.Dropout(dropout),
-        nn.Linear(hidden_size, hidden_size),
-        nn.BatchNorm1d(hidden_size),
-        nn.GELU(),
-        nn.Linear(hidden_size, n_outputs),
-        nn.LogSoftmax(dim=1)
-    )
-    model.classifier = sequential_layers
-
 else: 
-    # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
-    # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-    model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
-    # # Load the Vision Transformer model
-    # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
-    # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
+    if args.model == 'resnet50_custom':
+        model = resnet50(weights=ResNet50_Weights.DEFAULT)
+        model = nn.Sequential(*list(model.children())[:-4])
+        # #model = nn.Sequential(*list(model.children())[:-4])
+        num_features = model[-1][-1].conv3.out_channels
+        # #num_features = model.fc.in_features
+        dropout = 0.5
+        model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
+        model.add_module('flatten', nn.Flatten())
+        model.add_module('fc1', nn.Linear(num_features, 512))
+        model.add_module('relu', nn.ReLU())
+        model.add_module('dropout1', nn.Dropout(dropout))
+        model.add_module('fc3', nn.Linear(512, numGestures))
+        model.add_module('softmax', nn.Softmax(dim=1))
+    elif args.model == 'resnet50':
+        model = resnet50(weights=ResNet50_Weights.DEFAULT)
+        # Replace the last fully connected layer
+        num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
+        model.fc = nn.Linear(num_ftrs, utils.numGestures)  # Replace with a new linear layer
+    elif args.model == 'convnext_tiny_custom':
+        # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
+        class LayerNorm2d(nn.LayerNorm):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.permute(0, 2, 3, 1)
+                x = torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+                x = x.permute(0, 3, 1, 2)
+                return x
+
+        n_inputs = 768
+        hidden_size = 128 # default is 2048
+        n_outputs = numGestures
+
+        # model = timm.create_model(model_name, pretrained=True, num_classes=10)
+        model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
+        #model = nn.Sequential(*list(model.children())[:-4])
+        #model = nn.Sequential(*list(model.children())[:-3])
+        #num_features = model[-1][-1].conv3.out_channels
+        #num_features = model.fc.in_features
+        dropout = 0.1 # was 0.5
+
+        sequential_layers = nn.Sequential(
+            LayerNorm2d((n_inputs,), eps=1e-06, elementwise_affine=True),
+            nn.Flatten(start_dim=1, end_dim=-1),
+            nn.Linear(n_inputs, hidden_size, bias=True),
+            nn.BatchNorm1d(hidden_size),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, hidden_size),
+            nn.BatchNorm1d(hidden_size),
+            nn.GELU(),
+            nn.Linear(hidden_size, n_outputs),
+            nn.LogSoftmax(dim=1)
+        )
+        model.classifier = sequential_layers
+
+    else: 
+        # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
+        # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
+        model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
+        # # Load the Vision Transformer model
+        # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
+        # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
 
 num = 0
 for name, param in model.named_parameters():
@@ -940,8 +942,6 @@ if args.use_img2img:
     generated_images_grouped_training, generated_group_labels_training = dgzl.load_images_generated_from_img2img(args.leftout_subject, args.guidance_scales, utils.gesture_labels, zarr_foldername, validation_or_training='training')
     
     print("Note that the generated images for img2img replace the original images for training and validation")
-    # TODO DEBUG THIS. Why do validation and training images that are plotted to wandb look the same as the original pictures? Is there shuffling going on (data leaking) that has put some validation data 
-    # into the training set? Getting suspiciously high accuracies right now. 
     
     # Optimize training data concatenation
     X_train_list = [np.transpose(generated_images_grouped_training[i], (0, 3, 1, 2)).to(torch.float16) for i in tqdm(range(len(generated_images_grouped_training)))]
@@ -965,6 +965,9 @@ if args.use_img2img:
 
 batch_size = 64
 
+if args.turn_on_unlabeled_domain_adaptation:
+    assert 
+    
 train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 if (not args.leave_one_subject_out):
