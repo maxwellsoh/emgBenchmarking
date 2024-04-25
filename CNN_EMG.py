@@ -27,16 +27,13 @@ import matplotlib.pyplot as plt
 import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
-import diffusion_generated_zarr_loading as dgzl
 import cross_validation_utilities.train_test_split as tts # custom train test split to split stratified without shuffling
 from torchvision.utils import save_image
 import json
-from diffusion_augmentation import train_dreambooth
-from diffusers import DiffusionPipeline
 import shutil
 import gc
 import datetime
-from semilearn import get_dataset, get_data_loader, net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
+from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -95,10 +92,6 @@ parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help
 parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 1e-4 by default.', default=1e-4)
 # Add argument to specify which gpu to use (if any gpu exists)
 parser.add_argument('--gpu', type=int, help='which gpu to use. Set to 0 by default.', default=0)
-# Add argument to specify whether to load diffusion generated images
-parser.add_argument('--load_diffusion_generated_images', type=utils.str2bool, help='whether or not to load diffusion generated images. Set to False by default.', default=False)
-# Add argument to specify guidance scales for diffusion generated images
-parser.add_argument('--guidance_scales', type=str, help='guidance scales for diffusion generated images. Set to 5,15,25,50 by default.', default="5,15,25,50")
 # Add argument for loading just a few images from dataset for debugging
 parser.add_argument('--load_few_images', type=utils.str2bool, help='whether or not to load just a few images from dataset for debugging. Set to False by default.', default=False)
 # Add argument for reducing training data size while remaining stratified in terms of gestures and amount of data from each subject
@@ -113,12 +106,8 @@ parser.add_argument('--target_normalize', type=utils.str2bool, help='use a lefto
 parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
 # Add argument for cross validation for time series
 parser.add_argument('--cross_validation_for_time_series', type=utils.str2bool, help='whether or not to use cross validation for time series. Set to False by default.', default=False)
-# Add argument for using diffusion to generate more images with transfer learning
-parser.add_argument('--use_diffusion_for_transfer_learning', type=utils.str2bool, help='whether or not to use diffusion to generate more images with transfer learning. Set to False by default.', default=False)
 # Add argument for amount for reducing number of data to generate for transfer learning
 parser.add_argument('--reduce_data_for_transfer_learning', type=int, help='amount for reducing number of data to generate for transfer learning. Set to 1 by default.', default=1)
-# Add argument for whether or not to use diffusion generated images from img2img
-parser.add_argument('--use_img2img', type=utils.str2bool, help='whether or not to use diffusion generated images from img2img. Set to False by default.', default=False)
 # Add argument for whether to do leave-one-session-out
 parser.add_argument('--leave_one_session_out', type=utils.str2bool, help='whether or not to leave one session out. Set to False by default.', default=False)
 # Add argument for whether to do held_out test
@@ -208,9 +197,6 @@ if args.turn_on_magnitude:
     print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
 if exercises:
     print(f"The value of --exercises is {args.exercises}")
-    
-args.guidance_scales = args.guidance_scales.split(",")
-
 print(f"The value of --project_name_suffix is {args.project_name_suffix}")
 print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
 print(f"The value of --turn_on_cwt is {args.turn_on_cwt}")
@@ -220,8 +206,6 @@ print(f"The value of --save_images is {args.save_images}")
 print(f"The value of --turn_off_scaler_normalization is {args.turn_off_scaler_normalization}")
 print(f"The value of --learning_rate is {args.learning_rate}")
 print(f"The value of --gpu is {args.gpu}")
-print(f"The value of --load_diffusion_generated_images is {args.load_diffusion_generated_images}")
-print(f"The value of --guidance_scales is {args.guidance_scales}")
 
 print(f"The value of --load_few_images is {args.load_few_images}")
 print(f"The value of --reduce_training_data_size is {args.reduce_training_data_size}")
@@ -231,9 +215,7 @@ print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_o
 print(f"The value of --target_normalize is {args.target_normalize}")
 print(f"The value of --transfer_learning is {args.transfer_learning}")
 print(f"The value of --cross_validation_for_time_series is {args.cross_validation_for_time_series}")
-print(f"The value of --use_diffusion_for_transfer_learning is {args.use_diffusion_for_transfer_learning}")
 print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
-print(f"The value of --use_img2img is {args.use_img2img}")
 print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
 print(f"The value of --held_out_test is {args.held_out_test}")
 print(f"The value of --one_subject_for_training_set_for_session_test is {args.one_subject_for_training_set_for_session_test}")
@@ -841,7 +823,7 @@ if args.turn_on_unlabeled_domain_adaptation:
     'distributed': False,
     }
     semilearn_config = get_config(semilearn_config)
-    semilearn_algorithm = get_algorithm(semilearn_config, net_builder(semilearn_config.net, from_name=True), tb_log=None, logger=None)
+    semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=True), tb_log=None, logger=None)
 else:
     if args.model == 'resnet50_custom':
         model = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -990,8 +972,6 @@ if args.cross_validation_for_time_series:
     wandb_runname += '_cross-validation-for-time-series'
 if args.reduce_data_for_transfer_learning != 1:
     wandb_runname += '_reduce-data-for-transfer-learning-' + str(args.reduce_data_for_transfer_learning)
-if args.use_img2img:
-    wandb_runname += '_img2img'
 if args.leave_one_session_out:
     wandb_runname += '_leave-one-session-out'
 if args.leave_one_subject_out:
