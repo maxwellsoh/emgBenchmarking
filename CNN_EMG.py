@@ -34,6 +34,7 @@ import shutil
 import gc
 import datetime
 from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
+from PIL import Image
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -120,6 +121,8 @@ parser.add_argument('--pretrain_and_finetune', type=utils.str2bool, help='whethe
 parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool, help='whether or not to turn on unlabeled domain adaptation methods. Set to False by default.', default=False)
 # Add argument to specify algorithm to use for unlabeled domain adaptation
 parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "flexmatch" by default.', default="flexmatch")
+# Add argument to specify batch size
+parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by default.', default=64)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -223,6 +226,8 @@ print(f"The value of --pretrain_and_finetune is {args.pretrain_and_finetune}")
 
 print(f"The value of --turn_on_unlabeled_domain_adaptation is {args.turn_on_unlabeled_domain_adaptation}")
 print(f"The value of --unlabeled_algorithm is {args.unlabeled_algorithm}")
+
+print(f"The value of --batch_size is {args.batch_size}")
     
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -699,7 +704,7 @@ else:
             print("Size of Y_finetune:  ", Y_finetune.size())
             print("Size of X_validation:", X_validation.size())
             print("Size of Y_validation:", Y_validation.size())
-        else: 
+        else: # train with all subjects and first session of left out subject
             left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
             X_train = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index], axis=0, dtype=np.float16)
             Y_train = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index], axis=0, dtype=np.float16)
@@ -768,20 +773,31 @@ else:
             print("Size of X_train_partial_leftout_subject:     ", X_train_partial_leftout_subject.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
             print("Size of Y_train_partial_leftout_subject:     ", Y_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE)
 
-            # Append the partial validation data to the training data
-            X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
-            Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
+            if not args.turn_on_unlabeled_domain_adaptation:
+                # Append the partial validation data to the training data
+                X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
+                Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
+            else:
+                X_train_unlabeled = torch.tensor(X_train_partial_leftout_subject)
+                Y_train_unlabeled = torch.tensor(Y_train_partial_leftout_subject)
 
             print("Appended 1/12th of the data from each gesture in the validation dataset to the training data")
 
             # Update the validation data
-            X_validation = X_validation_partial_leftout_subject
-            Y_validation = Y_validation_partial_leftout_subject
+            X_validation = torch.tensor(X_validation_partial_leftout_subject).to(torch.float16)
+            Y_validation = torch.tensor(Y_validation_partial_leftout_subject).to(torch.float16)
+            
+            del X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject
 
         print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE)
         print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
+        
+        if args.turn_on_unlabeled_domain_adaptation:
+            print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
+            print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
+            
     else: 
         ValueError("Please specify the type of test you want to run")
 
@@ -792,22 +808,22 @@ if args.turn_on_unlabeled_domain_adaptation:
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
     semilearn_config = {
     'algorithm': args.unlabeled_algorithm,
-    'net': model_name,
+    'net': 'vit_small_patch16_224',
     'use_pretrain': False,  # todo: add pretrain
 
     # optimization configs
-    'epoch': 3,
-    'num_train_iter': 150,
-    'num_eval_iter': 50,
+    'epoch': args.epochs,
+    # 'num_train_iter': 150,
+    # 'num_eval_iter': 50,
     'optim': 'SGD',
     'lr': args.learning_rate,
     'momentum': 0.9,
-    'batch_size': args.batch_size,
-    'eval_batch_size': args.batch_size,
+    'batch_size': 16,
+    'eval_batch_size': 16,
 
     # dataset configs
     'dataset': 'none',
-    'num_labels': 40,
+    'num_labels': utils.numGestures,
     'num_classes': utils.numGestures,
     'input_size': 224,
     'data_dir': './data',
@@ -823,7 +839,31 @@ if args.turn_on_unlabeled_domain_adaptation:
     'distributed': False,
     }
     semilearn_config = get_config(semilearn_config)
-    semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=True), tb_log=None, logger=None)
+    semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
+    
+    class ToNumpy:
+        """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
+        def __call__(self, pic):
+            if isinstance(pic, Image.Image):
+                return np.array(pic)
+            elif isinstance(pic, torch.Tensor):
+                # Make sure the tensor is in CPU and convert it
+                return np.float32(pic.cpu().detach().numpy())
+            else:
+                raise TypeError("Unsupported image type")
+
+    
+    semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+    
+    labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
+    unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
+                                     is_ulb=True, strong_transform=semilearn_transform)
+    validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
+
+    train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, semilearn_config.batch_size)
+    train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, semilearn_config.batch_size)
+    validation_loader = get_data_loader(semilearn_config, validation_dataset, semilearn_config.eval_batch_size)
+
 else:
     if args.model == 'resnet50_custom':
         model = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -888,44 +928,45 @@ else:
         # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
         # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
 
-num = 0
-for name, param in model.named_parameters():
-    num += 1
-    if (num > 0):
-    #if (num > 72): # for -3
-    #if (num > 33): # for -4
-        param.requires_grad = True
-    else:
-        param.requires_grad = False
+if not args.turn_on_unlabeled_domain_adaptation:
+    num = 0
+    for name, param in model.named_parameters():
+        num += 1
+        if (num > 0):
+        #if (num > 72): # for -3
+        #if (num > 33): # for -4
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
 
-batch_size = 64
+    batch_size = args.batch_size
 
-train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
-val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
-if (args.held_out_test):
-    test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    if (args.held_out_test):
+        test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 
-# Define the loss function and optimizer
-criterion = nn.CrossEntropyLoss()
-learn = args.learning_rate
-optimizer = torch.optim.Adam(model.parameters(), lr=learn)
+    # Define the loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+    learn = args.learning_rate
+    optimizer = torch.optim.Adam(model.parameters(), lr=learn)
 
-num_epochs = args.epochs
-if args.turn_on_cosine_annealing:
-    number_cycles = 5
-    annealing_multiplier = 2
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=utils.periodLengthForAnnealing(num_epochs, annealing_multiplier, number_cycles),
-                                                                        T_mult=annealing_multiplier, eta_min=1e-5, last_epoch=-1)
-elif args.turn_on_cyclical_lr:
-    # Define the cyclical learning rate scheduler
-    step_size = len(train_loader) * 6  # Number of iterations in half a cycle
-    base_lr = 1e-4  # Minimum learning rate
-    max_lr = 1e-3  # Maximum learning rate
-    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
+    num_epochs = args.epochs
+    if args.turn_on_cosine_annealing:
+        number_cycles = 5
+        annealing_multiplier = 2
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=utils.periodLengthForAnnealing(num_epochs, annealing_multiplier, number_cycles),
+                                                                            T_mult=annealing_multiplier, eta_min=1e-5, last_epoch=-1)
+    elif args.turn_on_cyclical_lr:
+        # Define the cyclical learning rate scheduler
+        step_size = len(train_loader) * 6  # Number of iterations in half a cycle
+        base_lr = 1e-4  # Minimum learning rate
+        max_lr = 1e-3  # Maximum learning rate
+        scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr, max_lr, step_size_up=step_size, mode='triangular2', cycle_momentum=False)
 
-# Training loop
-gc.collect()
-torch.cuda.empty_cache()
+    # Training loop
+    gc.collect()
+    torch.cuda.empty_cache()
 
 wandb_runname = 'CNN_seed-'+str(args.seed)
 if args.turn_on_kfold:
@@ -984,7 +1025,7 @@ if args.pretrain_and_finetune:
     wandb_runname += '_pretrain-and-finetune'
 if args.turn_on_unlabeled_domain_adaptation:
     wandb_runname += '_unlabeled-domain-adaptation'
-    wandb_runname += '-algorithm-' + args.unlabeled_domain_adaptation_algorithm
+    wandb_runname += '-algorithm-' + args.unlabeled_algorithm
 
 if (args.held_out_test):
     if args.turn_on_kfold:
@@ -1000,15 +1041,16 @@ elif args.leave_one_session_out:
 project_name += args.project_name_suffix
 
 run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
-wandb.config.lr = learn
+wandb.config.lr = args.learning_rate
 if args.leave_n_subjects_out_randomly != 0:
     wandb.config.left_out_subjects = leaveOutIndices
 
 device = torch.device("cuda:" + str(args.gpu) if torch.cuda.is_available() else "cpu")
 print("Device:", device)
-model.to(device)
+if not args.turn_on_unlabeled_domain_adaptation:
+    model.to(device)
 
-wandb.watch(model)
+    wandb.watch(model)
 
 testrun_foldername = f'test/{project_name}/{wandb_runname}/{formatted_datetime}/'
 # Make folder if it doesn't exist
@@ -1022,94 +1064,38 @@ if (exercises):
         gesture_labels = gesture_labels + utils.gesture_labels[exercise_set]
 else:
     gesture_labels = utils.gesture_labels
+    
+# # if X_train, validation, test or Y_train validation, test are numpy arrays, convert them to tensors
+# X_train = torch.from_numpy(X_train).to(torch.float16) if isinstance(X_train, np.ndarray) else X_train
+# Y_train = torch.from_numpy(Y_train).to(torch.float16) if isinstance(Y_train, np.ndarray) else Y_train
+# X_validation = torch.from_numpy(X_validation).to(torch.float16) if isinstance(X_validation, np.ndarray) else X_validation
+# Y_validation = torch.from_numpy(Y_validation).to(torch.float16) if isinstance(Y_validation, np.ndarray) else Y_validation
+# if args.held_out_test:
+#     X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
+#     Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
 
-if args.held_out_test:
-    # Plot and log images
-    utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-    utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+# if args.held_out_test:
+#     # Plot and log images
+#     utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+#     utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
-utils.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
-utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+# utils.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+# utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
 
-utils.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+# utils.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+# utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
 
-for epoch in tqdm(range(num_epochs), desc="Epoch"):
-    model.train()
-    train_acc = 0.0
-    train_loss = 0.0
-    with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
-        for X_batch, Y_batch in t:
-            X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.float32)
-
-            optimizer.zero_grad()
-            output = model(X_batch)
-            loss = criterion(output, Y_batch)
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item()
-            preds = torch.argmax(output, dim=1)
-            Y_batch_long = torch.argmax(Y_batch, dim=1)
-            train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
-
-            # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
-            # Update the inner tqdm loop with metrics
-            # Only set_postfix every 10 batches to avoid slowing down the loop
-            if t.n % 10 == 0:
-                t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
-
-            del X_batch, Y_batch, output, preds
-            torch.cuda.empty_cache()
-
-    # Validation
-    model.eval()
-    val_loss = 0.0
-    val_acc = 0.0
-    with torch.no_grad():
-        for X_batch, Y_batch in val_loader:
-            X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.float32)
-
-            #output = model(X_batch).logits
-            output = model(X_batch)
-            val_loss += criterion(output, Y_batch).item()
-            preds = torch.argmax(output, dim=1)
-            Y_batch_long = torch.argmax(Y_batch, dim=1)
-
-            val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
-
-            del X_batch, Y_batch
-            torch.cuda.empty_cache()
-
-    train_loss /= len(train_loader)
-    train_acc /= len(train_loader)
-    val_loss /= len(val_loader)
-    val_acc /= len(val_loader)
-
-    print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
-    print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
-    #print(f"{val_acc:.4f}")
-    wandb.log({
-        "Epoch": epoch,
-        "Train Loss": train_loss,
-        "Train Acc": train_acc,
-        "Valid Loss": val_loss,
-        "Valid Acc": val_acc, 
-        "Learning Rate": optimizer.param_groups[0]['lr']})
-
-torch.save(model.state_dict(), model_filename)
-wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
-
-if args.pretrain_and_finetune:
-    # train more on X_finetune and Y_finetune
-    finetune_loader = DataLoader(list(zip(X_finetune, Y_finetune)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
-    for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
+if args.turn_on_unlabeled_domain_adaptation:
+    trainer = Trainer(semilearn_config, semilearn_algorithm)
+    trainer.fit(train_labeled_loader, train_unlabeled_loader, validation_loader)
+    trainer.evaluate(validation_loader)
+    
+else: 
+    for epoch in tqdm(range(num_epochs), desc="Epoch"):
         model.train()
         train_acc = 0.0
         train_loss = 0.0
-        with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+        with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
             for X_batch, Y_batch in t:
                 X_batch = X_batch.to(device).to(torch.float32)
                 Y_batch = Y_batch.to(device).to(torch.float32)
@@ -1154,83 +1140,154 @@ if args.pretrain_and_finetune:
                 del X_batch, Y_batch
                 torch.cuda.empty_cache()
 
-        train_loss /= len(finetune_loader)
-        train_acc /= len(finetune_loader)
+        train_loss /= len(train_loader)
+        train_acc /= len(train_loader)
         val_loss /= len(val_loader)
         val_acc /= len(val_loader)
 
-        print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+        print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
         print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+        #print(f"{val_acc:.4f}")
         wandb.log({
-            "Finetuning Epoch": epoch,
+            "Epoch": epoch,
             "Train Loss": train_loss,
             "Train Acc": train_acc,
             "Valid Loss": val_loss,
             "Valid Acc": val_acc, 
             "Learning Rate": optimizer.param_groups[0]['lr']})
+
+    torch.save(model.state_dict(), model_filename)
+    wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
+
+    if args.pretrain_and_finetune:
+        # train more on X_finetune and Y_finetune
+        finetune_loader = DataLoader(list(zip(X_finetune, Y_finetune)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+        for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
+            model.train()
+            train_acc = 0.0
+            train_loss = 0.0
+            with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+                for X_batch, Y_batch in t:
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    Y_batch = Y_batch.to(device).to(torch.float32)
+
+                    optimizer.zero_grad()
+                    output = model(X_batch)
+                    loss = criterion(output, Y_batch)
+                    loss.backward()
+                    optimizer.step()
+
+                    train_loss += loss.item()
+                    preds = torch.argmax(output, dim=1)
+                    Y_batch_long = torch.argmax(Y_batch, dim=1)
+                    train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+
+                    # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
+                    # Update the inner tqdm loop with metrics
+                    # Only set_postfix every 10 batches to avoid slowing down the loop
+                    if t.n % 10 == 0:
+                        t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
+
+                    del X_batch, Y_batch, output, preds
+                    torch.cuda.empty_cache()
+
+            # Validation
+            model.eval()
+            val_loss = 0.0
+            val_acc = 0.0
+            with torch.no_grad():
+                for X_batch, Y_batch in val_loader:
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    Y_batch = Y_batch.to(device).to(torch.float32)
+
+                    #output = model(X_batch).logits
+                    output = model(X_batch)
+                    val_loss += criterion(output, Y_batch).item()
+                    preds = torch.argmax(output, dim=1)
+                    Y_batch_long = torch.argmax(Y_batch, dim=1)
+
+                    val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+
+                    del X_batch, Y_batch
+                    torch.cuda.empty_cache()
+
+            train_loss /= len(finetune_loader)
+            train_acc /= len(finetune_loader)
+            val_loss /= len(val_loader)
+            val_acc /= len(val_loader)
+
+            print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+            print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+            wandb.log({
+                "Finetuning Epoch": epoch,
+                "Train Loss": train_loss,
+                "Train Acc": train_acc,
+                "Valid Loss": val_loss,
+                "Valid Acc": val_acc, 
+                "Learning Rate": optimizer.param_groups[0]['lr']})
+            
+    # Testing
+    if (args.held_out_test):
+        pred = []
+        true = []
+
+        model.eval()
+        test_loss = 0.0
+        test_acc = 0.0
+        with torch.no_grad():
+            for X_batch, Y_batch in test_loader:
+                X_batch = X_batch.to(device).to(torch.float32)
+                Y_batch = Y_batch.to(device).to(torch.float32)
+
+                output = model(X_batch)
+                test_loss += criterion(output, Y_batch).item()
+
+                test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+
+                output = np.argmax(output.cpu().detach().numpy(), axis=1)
+                pred.extend(output)
+                labels = np.argmax(Y_batch.cpu().detach().numpy(), axis=1)
+                true.extend(labels)
+
+        test_loss /= len(test_loader)
+        test_acc /= len(test_loader)
+        print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f}")
         
-# Testing
-if (args.held_out_test):
-    pred = []
-    true = []
+        wandb.log({
+            "Test Loss": test_loss,
+            "Test Acc": test_acc}) 
+        
+        
+        # %% Confusion Matrix
+        # Plot and log confusion matrix in wandb
+        utils.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+
+    # Load validation in smaller batches for memory purposes
+    torch.cuda.empty_cache()  # Clear cache if needed
 
     model.eval()
-    test_loss = 0.0
-    test_acc = 0.0
     with torch.no_grad():
-        for X_batch, Y_batch in test_loader:
-            X_batch = X_batch.to(device).to(torch.float32)
-            Y_batch = Y_batch.to(device).to(torch.float32)
+        validation_predictions = []
+        for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=batch_size)), desc="Validation Batch Loading"):  # Or some other number that fits in memory
+            batch = batch.to(device).to(torch.float32)
+            outputs = model(batch)
+            preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+            validation_predictions.extend(preds)
 
-            output = model(X_batch)
-            test_loss += criterion(output, Y_batch).item()
+    utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
 
-            test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+    # Load training in smaller batches for memory purposes
+    torch.cuda.empty_cache()  # Clear cache if needed
 
-            output = np.argmax(output.cpu().detach().numpy(), axis=1)
-            pred.extend(output)
-            labels = np.argmax(Y_batch.cpu().detach().numpy(), axis=1)
-            true.extend(labels)
+    model.eval()
+    with torch.no_grad():
+        train_predictions = []
+        for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=batch_size)), desc="Training Batch Loading"):  # Or some other number that fits in memory
+            batch = batch.to(device).to(torch.float32)
+            outputs = model(batch)
+            preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+            train_predictions.extend(preds)
 
-    test_loss /= len(test_loader)
-    test_acc /= len(test_loader)
-    print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f}")
-    
-    wandb.log({
-        "Test Loss": test_loss,
-        "Test Acc": test_acc}) 
-    
-    
-    # %% Confusion Matrix
-    # Plot and log confusion matrix in wandb
-    utils.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-
-# Load validation in smaller batches for memory purposes
-torch.cuda.empty_cache()  # Clear cache if needed
-
-model.eval()
-with torch.no_grad():
-    validation_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=batch_size)), desc="Validation Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device).to(torch.float32)
-        outputs = model(batch)
-        preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-        validation_predictions.extend(preds)
-
-utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
-
-# Load training in smaller batches for memory purposes
-torch.cuda.empty_cache()  # Clear cache if needed
-
-model.eval()
-with torch.no_grad():
-    train_predictions = []
-    for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=batch_size)), desc="Training Batch Loading"):  # Or some other number that fits in memory
-        batch = batch.to(device).to(torch.float32)
-        outputs = model(batch)
-        preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-        train_predictions.extend(preds)
-
-utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-    
-run.finish()
+    utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+        
+    run.finish()
