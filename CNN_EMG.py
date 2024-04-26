@@ -34,6 +34,7 @@ import shutil
 import gc
 import datetime
 from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
+from semilearn.core.utils import send_model_cuda
 from PIL import Image
 
 # Define a custom argument type for a list of integers
@@ -808,29 +809,32 @@ if args.turn_on_unlabeled_domain_adaptation:
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
     semilearn_config = {
     'algorithm': args.unlabeled_algorithm,
-    'net': 'vit_small_patch16_224',
-    'use_pretrain': False,  # todo: add pretrain
+    'net': 'vit_tiny_patch2_32',
+    'use_pretrain': True,  # todo: add pretrain
+    'pretrain_path': 'https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_tiny_patch2_32_mlp_im_1k_32.pth',
 
     # optimization configs
-    'epoch': args.epochs,
-    # 'num_train_iter': 150,
-    # 'num_eval_iter': 50,
-    'optim': 'SGD',
-    'lr': args.learning_rate,
-    'momentum': 0.9,
+    'epoch': 100,  # set to 100
+    'num_train_iter': 102400,  # set to 102400
+    'num_eval_iter': 1024,   # set to 1024
+    'num_log_iter': 256,    # set to 256
+    'optim': 'AdamW',   # AdamW optimizer
+    'lr': 5e-4,  # Learning rate
+    'layer_decay': 0.5,  # Layer-wise decay learning rate  
     'batch_size': 16,
     'eval_batch_size': 16,
+    'use_wandb': True,
 
     # dataset configs
     'dataset': 'none',
-    'num_labels': utils.numGestures,
+    'num_labels': X_train.shape[0],
     'num_classes': utils.numGestures,
-    'input_size': 224,
+    'input_size': 30,
     'data_dir': './data',
 
     # algorithm specific configs
     'hard_label': True,
-    'uratio': 3,
+    # 'uratio': 0.00232,
     'ulb_loss_ratio': 1.0,
 
     # device configs
@@ -838,8 +842,11 @@ if args.turn_on_unlabeled_domain_adaptation:
     'world_size': 1,
     'distributed': False,
     }
+    
     semilearn_config = get_config(semilearn_config)
     semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
+    semilearn_algorithm.model = send_model_cuda(semilearn_config, semilearn_algorithm.model)
+    semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
     
     class ToNumpy:
         """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
@@ -853,7 +860,7 @@ if args.turn_on_unlabeled_domain_adaptation:
                 raise TypeError("Unsupported image type")
 
     
-    semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+    semilearn_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
     
     labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
     unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
@@ -1065,14 +1072,14 @@ if (exercises):
 else:
     gesture_labels = utils.gesture_labels
     
-# # if X_train, validation, test or Y_train validation, test are numpy arrays, convert them to tensors
-# X_train = torch.from_numpy(X_train).to(torch.float16) if isinstance(X_train, np.ndarray) else X_train
-# Y_train = torch.from_numpy(Y_train).to(torch.float16) if isinstance(Y_train, np.ndarray) else Y_train
-# X_validation = torch.from_numpy(X_validation).to(torch.float16) if isinstance(X_validation, np.ndarray) else X_validation
-# Y_validation = torch.from_numpy(Y_validation).to(torch.float16) if isinstance(Y_validation, np.ndarray) else Y_validation
-# if args.held_out_test:
-#     X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
-#     Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
+# if X_train, validation, test or Y_train validation, test are numpy arrays, convert them to tensors
+X_train = torch.from_numpy(X_train).to(torch.float16) if isinstance(X_train, np.ndarray) else X_train
+Y_train = torch.from_numpy(Y_train).to(torch.float16) if isinstance(Y_train, np.ndarray) else Y_train
+X_validation = torch.from_numpy(X_validation).to(torch.float16) if isinstance(X_validation, np.ndarray) else X_validation
+Y_validation = torch.from_numpy(Y_validation).to(torch.float16) if isinstance(Y_validation, np.ndarray) else Y_validation
+if args.held_out_test:
+    X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
+    Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
 
 # if args.held_out_test:
 #     # Plot and log images
@@ -1086,9 +1093,15 @@ else:
 # utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
 
 if args.turn_on_unlabeled_domain_adaptation:
-    trainer = Trainer(semilearn_config, semilearn_algorithm)
-    trainer.fit(train_labeled_loader, train_unlabeled_loader, validation_loader)
-    trainer.evaluate(validation_loader)
+    semilearn_algorithm.loader_dict = {}
+    semilearn_algorithm.loader_dict['train_lb'] = train_labeled_loader
+    semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
+    semilearn_algorithm.loader_dict['eval'] = validation_loader
+    
+    semilearn_algorithm.train()
+    # trainer = Trainer(semilearn_config, semilearn_algorithm)
+    # trainer.fit(train_labeled_loader, train_unlabeled_loader, validation_loader)
+    # trainer.evaluate(validation_loader)
     
 else: 
     for epoch in tqdm(range(num_epochs), desc="Epoch"):
