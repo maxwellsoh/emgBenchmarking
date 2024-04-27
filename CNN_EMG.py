@@ -779,11 +779,11 @@ else:
                 if args.cross_validation_for_time_series:
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
-                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=proportion_unlabeled_of_proportion_to_keep, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=False)
+                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=False)
                 else:
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
-                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=proportion_unlabeled_of_proportion_to_keep, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=True)
+                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=True)
                     
             print("Size of X_train_partial_leftout_subject:     ", X_train_partial_leftout_subject.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
             print("Size of Y_train_partial_leftout_subject:     ", Y_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE)
@@ -795,8 +795,8 @@ else:
             else:
                 X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
                 Y_train = torch.tensor(np.concatenate((Y_train, Y_train_labeled_partial_leftout_subject), axis=0))
-                X_train_unlabeled = torch.tensor(X_train_partial_leftout_subject)
-                Y_train_unlabeled = torch.tensor(Y_train_partial_leftout_subject)
+                X_train_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
+                Y_train_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
 
             # Update the validation data
             X_train = torch.tensor(X_train).to(torch.float16)
@@ -820,32 +820,39 @@ else:
 
 model_name = args.model
 
+if args.model == "vit_tiny_patch2_32":
+    pretrain_path = "https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_tiny_patch2_32_mlp_im_1k_32.pth"
+else:
+    pretrain_path = f"https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/{model_name}_mlp_im_1k_224.pth"
+
 if args.turn_on_unlabeled_domain_adaptation:
+    print("Number of total batches in training data:", X_train.shape[0] // args.batch_size)
     assert (args.transfer_learning and args.cross_validation_for_time_series) or args.turn_on_leave_one_session_out, \
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
     semilearn_config = {
     'algorithm': args.unlabeled_algorithm,
-    'net': 'vit_tiny_patch2_32',
+    'net': args.model,
     'use_pretrain': True,  # todo: add pretrain
-    'pretrain_path': 'https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_tiny_patch2_32_mlp_im_1k_32.pth',
+    'pretrain_path': pretrain_path,
+    'seed': args.seed,
 
     # optimization configs
-    'epoch': 100,  # set to 100
-    'num_train_iter': 102400*4,  # set to 102400
-    'num_eval_iter': 1024,   # set to 1024
-    'num_log_iter': 256,    # set to 256
+    'epoch': args.epochs,  # set to 100
+    'num_train_iter': args.epochs * (X_train.shape[0] // args.batch_size),  # set to 102400
+    'num_eval_iter': X_train.shape[0] // args.batch_size,   # set to 1024
+    'num_log_iter': X_train.shape[0] // args.batch_size,    # set to 256
     'optim': 'AdamW',   # AdamW optimizer
-    'lr': 5e-4,  # Learning rate
-    'layer_decay': 0.5,  # Layer-wise decay learning rate  
-    'batch_size': 16,
-    'eval_batch_size': 16,
+    'lr': args.learning_rate,  # Learning rate
+    # 'layer_decay': 0.5,  # Layer-wise decay learning rate  
+    'batch_size': args.batch_size,  # Batch size
+    'eval_batch_size': args.batch_size, # Evaluation batch size
     'use_wandb': True,
 
     # dataset configs
     'dataset': 'none',
     'num_labels': X_train.shape[0],
     'num_classes': utils.numGestures,
-    'input_size': 30,
+    'input_size': 224,
     'data_dir': './data',
 
     # algorithm specific configs
