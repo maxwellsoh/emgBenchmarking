@@ -73,7 +73,7 @@ parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window s
 # Add argument for whether or not to concatenate magnitude image
 parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
 # Add argument for model to use
-parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_path16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
+parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_patch16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
 # Add argument for exercises to include
 parser.add_argument('--exercises', type=list_of_ints, help='List the exercises of the 3 to load. The most popular for benchmarking seem to be 2 and 3. Can format as \'--exercises 1,2,3\'', default=[1, 2, 3])
 # Add argument for project suffix
@@ -775,7 +775,7 @@ else:
                 X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
                     X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=True)
                 
-            if args.turn_on_unlabeled_domain_adaptation:
+            if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep>0:
                 if args.cross_validation_for_time_series:
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
@@ -793,10 +793,14 @@ else:
                 X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
                 Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
             else:
-                X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
-                Y_train = torch.tensor(np.concatenate((Y_train, Y_train_labeled_partial_leftout_subject), axis=0))
-                X_train_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
-                Y_train_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                if proportion_unlabeled_of_proportion_to_keep>0:
+                    X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
+                    Y_train = torch.tensor(np.concatenate((Y_train, Y_train_labeled_partial_leftout_subject), axis=0))
+                    X_train_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
+                    Y_train_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                else:
+                    X_train = torch.tensor(np.concatenate((X_train, X_train_partial_leftout_subject), axis=0))
+                    Y_train = torch.tensor(np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0))
 
             # Update the validation data
             X_train = torch.tensor(X_train).to(torch.float16)
@@ -811,7 +815,7 @@ else:
         print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
         
-        if args.turn_on_unlabeled_domain_adaptation:
+        if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep>0:
             print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
             print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
             
@@ -843,10 +847,35 @@ if args.turn_on_unlabeled_domain_adaptation:
     'num_log_iter': X_train.shape[0] // args.batch_size,    # set to 256
     'optim': 'AdamW',   # AdamW optimizer
     'lr': args.learning_rate,  # Learning rate
-    # 'layer_decay': 0.5,  # Layer-wise decay learning rate  
+    'layer_decay': 0.5,  # Layer-wise decay learning rate  
+    'momentum': 0.9,  # Momentum
+    'weight_decay': 0.0005,  # Weight decay
+    'amp': True,  # Automatic mixed precision
+    'train_sampler': 'RandomSampler',  # Random sampler
+    'rank': 0,  # Rank
     'batch_size': args.batch_size,  # Batch size
     'eval_batch_size': args.batch_size, # Evaluation batch size
     'use_wandb': True,
+    
+    # 'num_warmup_iter': c 1024,
+    'ema_m': 0.999,
+    # 'p_cutoff': 0.95,
+    # 'contrast_p_cutoff': 0.8,
+    # 'contrast_loss_ratio': 1.0, 
+    # 'ulb_loss_ratio': 1.0,
+    # 'proj_size': 64,
+    # 'queue_batch': args.batch_size * 4,
+    # 'smoothing_alpha': 0.9,
+    # 'T': 0.2,
+    # 'da_len': 32,
+    # 'use_cat': True,
+    # 'use_epass': True,
+    # 'clip': 0.0,
+    # 'gamma': 1.27,
+    # 'C': 1.0001,
+    # 'rho_min': 0.05,
+    # 'num_wu_iter': 2048,
+    
 
     # dataset configs
     'dataset': 'none',
@@ -886,12 +915,14 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
     
     labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
-    unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
-                                     is_ulb=True, strong_transform=semilearn_transform)
+    if proportion_unlabeled_of_proportion_to_keep>0:
+        unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
+                                        is_ulb=True, strong_transform=semilearn_transform)
     validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
 
     train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, semilearn_config.batch_size)
-    train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, semilearn_config.batch_size)
+    if proportion_unlabeled_of_proportion_to_keep>0:
+        train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, semilearn_config.batch_size)
     validation_loader = get_data_loader(semilearn_config, validation_dataset, semilearn_config.eval_batch_size)
 
 else:
@@ -1055,7 +1086,7 @@ if args.held_out_test:
 if args.pretrain_and_finetune:
     wandb_runname += '_pretrain-and-finetune'
 if args.turn_on_unlabeled_domain_adaptation:
-    wandb_runname += '_unlabeled-domain-adaptation'
+    wandb_runname += '_unlabeled-adapt'
     wandb_runname += '-algorithm-' + args.unlabeled_algorithm
     wandb_runname += '-proportion-unlabeled-data-' + str(args.proportion_unlabeled_data)
 
@@ -1120,11 +1151,11 @@ if args.held_out_test:
 if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.loader_dict = {}
     semilearn_algorithm.loader_dict['train_lb'] = train_labeled_loader
-    semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
+    if proportion_unlabeled_of_proportion_to_keep>0:
+        semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
     semilearn_algorithm.loader_dict['eval'] = validation_loader
     
     semilearn_algorithm.train()
-    semilearn_algorithm
     # trainer = Trainer(semilearn_config, semilearn_algorithm)
     # trainer.fit(train_labeled_loader, train_unlabeled_loader, validation_loader)
     # trainer.evaluate(validation_loader)
