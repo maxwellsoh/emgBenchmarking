@@ -120,6 +120,8 @@ parser.add_argument('--held_out_test', type=utils.str2bool, help='whether or not
 parser.add_argument('--one_subject_for_training_set_for_session_test', type=utils.str2bool, help='whether or not to use only the subject left out for training in leave out session test. Set to False by default.', default=False)
 # Add argument for pretraining on all data from other subjects, and fine-tuning on some data from left out subject
 parser.add_argument('--pretrain_and_finetune', type=utils.str2bool, help='whether or not to pretrain on all data from other subjects, and fine-tune on some data from left out subject. Set to False by default.', default=False)
+# Add argument for finetuning epochs
+parser.add_argument('--finetuning_epochs', type=int, help='number of epochs to fine-tune for. Set to 5 by default.', default=25)
 # Add argument for whether or not to turn on unlabeled domain adaptation
 parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool, help='whether or not to turn on unlabeled domain adaptation methods. Set to False by default.', default=False)
 # Add argument to specify algorithm to use for unlabeled domain adaptation
@@ -229,6 +231,7 @@ print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
 print(f"The value of --held_out_test is {args.held_out_test}")
 print(f"The value of --one_subject_for_training_set_for_session_test is {args.one_subject_for_training_set_for_session_test}")
 print(f"The value of --pretrain_and_finetune is {args.pretrain_and_finetune}")
+print(f"The value of --finetuning_epochs is {args.finetuning_epochs}")
 
 print(f"The value of --turn_on_unlabeled_domain_adaptation is {args.turn_on_unlabeled_domain_adaptation}")
 print(f"The value of --unlabeled_algorithm is {args.unlabeled_algorithm}")
@@ -1165,17 +1168,15 @@ if args.turn_on_unlabeled_domain_adaptation:
     
     if args.pretrain_and_finetune:
         run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
-    wandb.config.lr = args.learning_rate
-    if args.leave_n_subjects_out_randomly != 0:
-        wandb.config.left_out_subjects = leaveOutIndices
+        wandb.config.lr = args.learning_rate
         
-        semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + args.epochs * (X_train_finetuning.shape[0] // args.batch_size)
+        semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + args.finetuning_epochs * (X_train_finetuning.shape[0] // args.batch_size)
         semilearn_config_dict['num_eval_iter'] = X_train_finetuning.shape[0] // args.batch_size
         semilearn_config_dict['num_log_iter'] = X_train_finetuning.shape[0] // args.batch_size
         
         semilearn_config = get_config(semilearn_config_dict)
         semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
-        semilearn_algorithm.epochs = args.epochs * 2 # train for the same number of epochs as the previous training
+        semilearn_algorithm.epochs = args.epochs + args.finetuning_epochs # train for the same number of epochs as the previous training
         semilearn_algorithm.model = send_model_cuda(semilearn_config, semilearn_algorithm.model)
         semilearn_algorithm.load_model(semilearn_config.load_path)
         semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
@@ -1262,6 +1263,7 @@ else:
     wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
     if args.pretrain_and_finetune:
+        num_epochs = args.finetuning_epochs
         # train more on X_finetune and Y_finetune
         finetune_loader = DataLoader(list(zip(X_finetune, Y_finetune)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
         for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
