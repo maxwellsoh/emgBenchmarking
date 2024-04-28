@@ -16,6 +16,12 @@ $ mamba env create -n emgbench -f environment.yml
 $ pip install -r requirements.txt
 ```
 
+To update the virtual environment, run
+```console
+$ mamba env update --file enviroment.yml --prune
+$ pip install -r requirements.txt
+```
+
 To install the forked version of lightning bolts that allows for a pretrained model to be trained with SimCLR:
 ```console
 $ conda remove --force lightning-bolts
