@@ -1164,9 +1164,15 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.train()
     
     if args.pretrain_and_finetune:
+        run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
+    wandb.config.lr = args.learning_rate
+    if args.leave_n_subjects_out_randomly != 0:
+        wandb.config.left_out_subjects = leaveOutIndices
+        
         semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + args.epochs * (X_train_finetuning.shape[0] // args.batch_size)
         semilearn_config_dict['num_eval_iter'] = X_train_finetuning.shape[0] // args.batch_size
         semilearn_config_dict['num_log_iter'] = X_train_finetuning.shape[0] // args.batch_size
+        
         semilearn_config = get_config(semilearn_config_dict)
         semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
         semilearn_algorithm.epochs = args.epochs * 2 # train for the same number of epochs as the previous training
