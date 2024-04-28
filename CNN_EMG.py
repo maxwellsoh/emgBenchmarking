@@ -794,13 +794,24 @@ else:
                 Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
             else:
                 if proportion_unlabeled_of_proportion_to_keep>0:
-                    X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
-                    Y_train = torch.tensor(np.concatenate((Y_train, Y_train_labeled_partial_leftout_subject), axis=0))
-                    X_train_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
-                    Y_train_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                    if not args.pretrain_and_finetune:
+                        X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
+                        Y_train = torch.tensor(np.concatenate((Y_train, Y_train_labeled_partial_leftout_subject), axis=0))
+                        X_train_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
+                        Y_train_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                    else:
+                        X_train_finetuning = torch.tensor(X_train_labeled_partial_leftout_subject)
+                        Y_train_finetuning = torch.tensor(Y_train_labeled_partial_leftout_subject)
+                        X_train_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
+                        Y_train_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                        
                 else:
-                    X_train = torch.tensor(np.concatenate((X_train, X_train_partial_leftout_subject), axis=0))
-                    Y_train = torch.tensor(np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0))
+                    if not args.pretrain_and_finetune:
+                        X_train = torch.tensor(np.concatenate((X_train, X_train_partial_leftout_subject), axis=0))
+                        Y_train = torch.tensor(np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0))
+                    else: 
+                        X_train_finetuning = torch.tensor(X_train_partial_leftout_subject)
+                        Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
 
             # Update the validation data
             X_train = torch.tensor(X_train).to(torch.float16)
@@ -819,6 +830,10 @@ else:
             print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
             print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
             
+        if args.pretrain_and_finetune:
+            print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
+            print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
+            
     else: 
         ValueError("Please specify the type of test you want to run")
 
@@ -831,71 +846,58 @@ else:
 
 if args.turn_on_unlabeled_domain_adaptation:
     print("Number of total batches in training data:", X_train.shape[0] // args.batch_size)
+    current_date_and_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     assert (args.transfer_learning and args.cross_validation_for_time_series) or args.turn_on_leave_one_session_out, \
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
-    semilearn_config = {
-    'algorithm': args.unlabeled_algorithm,
-    'net': args.model,
-    'use_pretrain': True,  # todo: add pretrain
-    'pretrain_path': pretrain_path,
-    'seed': args.seed,
+    semilearn_config_dict = {
+        'algorithm': args.unlabeled_algorithm,
+        'net': args.model,
+        'use_pretrain': True,  
+        'pretrain_path': pretrain_path,
+        'seed': args.seed,
 
-    # optimization configs
-    'epoch': args.epochs,  # set to 100
-    'num_train_iter': args.epochs * (X_train.shape[0] // args.batch_size),  # set to 102400
-    'num_eval_iter': X_train.shape[0] // args.batch_size,   # set to 1024
-    'num_log_iter': X_train.shape[0] // args.batch_size,    # set to 256
-    'optim': 'AdamW',   # AdamW optimizer
-    'lr': args.learning_rate,  # Learning rate
-    'layer_decay': 0.5,  # Layer-wise decay learning rate  
-    'momentum': 0.9,  # Momentum
-    'weight_decay': 0.0005,  # Weight decay
-    'amp': True,  # Automatic mixed precision
-    'train_sampler': 'RandomSampler',  # Random sampler
-    'rank': 0,  # Rank
-    'batch_size': args.batch_size,  # Batch size
-    'eval_batch_size': args.batch_size, # Evaluation batch size
-    'use_wandb': True,
-    
-    # 'num_warmup_iter': c 1024,
-    'ema_m': 0.999,
-    # 'p_cutoff': 0.95,
-    # 'contrast_p_cutoff': 0.8,
-    # 'contrast_loss_ratio': 1.0, 
-    # 'ulb_loss_ratio': 1.0,
-    # 'proj_size': 64,
-    # 'queue_batch': args.batch_size * 4,
-    # 'smoothing_alpha': 0.9,
-    # 'T': 0.2,
-    # 'da_len': 32,
-    # 'use_cat': True,
-    # 'use_epass': True,
-    # 'clip': 0.0,
-    # 'gamma': 1.27,
-    # 'C': 1.0001,
-    # 'rho_min': 0.05,
-    # 'num_wu_iter': 2048,
-    
+        # optimization configs
+        'epoch': args.epochs,  # set to 100
+        'num_train_iter': args.epochs * (X_train.shape[0] // args.batch_size),  # set to 102400
+        'num_eval_iter': X_train.shape[0] // args.batch_size,   # set to 1024
+        'num_log_iter': X_train.shape[0] // args.batch_size,    # set to 256
+        'optim': 'AdamW',   # AdamW optimizer
+        'lr': args.learning_rate,  # Learning rate
+        'layer_decay': 0.5,  # Layer-wise decay learning rate  
+        'momentum': 0.9,  # Momentum
+        'weight_decay': 0.0005,  # Weight decay
+        'amp': True,  # Automatic mixed precision
+        'train_sampler': 'RandomSampler',  # Random sampler
+        'rank': 0,  # Rank
+        'batch_size': args.batch_size,  # Batch size
+        'eval_batch_size': args.batch_size, # Evaluation batch size
+        'use_wandb': True,
+        'ema_m': 0.999,
+        'save_dir': './saved_models/unlabeled_domain_adaptation/',
+        'save_name': f'{args.unlabeled_algorithm}_{args.model}_{args.dataset}_seed_{args.seed}_leave_{leaveOut}_unlabeled_domain_adaptation_{current_date_and_time}',
+        'resume': True,
+        'overwrite': True,
+        'load_path': f'./saved_models/unlabeled_domain_adaptation/{args.unlabeled_algorithm}_{args.model}_{args.dataset}_seed_{args.seed}_leave_{leaveOut}_unlabeled_domain_adaptation_{current_date_and_time}/latest_model.pth',
 
-    # dataset configs
-    'dataset': 'none',
-    'num_labels': X_train.shape[0],
-    'num_classes': utils.numGestures,
-    'input_size': 224,
-    'data_dir': './data',
+        # dataset configs
+        'dataset': 'none',
+        'num_labels': X_train.shape[0],
+        'num_classes': utils.numGestures,
+        'input_size': 224,
+        'data_dir': './data',
 
-    # algorithm specific configs
-    'hard_label': True,
-    # 'uratio': 0.00232,
-    'ulb_loss_ratio': 1.0,
+        # algorithm specific configs
+        'hard_label': True,
+        # 'uratio': 0.00232,
+        'ulb_loss_ratio': 1.0,
 
-    # device configs
-    'gpu': 0,
-    'world_size': 1,
-    'distributed': False,
+        # device configs
+        'gpu': 0,
+        'world_size': 1,
+        'distributed': False,
     }
     
-    semilearn_config = get_config(semilearn_config)
+    semilearn_config = get_config(semilearn_config_dict)
     semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
     semilearn_algorithm.model = send_model_cuda(semilearn_config, semilearn_algorithm.model)
     semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
@@ -918,12 +920,16 @@ if args.turn_on_unlabeled_domain_adaptation:
     if proportion_unlabeled_of_proportion_to_keep>0:
         unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                         is_ulb=True, strong_transform=semilearn_transform)
+    if args.pretrain_and_finetune:
+        finetune_dataset = BasicDataset(semilearn_config, X_train_finetuning, torch.argmax(Y_train_finetuning, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
     validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
 
-    train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, semilearn_config.batch_size)
+    train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, semilearn_config.batch_size, num_workers=32)
     if proportion_unlabeled_of_proportion_to_keep>0:
-        train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, semilearn_config.batch_size)
-    validation_loader = get_data_loader(semilearn_config, validation_dataset, semilearn_config.eval_batch_size)
+        train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, semilearn_config.batch_size, num_workers=32)
+    if args.pretrain_and_finetune:
+        train_finetuning_loader = get_data_loader(semilearn_config, finetune_dataset, semilearn_config.batch_size, num_workers=32)
+    validation_loader = get_data_loader(semilearn_config, validation_dataset, semilearn_config.eval_batch_size, num_workers=32)
 
 else:
     if args.model == 'resnet50_custom':
@@ -1056,8 +1062,6 @@ if args.turn_on_cwt:
     wandb_runname += '_cwt'
 if args.turn_on_hht:
     wandb_runname += '_hht'
-if args.learning_rate != 1e-4:
-    wandb_runname += '_lr-'+str(args.learning_rate)
 if args.reduce_training_data_size:
     wandb_runname += '_reduced-training-data-size-' + str(args.reduced_training_data_size)
 if args.leave_n_subjects_out_randomly != 0:
@@ -1087,8 +1091,8 @@ if args.pretrain_and_finetune:
     wandb_runname += '_pretrain-and-finetune'
 if args.turn_on_unlabeled_domain_adaptation:
     wandb_runname += '_unlabeled-adapt'
-    wandb_runname += '-algorithm-' + args.unlabeled_algorithm
-    wandb_runname += '-proportion-unlabeled-data-' + str(args.proportion_unlabeled_data)
+    wandb_runname += '-algo-' + args.unlabeled_algorithm
+    wandb_runname += '-proportion-unlabeled-' + str(args.proportion_unlabeled_data)
 
 if (args.held_out_test):
     if args.turn_on_kfold:
@@ -1151,11 +1155,29 @@ if args.held_out_test:
 if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.loader_dict = {}
     semilearn_algorithm.loader_dict['train_lb'] = train_labeled_loader
-    if proportion_unlabeled_of_proportion_to_keep>0:
+    if proportion_unlabeled_of_proportion_to_keep>0 and not args.pretrain_and_finetune:
         semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
     semilearn_algorithm.loader_dict['eval'] = validation_loader
     
     semilearn_algorithm.train()
+    
+    if args.pretrain_and_finetune:
+        semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + args.epochs * (X_train_finetuning.shape[0] // args.batch_size)
+        semilearn_config_dict['num_eval_iter'] = X_train_finetuning.shape[0] // args.batch_size
+        semilearn_config_dict['num_log_iter'] = X_train_finetuning.shape[0] // args.batch_size
+        semilearn_config = get_config(semilearn_config_dict)
+        semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
+        semilearn_algorithm.epochs = args.epochs * 2 # train for the same number of epochs as the previous training
+        semilearn_algorithm.model = send_model_cuda(semilearn_config, semilearn_algorithm.model)
+        semilearn_algorithm.load_model(semilearn_config.load_path)
+        semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
+        semilearn_algorithm.loader_dict = {}
+        semilearn_algorithm.loader_dict['train_lb'] = train_finetuning_loader
+        if proportion_unlabeled_of_proportion_to_keep>0:
+            semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
+            
+        semilearn_algorithm.loader_dict['eval'] = validation_loader
+        semilearn_algorithm.train()
     # trainer = Trainer(semilearn_config, semilearn_algorithm)
     # trainer.fit(train_labeled_loader, train_unlabeled_loader, validation_loader)
     # trainer.evaluate(validation_loader)
