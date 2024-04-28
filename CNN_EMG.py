@@ -878,6 +878,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         'resume': True,
         'overwrite': True,
         'load_path': f'./saved_models/unlabeled_domain_adaptation/{args.unlabeled_algorithm}_{args.model}_{args.dataset}_seed_{args.seed}_leave_{leaveOut}_unlabeled_domain_adaptation_{current_date_and_time}/latest_model.pth',
+        'scheduler': None,
 
         # dataset configs
         'dataset': 'none',
@@ -1158,6 +1159,7 @@ if args.turn_on_unlabeled_domain_adaptation:
     if proportion_unlabeled_of_proportion_to_keep>0 and not args.pretrain_and_finetune:
         semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
     semilearn_algorithm.loader_dict['eval'] = validation_loader
+    semilearn_algorithm.scheduler = None
     
     semilearn_algorithm.train()
     
@@ -1173,6 +1175,8 @@ if args.turn_on_unlabeled_domain_adaptation:
         semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
         semilearn_algorithm.loader_dict = {}
         semilearn_algorithm.loader_dict['train_lb'] = train_finetuning_loader
+        semilearn_algorithm.scheduler = None
+        
         if proportion_unlabeled_of_proportion_to_keep>0:
             semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
             
