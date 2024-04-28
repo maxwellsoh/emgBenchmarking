@@ -1161,6 +1161,9 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.loader_dict['train_lb'] = train_labeled_loader
     if proportion_unlabeled_of_proportion_to_keep>0 and not args.pretrain_and_finetune:
         semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
+    if args.pretrain_and_finetune:
+        # TODO change to fully supervised training
+        print("todo change to fully supervised training")
     semilearn_algorithm.loader_dict['eval'] = validation_loader
     semilearn_algorithm.scheduler = None
     
