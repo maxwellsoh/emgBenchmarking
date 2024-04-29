@@ -852,6 +852,7 @@ if args.turn_on_unlabeled_domain_adaptation:
     current_date_and_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     assert (args.transfer_learning and args.cross_validation_for_time_series) or args.turn_on_leave_one_session_out, \
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
+    
     semilearn_config_dict = {
         'algorithm': args.unlabeled_algorithm,
         'net': args.model,
@@ -1159,11 +1160,8 @@ if args.held_out_test:
 if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.loader_dict = {}
     semilearn_algorithm.loader_dict['train_lb'] = train_labeled_loader
-    if proportion_unlabeled_of_proportion_to_keep>0 and not args.pretrain_and_finetune:
+    if proportion_unlabeled_of_proportion_to_keep>0:
         semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
-    if args.pretrain_and_finetune:
-        # TODO change to fully supervised training
-        print("todo change to fully supervised training")
     semilearn_algorithm.loader_dict['eval'] = validation_loader
     semilearn_algorithm.scheduler = None
     
@@ -1176,6 +1174,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + args.finetuning_epochs * (X_train_finetuning.shape[0] // args.batch_size)
         semilearn_config_dict['num_eval_iter'] = X_train_finetuning.shape[0] // args.batch_size
         semilearn_config_dict['num_log_iter'] = X_train_finetuning.shape[0] // args.batch_size
+        semilearn_config_dict['algorithm'] = args.unlabeled_algorithm
         
         semilearn_config = get_config(semilearn_config_dict)
         semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
