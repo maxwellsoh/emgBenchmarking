@@ -673,64 +673,63 @@ else:
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
     elif args.leave_one_session_out:
         number_of_sessions = 2
-        if args.one_subject_for_training_set_for_session_test:
-            left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
-            left_out_subject_first_n_sessions_indices = [i for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
-            X_train = np.concatenate([np.array(data[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-            Y_train = np.concatenate([np.array(labels[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-            X_validation = np.array(data[left_out_subject_last_session_index])
-            Y_validation = np.array(labels[left_out_subject_last_session_index])
+        left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+        left_out_subject_first_n_sessions_indices = [i for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
+        print("left_out_subject_last_session_index:", left_out_subject_last_session_index)
+        print("left_out_subject_first_n_sessions_indices:", left_out_subject_first_n_sessions_indices)
+        X_pretrain = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+        Y_pretrain = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+        X_finetune = np.concatenate([np.array(data[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+        Y_finetune = np.concatenate([np.array(labels[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+        X_validation = np.array(data[left_out_subject_last_session_index])
+        Y_validation = np.array(labels[left_out_subject_last_session_index])
+        
+        X_train = torch.from_numpy(X_pretrain).to(torch.float16)
+        Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
+        X_finetune = torch.from_numpy(X_finetune).to(torch.float16)
+        Y_finetune = torch.from_numpy(Y_finetune).to(torch.float16)
+        X_validation = torch.from_numpy(X_validation).to(torch.float16)
+        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        
+        if args.turn_on_unlabeled_domain_adaptation:
+            if args.proportion_unlabeled_data>0:
+                proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
+                X_train_labeled_leftout_subject, X_train_unlabeled_leftout_subject, Y_train_labeled_leftout_subject, Y_train_unlabeled_leftout_subject = tts.train_test_split(
+                    X_finetune, Y_finetune, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
+                X_train_finetuning = torch.tensor(X_train_labeled_leftout_subject)
+                Y_train_finetuning = torch.tensor(Y_train_labeled_leftout_subject)
+                X_train_unlabeled = torch.tensor(X_train_unlabeled_leftout_subject)
+                Y_train_unlabeled = torch.tensor(Y_train_unlabeled_leftout_subject)
+                
+                print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
+                print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
+                print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
+                print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
+            else: 
+                X_train_finetuning = torch.tensor(X_finetune)
+                Y_train_finetuning = torch.tensor(Y_finetune)
+                X_train_unlabeled = None
+                Y_train_unlabeled = None
+                
+                print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
+                print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
+                
+            if not args.pretrain_and_finetune:
+                X_train = torch.concat((X_train, X_train_finetuning), axis=0)
+                Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
+                
+        else:
+            if not args.pretrain_and_finetune:
+                X_train = torch.concat((X_train, X_finetune), axis=0)
+                Y_train = torch.concat((Y_train, Y_finetune), axis=0)
             
-            X_train = torch.from_numpy(X_train).to(torch.float16)
-            Y_train = torch.from_numpy(Y_train).to(torch.float16)
-            X_validation = torch.from_numpy(X_validation).to(torch.float16)
-            Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-            
-            print("Size of X_train:     ", X_train.size())
-            print("Size of Y_train:     ", Y_train.size())
-            print("Size of X_validation:", X_validation.size())
-            print("Size of Y_validation:", Y_validation.size())
-        elif args.pretrain_and_finetune:
-            left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
-            left_out_subject_first_n_sessions_indices = [i for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
-            print("left_out_subject_last_session_index:", left_out_subject_last_session_index)
-            print("left_out_subject_first_n_sessions_indices:", left_out_subject_first_n_sessions_indices)
-            X_pretrain = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-            Y_pretrain = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-            X_finetune = np.concatenate([np.array(data[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-            Y_finetune = np.concatenate([np.array(labels[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-            X_validation = np.array(data[left_out_subject_last_session_index])
-            Y_validation = np.array(labels[left_out_subject_last_session_index])
-            
-            X_train = torch.from_numpy(X_pretrain).to(torch.float16)
-            Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
-            X_finetune = torch.from_numpy(X_finetune).to(torch.float16)
-            Y_finetune = torch.from_numpy(Y_finetune).to(torch.float16)
-            X_validation = torch.from_numpy(X_validation).to(torch.float16)
-            Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-            
-            print("Size of X_train:     ", X_train.size())
-            print("Size of Y_train:     ", Y_train.size())
+        print("Size of X_train:     ", X_train.size())
+        print("Size of Y_train:     ", Y_train.size())
+        if not args.turn_on_unlabeled_domain_adaptation:
             print("Size of X_finetune:  ", X_finetune.size())
             print("Size of Y_finetune:  ", Y_finetune.size())
-            print("Size of X_validation:", X_validation.size())
-            print("Size of Y_validation:", Y_validation.size())
-        else: # train with all subjects and first session of left out subject
-            left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
-            X_train = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index], axis=0, dtype=np.float16)
-            Y_train = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index], axis=0, dtype=np.float16)
-            X_validation = np.array(data[left_out_subject_last_session_index])
-            Y_validation = np.array(labels[left_out_subject_last_session_index])
-            
-            X_train = torch.from_numpy(X_train).to(torch.float16)
-            Y_train = torch.from_numpy(Y_train).to(torch.float16)
-            X_validation = torch.from_numpy(X_validation).to(torch.float16)
-            Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-            
-            print("Size of X_train:     ", X_train.size())
-            print("Size of Y_train:     ", Y_train.size())
-            print("Size of X_validation:", X_validation.size())
-            print("Size of Y_validation:", Y_validation.size())
+        print("Size of X_validation:", X_validation.size())
+        print("Size of Y_validation:", Y_validation.size())
         
         del data
         del emg
@@ -837,6 +836,8 @@ else:
             print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
             print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
             
+        
+            
     else: 
         ValueError("Please specify the type of test you want to run")
 
@@ -850,7 +851,7 @@ else:
 if args.turn_on_unlabeled_domain_adaptation:
     print("Number of total batches in training data:", X_train.shape[0] // args.batch_size)
     current_date_and_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    assert (args.transfer_learning and args.cross_validation_for_time_series) or args.turn_on_leave_one_session_out, \
+    assert (args.transfer_learning and args.cross_validation_for_time_series) or args.leave_one_session_out, \
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
     
     semilearn_config_dict = {
