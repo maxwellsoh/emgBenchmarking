@@ -870,8 +870,6 @@ else:
             print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
             print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
             
-        
-            
     else: 
         ValueError("Please specify the type of test you want to run")
 
