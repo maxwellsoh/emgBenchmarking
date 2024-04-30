@@ -1,16 +1,13 @@
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from torchvision.models import resnet50, ResNet50_Weights
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing, model_selection
-from scipy.signal import butter,filtfilt,iirnotch
-#from PyEMD import EMD
 import wandb
 from sklearn.metrics import confusion_matrix
-import seaborn as sn
 import pandas as pd
 import multiprocessing
 from tqdm import tqdm
@@ -20,7 +17,6 @@ import utils_OzdemirEMG as utils
 from sklearn.model_selection import StratifiedKFold
 import os
 import datetime
-import matplotlib as mpl
 import logging
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
@@ -167,10 +163,21 @@ elif (args.dataset == "M_dataset"):
         ValueError("leave-one-session-out not implemented for M_dataset; only one session exists")
 
 elif (args.dataset == "hyser"):
-    import utils_hyser as utils
+    import utils_Hyser as utils
     print(f"The dataset being tested is hyser")
     project_name = 'emg_benchmarking_hyser'
-
+elif (args.dataset == "capgmyo"):
+    import utils_CapgMyo as utils
+    print(f"The dataset being tested is CapgMyo")
+    project_name = 'emg_benchmarking_capgmyo'
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for CapgMyo; only one session exists")
+elif (args.dataset == "jehan"):
+    import utils_JehanData as utils
+    print(f"The dataset being tested is JehanDataset")
+    project_name = 'emg_benchmarking_jehandataset'
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for JehanDataset; only one session exists")
 else:
     print(f"The dataset being tested is OzdemirEMG")
     project_name = 'emg_benchmarking_ozdemir'
@@ -244,6 +251,53 @@ print(f"The value of --batch_size is {args.batch_size}")
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
 formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+
+wandb_runname = 'CNN_seed-'+str(args.seed)
+if args.turn_on_kfold:
+    wandb_runname += '_k-fold-'+str(args.kfold)+'_fold-index-'+str(args.fold_index)
+if args.turn_on_cyclical_lr:
+    wandb_runname += '_cyclical-lr'
+if args.turn_on_cosine_annealing: 
+    wandb_runname += '_cosine-annealing'
+if args.turn_on_rms:
+    wandb_runname += '_rms-windows-'+str(args.rms_input_windowsize)
+if args.turn_on_magnitude:  
+    wandb_runname += '_magnitude'
+if args.leftout_subject != 0:
+    wandb_runname += '_LOSO-'+str(args.leftout_subject)
+wandb_runname += '_' + args.model
+if (exercises):
+    wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
+if args.dataset == "OzdemirEMG":
+    if args.full_dataset_ozdemir:
+        wandb_runname += '_full-dataset'
+    else:
+        wandb_runname += '_partial-dataset'
+if args.turn_on_spectrogram:
+    wandb_runname += '_spectrogram'
+if args.turn_on_cwt:
+    wandb_runname += '_cwt'
+if args.turn_on_hht:
+    wandb_runname += '_hht'
+if args.learning_rate != 1e-4:
+    wandb_runname += '_lr-'+str(args.learning_rate)
+if args.leave_n_subjects_out_randomly != 0:
+    wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
+if args.turn_off_scaler_normalization:
+    wandb_runname += '_no-scaler-normalization'
+if args.target_normalize:
+    wandb_runname += '_target-normalize'
+
+if (int(args.leftout_subject) == 0):
+    if args.turn_on_kfold:
+        project_name += '_k-fold-'+str(args.kfold)
+    else:
+        project_name += '_heldout'
+else:
+    project_name += '_LOSO'
+project_name += args.project_name_suffix
+
+run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
 
 print("------------------------------------------------------------------------------------------------------------------------")
 print("Starting run at", formatted_datetime)
@@ -354,7 +408,6 @@ else: # Not exercises
             labels = labels_async.get()
 
     else: # Not target_normalize
-        #with multiprocessing.pool.ThreadPool() as pool:
         with multiprocessing.Pool() as pool:
             if args.leave_one_session_out: # based on 2 sessions for each subject
                 total_number_of_sessions = 2
@@ -556,6 +609,8 @@ data = []
 # add tqdm to show progress bar
 print("Width of EMG data: ", width)
 print("Length of EMG data: ", length)
+
+base_foldername_zarr = ""
 
 if args.leave_n_subjects_out_randomly != 0:
     base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
@@ -1152,6 +1207,7 @@ project_name += args.project_name_suffix
 
 run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
 wandb.config.lr = args.learning_rate
+
 if args.leave_n_subjects_out_randomly != 0:
     wandb.config.left_out_subjects = leaveOutIndices
 
