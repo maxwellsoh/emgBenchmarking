@@ -343,7 +343,6 @@ def denormalize(images):
     
     return images
 
-
 def plot_average_images(image_data, true, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
     # Convert true to numpy for quick indexing
     true_np = np.array(true)        
@@ -352,7 +351,7 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     average_images = []
     print(f"Plotting average {partition_name} images...")
     numGestures = len(gesture_labels)
-    
+
     for i in range(numGestures):
         # Find indices
         gesture_indices = np.where(true_np == i)[0]
@@ -363,8 +362,12 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
 
     average_images = np.array(average_images)
 
+    # resize average images to 224 x 224
+    resize = transforms.Resize([224, 224], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    average_images = np.array([resize(torch.from_numpy(img)).numpy() for img in average_images])
+
     # Plot average image of each gesture
-    fig, axs = plt.subplots(ceil(len(gesture_labels) / 9), 9, figsize=(10, 5))
+    fig, axs = plt.subplots(2, 9, figsize=(15, 5))
     for i in range(numGestures):
         axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])
@@ -389,13 +392,18 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     # Create subplots
     fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))
 
+    # resize average images to 224 x 224
+    resize = transforms.Resize([224, 224], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+
     print(f"Plotting first fifteen {partition_name} images...")
     for i in range(total_gestures):
         # Find indices of the first 15 images for gesture i
         gesture_indices = np.where(true_np == i)[0][:rows_per_gesture]
+
+        current_images = torch.tensor(np.array([resize(img) for img in image_data[gesture_indices]]))
         
         # Select and denormalize only the required images
-        gesture_images = denormalize(image_data[gesture_indices]).cpu().detach().numpy()
+        gesture_images = denormalize(current_images).cpu().detach().numpy()
 
         for j in range(len(gesture_images)):  # len(gesture_images) is no more than rows_per_gesture
             ax = axs[j, i]
@@ -412,4 +420,5 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     firstThreeImages_filename = f'{testrun_foldername}firstFifteenImages_seed{args.seed}_{partition_name}_{formatted_datetime}.png'
     plt.savefig(firstThreeImages_filename, dpi=300)
     wandb.log({f"First Fifteen {partition_name.capitalize()} Images of Each Gesture": wandb.Image(firstThreeImages_filename)})
+
 

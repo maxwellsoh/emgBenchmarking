@@ -720,6 +720,8 @@ else:
         del Y_finetune
         
         if args.turn_on_unlabeled_domain_adaptation: # while in leave one session out
+            proportion_to_keep = args.proportion_transfer_learning
+            proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
             if args.proportion_unlabeled_data>0:
                 proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
                 X_train_labeled_leftout_subject, X_train_unlabeled_leftout_subject, Y_train_labeled_leftout_subject, Y_train_unlabeled_leftout_subject = tts.train_test_split(
@@ -922,7 +924,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         # dataset configs
         'dataset': 'none',
         'num_labels': X_train.shape[0],
-        'num_classes': utils.numGestures,
+        'num_classes': numGestures,
         'input_size': 224,
         'data_dir': './data',
 
@@ -990,7 +992,7 @@ else:
         model = resnet50(weights=ResNet50_Weights.DEFAULT)
         # Replace the last fully connected layer
         num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
-        model.fc = nn.Linear(num_ftrs, utils.numGestures)  # Replace with a new linear layer
+        model.fc = nn.Linear(num_ftrs, numGestures)  # Replace with a new linear layer
     elif args.model == 'convnext_tiny_custom':
         # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
         class LayerNorm2d(nn.LayerNorm):
@@ -1169,9 +1171,12 @@ if not os.path.exists(testrun_foldername):
 model_filename = f'{testrun_foldername}model_{formatted_datetime}.pth'
 
 if (exercises):
-    gesture_labels = utils.gesture_labels['Rest']
-    for exercise_set in args.exercises:
-        gesture_labels = gesture_labels + utils.gesture_labels[exercise_set]
+    if not args.partial_dataset_ninapro:
+        gesture_labels = utils.gesture_labels['Rest']
+        for exercise_set in args.exercises:
+            gesture_labels = gesture_labels + utils.gesture_labels[exercise_set]
+    else:
+        gesture_labels = utils.partial_gesture_labels
 else:
     gesture_labels = utils.gesture_labels
     
@@ -1184,16 +1189,20 @@ if args.held_out_test:
     X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
     Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
 
-# if args.held_out_test:
-#     # Plot and log images
-#     utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-#     utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+if args.held_out_test:
+    # Plot and log images
+    utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
-# utils.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
-# utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+utils.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
 
-# utils.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-# utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), utils.gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+utils.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+
+if args.pretrain_and_finetune:
+    utils.plot_average_images(X_train_finetuning, np.argmax(Y_train_finetuning.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train_finetuning')
+    utils.plot_first_fifteen_images(X_train_finetuning, np.argmax(Y_train_finetuning.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train_finetuning')
 
 if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.loader_dict = {}
