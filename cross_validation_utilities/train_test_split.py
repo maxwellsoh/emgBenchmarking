@@ -59,7 +59,11 @@ def train_test_split(
         X_test = np.concatenate(X_test)
         y_train = np.concatenate(y_train)
         y_test = np.concatenate(y_test)
-
+        
+        # if Y_train_set is one-hot-encoded, turn results into one-hot-encoded
+        if Y_train_set.shape[1] != 1:
+            y_train = np.eye(len(np.unique(y_train)))[y_train]
+            y_test = np.eye(len(np.unique(y_test)))[y_test]
         
     else:
         X_train, X_test, y_train, y_test = model_selection.train_test_split(
