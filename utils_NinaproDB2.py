@@ -28,19 +28,22 @@ cmap = mpl.colormaps['viridis']
 gesture_labels = {}
 gesture_labels['Rest'] = ['Rest'] # Shared between exercises
 
-gesture_labels[1] = ['Index Flexion', 'Index Extension', 'Middle Flexion', 'Middle Extension', 'Ring Flexion', 'Ring Extension',
-                    'Little Finger Flexion', 'Little Finger Extension', 'Thumb Adduction', 'Thumb Abduction', 'Thumb Flexion',
-                    'Thumb Extension'] # End exercise A
-
-gesture_labels[2] = ['Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction',
+gesture_labels[1] = ['Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction',
                     'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation',
                     'Ulnar Deviation', 'Wrist Extension Fist'] # End exercise B
 
-gesture_labels[3] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook Grasp', 'Index Finger Extension Grasp', 'Medium Wrap',
+gesture_labels[2] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook Grasp', 'Index Finger Extension Grasp', 'Medium Wrap',
                     'Ring Grasp', 'Prismatic Four Fingers Grasp', 'Stick Grasp', 'Writing Tripod Grasp', 'Power Sphere Grasp', 'Three Finger Sphere Grasp', 'Precision Sphere Grasp',
                     'Tripod Grasp', 'Prismatic Pinch Grasp', 'Tip Pinch Grasp', 'Quadrupod Grasp', 'Lateral Grasp', 'Parallel Extension Grasp', 'Extension Type Grasp', 'Power Disk Grasp',
                     'Open A Bottle With A Tripod Grasp', 'Turn A Screw', 'Cut Something'] # End exercise C
 
+gesture_labels[3] = ['Flexion Of The Little Finger', 'Flexion Of The Ring Finger', 'Flexion Of The Middle Finger', 'Flexion Of The Index Finger', 
+                     'Abduction Of The Thumb', 'Flexion Of The Thumb', 'Flexion Of Index And Little Finger', 'Flexion Of Ring And Middle Finger', 
+                     'Flexion Of Index Finger And Thumb'] # End exercise D
+
+partial_gesture_labels = ['Rest', 'Finger Abduction', 'Fist', 'Finger Adduction', 'Middle Axis Supination', 
+                          'Middle Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 'Ulnar Deviation']
+partial_gesture_indices = [0] + [gesture_labels[1].index(g) + len(gesture_labels['Rest']) for g in partial_gesture_labels[1:]] # 0 is for rest
 class CustomDataset_swav(Dataset):
     def __init__(self, data, labels=None, transform=None):
         self.data = data
@@ -98,6 +101,17 @@ class CustomDataset(Dataset):
             x = self.transform(x)
         
         return x, y
+    
+def getPartialEMG (args):
+    n = args
+    restim = getRestim(n, exercise)
+    emg = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['emg']).to(torch.float16)
+    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+
+def getPartialLabels (args):
+    n = args
+    restim = getRestim(n, exercise)
+    return contract(restim[balance(restim)])
         
 def str2bool(v):
     if isinstance(v, bool):
@@ -184,7 +198,7 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
     
     return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
 
-def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size):
+def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size, index, display_interval=1000):
     # Normalize and convert data to a usable color map
     data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
@@ -192,15 +206,19 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     image_data = np.reshape(rgb_data, (length, width, 3))
     image = np.transpose(image_data, (2, 0, 1))
     
-    # Resize the whole image instead of splitting
     resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
                                interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image = resize(torch.from_numpy(image))
     
-    # Normalize using ImageNet standards after resizing
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     image = normalize(image)
-    
+
+    # Displaying the image periodically
+    if index is not None and index % display_interval == 0:
+        plt.imshow(np.transpose(image.numpy(), (1, 2, 0)))  # Adjusting to HxWxC for display
+        plt.title(f"Image at index {index}")
+        plt.show(block=False)
+
     return image.numpy().astype(np.float32)
 
 
@@ -217,6 +235,18 @@ def process_optimized_makeOneImage(args_tuple):
 def process_optimized_makeOneMagnitudeImage(args_tuple):
     return optimized_makeOneMagnitudeImage(*args_tuple)
 
+def process_optimized_makeOneImageChunk(args_tuple):
+    images = [None] * len(args_tuple)
+    for i in range(len(args_tuple)):
+        images[i] = optimized_makeOneImage(*args_tuple[i])
+    return images
+
+def process_optimized_makeOneMagnitudeImageChunk(args_tuple):
+    images = [None] * len(args_tuple)
+    for i in range(len(args_tuple)):
+        images[i] = optimized_makeOneMagnitudeImage(*args_tuple[i])
+    return images
+
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None,
               turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
     
@@ -232,7 +262,7 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         # Reshape data for RMS calculation: (SAMPLES, 16, 5, 10)
         emg = emg.reshape(len(emg), length, rms_windows, width // rms_windows)
         
-        num_splits = multiprocessing.cpu_count()
+        num_splits = multiprocessing.cpu_count() // 2
         data_chunks = np.array_split(emg, num_splits)
         
         emg_rms = process_map(process_chunk, data_chunks, chunksize=1, max_workers=num_splits, desc="Calculating RMS")
@@ -251,13 +281,20 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         resize_length_factor = 3
     native_resnet_size = 224
     
-    args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-    # Using process_map instead of multiprocessing.Pool directly
-    images = process_map(process_optimized_makeOneImage, args, chunksize=1, max_workers=4)
+    args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size, i) for i in range(len(emg))]
+    chunk_size = len(args) // (multiprocessing.cpu_count() // 2)
+    arg_chunks = [args[i:i + chunk_size] for i in range(0, len(args), chunk_size)]
+    images = []
+    for i in tqdm(range(len(arg_chunks)), desc="Creating Images in Chunks"):
+        images.extend(process_optimized_makeOneImageChunk(arg_chunks[i]))
 
     if turn_on_magnitude:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
-        images_magnitude = process_map(process_optimized_makeOneMagnitudeImage, args, chunksize=1, max_workers=32)
+        chunk_size = len(args) // (multiprocessing.cpu_count() // 2)
+        arg_chunks = [args[i:i + chunk_size] for i in range(0, len(args), chunk_size)]
+        images_magnitude = []
+        for i in tqdm(range(len(arg_chunks)), desc="Creating Magnitude Images in Chunks"):
+            images_magnitude.extend(process_optimized_makeOneMagnitudeImageChunk(arg_chunks[i]))
         images = np.concatenate((images, images_magnitude), axis=2)
     
     if turn_on_cwt:
