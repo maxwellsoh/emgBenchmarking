@@ -80,6 +80,8 @@ parser.add_argument('--exercises', type=list_of_ints, help='List the exercises o
 parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
 # Add argument for full or partial dataset for Ozdemir EMG dataset
 parser.add_argument('--full_dataset_ozdemir', type=utils.str2bool, help='whether or not to use the full dataset for Ozdemir EMG Dataset. Set to False by default.', default=False)
+# Add argument for partial dataset for Ninapro DB2 and DB5
+parser.add_argument('--partial_dataset_ninapro', type=utils.str2bool, help='whether or not to use the partial dataset for Ninapro DB2 and DB5. Set to False by default.', default=False)
 # Add argument for using spectrogram transform
 parser.add_argument('--turn_on_spectrogram', type=utils.str2bool, help='whether or not to use spectrogram transform. Set to False by default.', default=False)
 # Add argument for using cwt
@@ -262,11 +264,17 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
     
-if (exercises):
+if exercises:
     emg = []
     labels = []
 
-    with  multiprocessing.Pool() as pool:
+    if args.partial_dataset_ninapro:
+        if args.dataset == "ninapro-db2":
+            args.exercises = [1]
+        elif args.dataset == "ninapro-db5":
+            args.exercises = [2]
+
+    with multiprocessing.Pool() as pool:
         for exercise in args.exercises:
             emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
             emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
@@ -303,18 +311,29 @@ if (exercises):
         index_to_start_at = 0
         for i in range(len(subject_labels)):
             subject_labels_to_concatenate = [x + index_to_start_at if x != 0 else 0 for x in np.argmax(subject_labels[i], axis=1)]
-            if (args.dataset == "ninapro-db5"):
+            if args.dataset == "ninapro-db5":
                 index_to_start_at = max(subject_labels_to_concatenate)
             labels_set.append(subject_labels_to_concatenate)
+
+        if args.partial_dataset_ninapro:
+            desired_gesture_labels = utils.partial_gesture_indices
         
         # Assuming labels are stored separately and need to be concatenated end-to-end
         concatenated_labels = np.concatenate(labels_set, axis=0) # (TRIAL)
+
+        if args.partial_dataset_ninapro:
+            indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
+            concatenated_labels = concatenated_labels[indices_for_partial_dataset]
+            concatenated_trials = concatenated_trials[indices_for_partial_dataset]
+            # convert labels to indices
+            label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
+            concatenated_labels = [label_to_index[label] for label in concatenated_labels]
         
         numGestures = len(np.unique(concatenated_labels))
-        
+
         # Convert to one hot encoding
-        concatenated_labels = np.eye(numGestures)[concatenated_labels] # (TRIAL, GESTURE)
-        
+        concatenated_labels = np.eye(np.max(concatenated_labels) + 1)[concatenated_labels] # (TRIAL, GESTURE)
+
         # Append the concatenated trials to the new_emg list
         new_emg.append(concatenated_trials)
         new_labels.append(concatenated_labels)
@@ -334,22 +353,21 @@ else: # Not exercises
             labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
             labels = labels_async.get()
 
-    else:
+    else: # Not target_normalize
         #with multiprocessing.pool.ThreadPool() as pool:
         with multiprocessing.Pool() as pool:
-            # TODO: add unlabeled domain adaptation for leave_one_session_out
             if args.leave_one_session_out: # based on 2 sessions for each subject
-                number_of_sessions = 2
+                total_number_of_sessions = 2
                 emg = []
                 labels = []
-                for i in range(1, number_of_sessions+1):
+                for i in range(1, total_number_of_sessions+1):
                     emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
                     emg.extend(emg_async.get())
                     
                     labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
                     labels.extend(labels_async.get())
                 
-            else:
+            else: # Not leave one session out
                 emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
                 emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
                 
@@ -571,6 +589,13 @@ elif args.turn_on_cwt:
     base_foldername_zarr += 'cwt/'
 elif args.turn_on_hht:
     base_foldername_zarr += 'hht/'
+
+if exercises:
+    if args.partial_dataset_ninapro:
+        base_foldername_zarr += 'partial_dataset_ninapro/'
+    else:
+        exercises_numbers_filename = '-'.join(map(str, args.exercises))
+        base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
     
 if args.save_images: 
     if not os.path.exists(base_foldername_zarr):
@@ -672,13 +697,13 @@ else:
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
     elif args.leave_one_session_out:
-        number_of_sessions = 2
-        left_out_subject_last_session_index = (number_of_sessions - 1) * utils.num_subjects + leaveOut-1
-        left_out_subject_first_n_sessions_indices = [i for i in range(number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
+        total_number_of_sessions = 2
+        left_out_subject_last_session_index = (total_number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+        left_out_subject_first_n_sessions_indices = [i for i in range(total_number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
         print("left_out_subject_last_session_index:", left_out_subject_last_session_index)
         print("left_out_subject_first_n_sessions_indices:", left_out_subject_first_n_sessions_indices)
-        X_pretrain = np.concatenate([np.array(data[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-        Y_pretrain = np.concatenate([np.array(labels[i]) for i in range(number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+        X_pretrain = np.concatenate([np.array(data[i]) for i in range(total_number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+        Y_pretrain = np.concatenate([np.array(labels[i]) for i in range(total_number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
         X_finetune = np.concatenate([np.array(data[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
         Y_finetune = np.concatenate([np.array(labels[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
         X_validation = np.array(data[left_out_subject_last_session_index])
@@ -686,16 +711,19 @@ else:
         
         X_train = torch.from_numpy(X_pretrain).to(torch.float16)
         Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
-        X_finetune = torch.from_numpy(X_finetune).to(torch.float16)
-        Y_finetune = torch.from_numpy(Y_finetune).to(torch.float16)
+        X_train_finetuning = torch.from_numpy(X_finetune).to(torch.float16)
+        Y_train_finetuning = torch.from_numpy(Y_finetune).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+
+        del X_finetune
+        del Y_finetune
         
-        if args.turn_on_unlabeled_domain_adaptation:
+        if args.turn_on_unlabeled_domain_adaptation: # while in leave one session out
             if args.proportion_unlabeled_data>0:
                 proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
                 X_train_labeled_leftout_subject, X_train_unlabeled_leftout_subject, Y_train_labeled_leftout_subject, Y_train_unlabeled_leftout_subject = tts.train_test_split(
-                    X_finetune, Y_finetune, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
+                    X_train_finetuning, Y_train_finetuning, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
                 X_train_finetuning = torch.tensor(X_train_labeled_leftout_subject)
                 Y_train_finetuning = torch.tensor(Y_train_labeled_leftout_subject)
                 X_train_unlabeled = torch.tensor(X_train_unlabeled_leftout_subject)
@@ -706,8 +734,8 @@ else:
                 print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
                 print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
             else: 
-                X_train_finetuning = torch.tensor(X_finetune)
-                Y_train_finetuning = torch.tensor(Y_finetune)
+                X_train_finetuning = torch.tensor(X_train_finetuning)
+                Y_train_finetuning = torch.tensor(Y_train_finetuning)
                 X_train_unlabeled = None
                 Y_train_unlabeled = None
                 
@@ -718,16 +746,16 @@ else:
                 X_train = torch.concat((X_train, X_train_finetuning), axis=0)
                 Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
                 
-        else:
+        else: 
             if not args.pretrain_and_finetune:
-                X_train = torch.concat((X_train, X_finetune), axis=0)
-                Y_train = torch.concat((Y_train, Y_finetune), axis=0)
+                X_train = torch.concat((X_train, X_train_finetuning), axis=0)
+                Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
             
         print("Size of X_train:     ", X_train.size())
         print("Size of Y_train:     ", Y_train.size())
         if not args.turn_on_unlabeled_domain_adaptation:
-            print("Size of X_finetune:  ", X_finetune.size())
-            print("Size of Y_finetune:  ", Y_finetune.size())
+            print("Size of X_train_finetuning:  ", X_train_finetuning.size())
+            print("Size of Y_train_finetuning:  ", Y_train_finetuning.size())
         print("Size of X_validation:", X_validation.size())
         print("Size of Y_validation:", Y_validation.size())
         
@@ -765,7 +793,7 @@ else:
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
 
-        if args.transfer_learning:
+        if args.transfer_learning: # while in leave one subject out
             proportion_to_keep = args.proportion_transfer_learning
             proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
             
@@ -792,9 +820,13 @@ else:
 
             if not args.turn_on_unlabeled_domain_adaptation:
                 # Append the partial validation data to the training data
-                X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
-                Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
-            else:
+                if not args.pretrain_and_finetune:
+                    X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
+                    Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
+                else:
+                    X_train_finetuning = torch.tensor(X_train_partial_leftout_subject)
+                    Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
+            else: # unlabeled domain adaptation
                 if proportion_unlabeled_of_proportion_to_keep>0:
                     if not args.pretrain_and_finetune:
                         X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
@@ -1062,6 +1094,9 @@ if args.dataset == "OzdemirEMG":
         wandb_runname += '_full-dataset'
     else:
         wandb_runname += '_partial-dataset'
+if args.dataset == "ninapro-db2" or args.dataset == "ninapro-db5":
+    if args.partial_dataset_ninapro:
+        wandb_runname += '_partial-dataset'
 if args.turn_on_spectrogram:
     wandb_runname += '_spectrogram'
 if args.turn_on_cwt:
@@ -1267,8 +1302,8 @@ else:
 
     if args.pretrain_and_finetune:
         num_epochs = args.finetuning_epochs
-        # train more on X_finetune and Y_finetune
-        finetune_loader = DataLoader(list(zip(X_finetune, Y_finetune)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+        # train more on fine tuning dataset
+        finetune_loader = DataLoader(list(zip(X_train_finetuning, Y_train_finetuning)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
         for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
             model.train()
             train_acc = 0.0
