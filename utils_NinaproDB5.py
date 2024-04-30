@@ -14,6 +14,7 @@ from sklearn.metrics import confusion_matrix
 import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
 
 fs = 200 #Hz
 wLen = 250 # ms
@@ -38,6 +39,10 @@ gesture_labels[3] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook
                     'Ring Grasp', 'Prismatic Four Fingers Grasp', 'Stick Grasp', 'Writing Tripod Grasp', 'Power Sphere Grasp', 'Three Finger Sphere Grasp', 'Precision Sphere Grasp',
                     'Tripod Grasp', 'Prismatic Pinch Grasp', 'Tip Pinch Grasp', 'Quadrupod Grasp', 'Lateral Grasp', 'Parallel Extension Grasp', 'Extension Type Grasp', 'Power Disk Grasp',
                     'Open A Bottle With A Tripod Grasp', 'Turn A Screw', 'Cut Something'] # End exercise C
+
+partial_gesture_labels = ['Rest', 'Finger Abduction', 'Fist', 'Finger Adduction', 'Middle Axis Supination', 
+                          'Middle Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 'Ulnar Deviation']
+partial_gesture_indices = [0] + [gesture_labels[2].index(g) + len(gesture_labels['Rest']) for g in partial_gesture_labels[1:]] # 0 is for rest 
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -199,7 +204,29 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None):
+def process_chunk(data_chunk):
+    return np.apply_along_axis(calculate_rms, -1, data_chunk)
+
+def process_optimized_makeOneImage(args_tuple):
+    return optimized_makeOneImage(*args_tuple)
+
+def process_optimized_makeOneMagnitudeImage(args_tuple):
+    return optimized_makeOneMagnitudeImage(*args_tuple)
+
+def process_optimized_makeOneImageChunk(args_tuple):
+    images = [None] * len(args_tuple)
+    for i in range(len(args_tuple)):
+        images[i] = optimized_makeOneImage(*args_tuple[i])
+    return images
+
+def process_optimized_makeOneMagnitudeImageChunk(args_tuple):
+    images = [None] * len(args_tuple)
+    for i in range(len(args_tuple)):
+        images[i] = optimized_makeOneMagnitudeImage(*args_tuple[i])
+    return images
+
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None,
+              turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
 
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
@@ -216,23 +243,55 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         width = rms_windows
         emg = emg.reshape(len(emg), length*width)
 
+    # Use RMS preprocessing
+    if turn_on_rms:
+        emg = emg.reshape(len(emg), length, width)
+        # Reshape data for RMS calculation: (SAMPLES, 16, 5, 10)
+        emg = emg.reshape(len(emg), length, rms_windows, width // rms_windows)
+        
+        num_splits = multiprocessing.cpu_count() // 2
+        data_chunks = np.array_split(emg, num_splits)
+        
+        emg_rms = process_map(process_chunk, data_chunks, chunksize=1, max_workers=num_splits, desc="Calculating RMS")
+        # Apply RMS calculation along the last axis (axis=-1)
+        # emg_rms = np.apply_along_axis(calculate_rms, -1, emg)
+        emg = np.concatenate(emg_rms)  # Resulting shape will be (SAMPLES, 16, 5)
+        width = rms_windows
+        emg = emg.reshape(len(emg), length*width)
+        
+        del emg_rms
+        del data_chunks
+
     # Parameters that don't change can be set once
     resize_length_factor = 6
     if turn_on_magnitude:
         resize_length_factor = 3
     native_resnet_size = 224
 
-    with multiprocessing.Pool(processes=5) as pool:
-        args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-        images_async = pool.starmap_async(optimized_makeOneImage, args)
-        images = images_async.get()
+    args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+    chunk_size = len(args) // (multiprocessing.cpu_count() // 2)
+    arg_chunks = [args[i:i + chunk_size] for i in range(0, len(args), chunk_size)]
+    images = []
+    for i in tqdm(range(len(arg_chunks)), desc="Creating Images in Chunks"):
+        images.extend(process_optimized_makeOneImageChunk(arg_chunks[i]))
 
     if turn_on_magnitude:
-        with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
-            images_magnitude = images_async.get()
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
+        chunk_size = len(args) // (multiprocessing.cpu_count() // 2)
+        arg_chunks = [args[i:i + chunk_size] for i in range(0, len(args), chunk_size)]
+        images_magnitude = []
+        for i in tqdm(range(len(arg_chunks)), desc="Creating Magnitude Images in Chunks"):
+            images_magnitude.extend(process_optimized_makeOneMagnitudeImageChunk(arg_chunks[i]))
         images = np.concatenate((images, images_magnitude), axis=2)
+
+    if turn_on_cwt:
+        raise NotImplementedError("CWT is not implemented yet.")
+    
+    if turn_on_spectrogram:
+        raise NotImplementedError("Spectrogram is not implemented yet.")
+    
+    if turn_on_hht:
+        raise NotImplementedError("HHT is not implemented yet.")
     
     return images
 
