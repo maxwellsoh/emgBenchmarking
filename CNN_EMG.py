@@ -121,7 +121,7 @@ parser.add_argument('--one_subject_for_training_set_for_session_test', type=util
 # Add argument for pretraining on all data from other subjects, and fine-tuning on some data from left out subject
 parser.add_argument('--pretrain_and_finetune', type=utils.str2bool, help='whether or not to pretrain on all data from other subjects, and fine-tune on some data from left out subject. Set to False by default.', default=False)
 # Add argument for finetuning epochs
-parser.add_argument('--finetuning_epochs', type=int, help='number of epochs to fine-tune for. Set to 5 by default.', default=25)
+parser.add_argument('--finetuning_epochs', type=int, help='number of epochs to fine-tune for. Set to 25 by default.', default=25)
 # Add argument for whether or not to turn on unlabeled domain adaptation
 parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool, help='whether or not to turn on unlabeled domain adaptation methods. Set to False by default.', default=False)
 # Add argument to specify algorithm to use for unlabeled domain adaptation
@@ -845,6 +845,8 @@ model_name = args.model
 
 if args.model == "vit_tiny_patch2_32":
     pretrain_path = "https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_tiny_patch2_32_mlp_im_1k_32.pth"
+elif args.model == "resnet50":
+    pretrain_path = "https://download.pytorch.org/models/resnet50-11ad3fa6.pth"
 else:
     pretrain_path = f"https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/{model_name}_mlp_im_1k_224.pth"
 
@@ -920,7 +922,7 @@ if args.turn_on_unlabeled_domain_adaptation:
                 raise TypeError("Unsupported image type")
 
     
-    semilearn_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
+    semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
     
     labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
     if proportion_unlabeled_of_proportion_to_keep>0:
