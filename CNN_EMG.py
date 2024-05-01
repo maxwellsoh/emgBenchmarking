@@ -123,7 +123,7 @@ parser.add_argument('--finetuning_epochs', type=int, help='number of epochs to f
 # Add argument for whether or not to turn on unlabeled domain adaptation
 parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool, help='whether or not to turn on unlabeled domain adaptation methods. Set to False by default.', default=False)
 # Add argument to specify algorithm to use for unlabeled domain adaptation
-parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "flexmatch" by default.', default="flexmatch")
+parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "fixmatch" by default.', default="fixmatch")
 # Add argument to specify proportion from left-out-subject to keep as unlabeled data
 parser.add_argument('--proportion_unlabeled_data', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75)
 # Add argument to specify batch size
@@ -251,53 +251,6 @@ print(f"The value of --batch_size is {args.batch_size}")
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
 formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
-
-wandb_runname = 'CNN_seed-'+str(args.seed)
-if args.turn_on_kfold:
-    wandb_runname += '_k-fold-'+str(args.kfold)+'_fold-index-'+str(args.fold_index)
-if args.turn_on_cyclical_lr:
-    wandb_runname += '_cyclical-lr'
-if args.turn_on_cosine_annealing: 
-    wandb_runname += '_cosine-annealing'
-if args.turn_on_rms:
-    wandb_runname += '_rms-windows-'+str(args.rms_input_windowsize)
-if args.turn_on_magnitude:  
-    wandb_runname += '_magnitude'
-if args.leftout_subject != 0:
-    wandb_runname += '_LOSO-'+str(args.leftout_subject)
-wandb_runname += '_' + args.model
-if (exercises):
-    wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
-if args.dataset == "OzdemirEMG":
-    if args.full_dataset_ozdemir:
-        wandb_runname += '_full-dataset'
-    else:
-        wandb_runname += '_partial-dataset'
-if args.turn_on_spectrogram:
-    wandb_runname += '_spectrogram'
-if args.turn_on_cwt:
-    wandb_runname += '_cwt'
-if args.turn_on_hht:
-    wandb_runname += '_hht'
-if args.learning_rate != 1e-4:
-    wandb_runname += '_lr-'+str(args.learning_rate)
-if args.leave_n_subjects_out_randomly != 0:
-    wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
-if args.turn_off_scaler_normalization:
-    wandb_runname += '_no-scaler-normalization'
-if args.target_normalize:
-    wandb_runname += '_target-normalize'
-
-if (int(args.leftout_subject) == 0):
-    if args.turn_on_kfold:
-        project_name += '_k-fold-'+str(args.kfold)
-    else:
-        project_name += '_heldout'
-else:
-    project_name += '_LOSO'
-project_name += args.project_name_suffix
-
-run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
 
 print("------------------------------------------------------------------------------------------------------------------------")
 print("Starting run at", formatted_datetime)
@@ -1144,7 +1097,7 @@ if args.turn_on_magnitude:
 if args.leftout_subject != 0:
     wandb_runname += '_LOSO-'+str(args.leftout_subject)
 wandb_runname += '_' + model_name
-if (exercises):
+if (exercises and not args.partial_dataset_ninapro):
     wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
 if args.dataset == "OzdemirEMG":
     if args.full_dataset_ozdemir:
