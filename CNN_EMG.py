@@ -905,9 +905,9 @@ if args.turn_on_unlabeled_domain_adaptation:
 
         # optimization configs
         'epoch': args.epochs,  # set to 100
-        'num_train_iter': args.epochs * (X_train.shape[0] // args.batch_size),  # set to 102400
-        'num_eval_iter': X_train.shape[0] // args.batch_size,   # set to 1024
-        'num_log_iter': X_train.shape[0] // args.batch_size,    # set to 256
+        'num_train_iter': args.epochs * (X_train.shape[0] // args.batch_size),
+        'num_eval_iter': X_train.shape[0] // args.batch_size,  
+        'num_log_iter': X_train.shape[0] // args.batch_size,
         'optim': 'AdamW',   # AdamW optimizer
         'lr': args.learning_rate,  # Learning rate
         'layer_decay': 0.5,  # Layer-wise decay learning rate  
@@ -1155,6 +1155,23 @@ elif args.leave_one_subject_out:
 elif args.leave_one_session_out:
     project_name += '_leave-one-session-out'
     
+def freezeAllLayersButLastLayer(model):
+    # Convert model children to a list
+    children = list(model.children())
+
+    # Freeze parameters in all children except the last one
+    for child in children[:-1]:
+        for param in child.parameters():
+            param.requires_grad = False
+
+    # Unfreeze the last layer
+    for param in children[-1].parameters():
+        param.requires_grad = True
+
+def unfreezeAllLayers(model):
+    for name, param in model.named_parameters():
+        param.requires_grad = True
+    return model
 
 project_name += args.project_name_suffix
 
@@ -1220,14 +1237,17 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.scheduler = None
     
     semilearn_algorithm.train()
+
+    def ceildiv(a, b):
+        return -(a // -b)
     
     if args.pretrain_and_finetune:
         run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
         wandb.config.lr = args.learning_rate
         
-        semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + args.finetuning_epochs * (X_train_finetuning.shape[0] // args.batch_size)
-        semilearn_config_dict['num_eval_iter'] = X_train_finetuning.shape[0] // args.batch_size
-        semilearn_config_dict['num_log_iter'] = X_train_finetuning.shape[0] // args.batch_size
+        semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + args.finetuning_epochs * ceildiv(X_train_finetuning.shape[0], args.batch_size)
+        semilearn_config_dict['num_eval_iter'] = ceildiv(X_train_finetuning.shape[0], args.batch_size)
+        semilearn_config_dict['num_log_iter'] = ceildiv(X_train_finetuning.shape[0], args.batch_size)
         semilearn_config_dict['algorithm'] = args.unlabeled_algorithm
         
         semilearn_config = get_config(semilearn_config_dict)
@@ -1242,13 +1262,10 @@ if args.turn_on_unlabeled_domain_adaptation:
         
         if proportion_unlabeled_of_proportion_to_keep>0:
             semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
-            
+
         semilearn_algorithm.loader_dict['eval'] = validation_loader
         semilearn_algorithm.train()
-    # trainer = Trainer(semilearn_config, semilearn_algorithm)
-    # trainer.fit(train_labeled_loader, train_unlabeled_loader, validation_loader)
-    # trainer.evaluate(validation_loader)
-    
+
 else: 
     for epoch in tqdm(range(num_epochs), desc="Epoch"):
         model.train()
