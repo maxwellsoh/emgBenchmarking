@@ -961,8 +961,10 @@ if args.turn_on_unlabeled_domain_adaptation:
             else:
                 raise TypeError("Unsupported image type")
 
-    
-    semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+    if args.model == 'vit_tiny_patch2_32':
+        semilearn_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
+    else: 
+        semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
     
     labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
     if proportion_unlabeled_of_proportion_to_keep>0:
