@@ -1056,10 +1056,15 @@ if not args.turn_on_unlabeled_domain_adaptation:
 
     batch_size = args.batch_size
 
-    train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
-    val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    if args.model == 'vit_tiny_patch2_32':
+        resize_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
+    else:
+        resize_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+
+    train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True, transform=resize_transform)
+    val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True, transform=resize_transform)
     if (args.held_out_test):
-        test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+        test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True, transform=resize_transform)
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
