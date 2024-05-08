@@ -559,6 +559,17 @@ else: # Not leave n subjects out randomly
         
 data = []
 
+class ToNumpy:
+        """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
+        def __call__(self, pic):
+            if isinstance(pic, Image.Image):
+                return np.array(pic)
+            elif isinstance(pic, torch.Tensor):
+                # Make sure the tensor is in CPU and convert it
+                return np.float32(pic.cpu().detach().numpy())
+            else:
+                raise TypeError("Unsupported image type")
+
 # add tqdm to show progress bar
 print("Width of EMG data: ", width)
 print("Length of EMG data: ", length)
@@ -949,17 +960,6 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
     semilearn_algorithm.model = send_model_cuda(semilearn_config, semilearn_algorithm.model)
     semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
-    
-    class ToNumpy:
-        """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
-        def __call__(self, pic):
-            if isinstance(pic, Image.Image):
-                return np.array(pic)
-            elif isinstance(pic, torch.Tensor):
-                # Make sure the tensor is in CPU and convert it
-                return np.float32(pic.cpu().detach().numpy())
-            else:
-                raise TypeError("Unsupported image type")
 
     if args.model == 'vit_tiny_patch2_32':
         semilearn_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
