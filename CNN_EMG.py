@@ -662,10 +662,6 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
             print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
         data += [images]
 
-print("------------------------------------------------------------------------------------------------------------------------")
-print("NOTE: The width 224 is natively used in Resnet50, height is currently integer multiples of number of electrode channels ")
-print("------------------------------------------------------------------------------------------------------------------------")
-
 if args.leave_n_subjects_out_randomly != 0:
     
     # Instead of the below code, leave n subjects out randomly to be used as the 
@@ -1365,7 +1361,8 @@ else:
     if args.pretrain_and_finetune:
         num_epochs = args.finetuning_epochs
         # train more on fine tuning dataset
-        finetune_loader = DataLoader(list(zip(X_train_finetuning, Y_train_finetuning)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+        finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
+        finetune_loader = DataLoader(finetune_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
         for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
             model.train()
             train_acc = 0.0
