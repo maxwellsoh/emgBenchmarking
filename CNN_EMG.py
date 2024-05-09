@@ -940,7 +940,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         'ulb_loss_ratio': 1.0,
 
         # device configs
-        'gpu': 0,
+        'gpu': args.gpu,
         'world_size': 1,
         'distributed': False,
     }
