@@ -32,6 +32,7 @@ import datetime
 from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 from semilearn.core.utils import send_model_cuda
 from PIL import Image
+from torch.utils.data import Dataset
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -123,7 +124,7 @@ parser.add_argument('--finetuning_epochs', type=int, help='number of epochs to f
 # Add argument for whether or not to turn on unlabeled domain adaptation
 parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool, help='whether or not to turn on unlabeled domain adaptation methods. Set to False by default.', default=False)
 # Add argument to specify algorithm to use for unlabeled domain adaptation
-parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "flexmatch" by default.', default="flexmatch")
+parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "fixmatch" by default.', default="fixmatch")
 # Add argument to specify proportion from left-out-subject to keep as unlabeled data
 parser.add_argument('--proportion_unlabeled_data', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75)
 # Add argument to specify batch size
@@ -251,53 +252,6 @@ print(f"The value of --batch_size is {args.batch_size}")
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
 formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
-
-wandb_runname = 'CNN_seed-'+str(args.seed)
-if args.turn_on_kfold:
-    wandb_runname += '_k-fold-'+str(args.kfold)+'_fold-index-'+str(args.fold_index)
-if args.turn_on_cyclical_lr:
-    wandb_runname += '_cyclical-lr'
-if args.turn_on_cosine_annealing: 
-    wandb_runname += '_cosine-annealing'
-if args.turn_on_rms:
-    wandb_runname += '_rms-windows-'+str(args.rms_input_windowsize)
-if args.turn_on_magnitude:  
-    wandb_runname += '_magnitude'
-if args.leftout_subject != 0:
-    wandb_runname += '_LOSO-'+str(args.leftout_subject)
-wandb_runname += '_' + args.model
-if (exercises):
-    wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
-if args.dataset == "OzdemirEMG":
-    if args.full_dataset_ozdemir:
-        wandb_runname += '_full-dataset'
-    else:
-        wandb_runname += '_partial-dataset'
-if args.turn_on_spectrogram:
-    wandb_runname += '_spectrogram'
-if args.turn_on_cwt:
-    wandb_runname += '_cwt'
-if args.turn_on_hht:
-    wandb_runname += '_hht'
-if args.learning_rate != 1e-4:
-    wandb_runname += '_lr-'+str(args.learning_rate)
-if args.leave_n_subjects_out_randomly != 0:
-    wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
-if args.turn_off_scaler_normalization:
-    wandb_runname += '_no-scaler-normalization'
-if args.target_normalize:
-    wandb_runname += '_target-normalize'
-
-if (int(args.leftout_subject) == 0):
-    if args.turn_on_kfold:
-        project_name += '_k-fold-'+str(args.kfold)
-    else:
-        project_name += '_heldout'
-else:
-    project_name += '_LOSO'
-project_name += args.project_name_suffix
-
-run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
 
 print("------------------------------------------------------------------------------------------------------------------------")
 print("Starting run at", formatted_datetime)
@@ -605,6 +559,17 @@ else: # Not leave n subjects out randomly
         scaler = None
         
 data = []
+
+class ToNumpy:
+        """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
+        def __call__(self, pic):
+            if isinstance(pic, Image.Image):
+                return np.array(pic)
+            elif isinstance(pic, torch.Tensor):
+                # Make sure the tensor is in CPU and convert it
+                return np.float32(pic.cpu().detach().numpy())
+            else:
+                raise TypeError("Unsupported image type")
 
 # add tqdm to show progress bar
 print("Width of EMG data: ", width)
@@ -952,9 +917,9 @@ if args.turn_on_unlabeled_domain_adaptation:
 
         # optimization configs
         'epoch': args.epochs,  # set to 100
-        'num_train_iter': args.epochs * (X_train.shape[0] // args.batch_size),  # set to 102400
-        'num_eval_iter': X_train.shape[0] // args.batch_size,   # set to 1024
-        'num_log_iter': X_train.shape[0] // args.batch_size,    # set to 256
+        'num_train_iter': args.epochs * (X_train.shape[0] // args.batch_size),
+        'num_eval_iter': X_train.shape[0] // args.batch_size,  
+        'num_log_iter': X_train.shape[0] // args.batch_size,
         'optim': 'AdamW',   # AdamW optimizer
         'lr': args.learning_rate,  # Learning rate
         'layer_decay': 0.5,  # Layer-wise decay learning rate  
@@ -996,20 +961,11 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
     semilearn_algorithm.model = send_model_cuda(semilearn_config, semilearn_algorithm.model)
     semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
-    
-    class ToNumpy:
-        """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
-        def __call__(self, pic):
-            if isinstance(pic, Image.Image):
-                return np.array(pic)
-            elif isinstance(pic, torch.Tensor):
-                # Make sure the tensor is in CPU and convert it
-                return np.float32(pic.cpu().detach().numpy())
-            else:
-                raise TypeError("Unsupported image type")
 
-    
-    semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+    if args.model == 'vit_tiny_patch2_32':
+        semilearn_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
+    else: 
+        semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
     
     labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
     if proportion_unlabeled_of_proportion_to_keep>0:
@@ -1090,6 +1046,22 @@ else:
         # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
         # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
 
+class CustomDataset(Dataset):
+    def __init__(self, X, Y, transform=None):
+        self.X = X
+        self.Y = Y
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, index):
+        x = self.X[index]
+        y = self.Y[index]
+        if self.transform:
+            x = self.transform(x)
+        return x, y
+
 if not args.turn_on_unlabeled_domain_adaptation:
     num = 0
     for name, param in model.named_parameters():
@@ -1103,10 +1075,18 @@ if not args.turn_on_unlabeled_domain_adaptation:
 
     batch_size = args.batch_size
 
-    train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
-    val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    if args.model == 'vit_tiny_patch2_32':
+        resize_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
+    else:
+        resize_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+
+    train_dataset = CustomDataset(X_train, Y_train, transform=resize_transform)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    val_dataset = CustomDataset(X_validation, Y_validation, transform=resize_transform)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
     if (args.held_out_test):
-        test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+        test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -1144,7 +1124,7 @@ if args.turn_on_magnitude:
 if args.leftout_subject != 0:
     wandb_runname += '_LOSO-'+str(args.leftout_subject)
 wandb_runname += '_' + model_name
-if (exercises):
+if (exercises and not args.partial_dataset_ninapro):
     wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
 if args.dataset == "OzdemirEMG":
     if args.full_dataset_ozdemir:
@@ -1202,6 +1182,23 @@ elif args.leave_one_subject_out:
 elif args.leave_one_session_out:
     project_name += '_leave-one-session-out'
     
+def freezeAllLayersButLastLayer(model):
+    # Convert model children to a list
+    children = list(model.children())
+
+    # Freeze parameters in all children except the last one
+    for child in children[:-1]:
+        for param in child.parameters():
+            param.requires_grad = False
+
+    # Unfreeze the last layer
+    for param in children[-1].parameters():
+        param.requires_grad = True
+
+def unfreezeAllLayers(model):
+    for name, param in model.named_parameters():
+        param.requires_grad = True
+    return model
 
 project_name += args.project_name_suffix
 
@@ -1267,14 +1264,17 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.scheduler = None
     
     semilearn_algorithm.train()
+
+    def ceildiv(a, b):
+        return -(a // -b)
     
     if args.pretrain_and_finetune:
         run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
         wandb.config.lr = args.learning_rate
         
-        semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + args.finetuning_epochs * (X_train_finetuning.shape[0] // args.batch_size)
-        semilearn_config_dict['num_eval_iter'] = X_train_finetuning.shape[0] // args.batch_size
-        semilearn_config_dict['num_log_iter'] = X_train_finetuning.shape[0] // args.batch_size
+        semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + args.finetuning_epochs * ceildiv(X_train_finetuning.shape[0], args.batch_size)
+        semilearn_config_dict['num_eval_iter'] = ceildiv(X_train_finetuning.shape[0], args.batch_size)
+        semilearn_config_dict['num_log_iter'] = ceildiv(X_train_finetuning.shape[0], args.batch_size)
         semilearn_config_dict['algorithm'] = args.unlabeled_algorithm
         
         semilearn_config = get_config(semilearn_config_dict)
@@ -1289,13 +1289,10 @@ if args.turn_on_unlabeled_domain_adaptation:
         
         if proportion_unlabeled_of_proportion_to_keep>0:
             semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
-            
+
         semilearn_algorithm.loader_dict['eval'] = validation_loader
         semilearn_algorithm.train()
-    # trainer = Trainer(semilearn_config, semilearn_algorithm)
-    # trainer.fit(train_labeled_loader, train_unlabeled_loader, validation_loader)
-    # trainer.evaluate(validation_loader)
-    
+
 else: 
     for epoch in tqdm(range(num_epochs), desc="Epoch"):
         model.train()
