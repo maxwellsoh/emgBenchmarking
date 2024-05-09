@@ -32,6 +32,7 @@ import datetime
 from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 from semilearn.core.utils import send_model_cuda
 from PIL import Image
+from torch.utils.data import Dataset
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -559,6 +560,17 @@ else: # Not leave n subjects out randomly
         
 data = []
 
+class ToNumpy:
+        """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
+        def __call__(self, pic):
+            if isinstance(pic, Image.Image):
+                return np.array(pic)
+            elif isinstance(pic, torch.Tensor):
+                # Make sure the tensor is in CPU and convert it
+                return np.float32(pic.cpu().detach().numpy())
+            else:
+                raise TypeError("Unsupported image type")
+
 # add tqdm to show progress bar
 print("Width of EMG data: ", width)
 print("Length of EMG data: ", length)
@@ -949,20 +961,11 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
     semilearn_algorithm.model = send_model_cuda(semilearn_config, semilearn_algorithm.model)
     semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
-    
-    class ToNumpy:
-        """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
-        def __call__(self, pic):
-            if isinstance(pic, Image.Image):
-                return np.array(pic)
-            elif isinstance(pic, torch.Tensor):
-                # Make sure the tensor is in CPU and convert it
-                return np.float32(pic.cpu().detach().numpy())
-            else:
-                raise TypeError("Unsupported image type")
 
-    
-    semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+    if args.model == 'vit_tiny_patch2_32':
+        semilearn_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
+    else: 
+        semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
     
     labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
     if proportion_unlabeled_of_proportion_to_keep>0:
@@ -1043,6 +1046,22 @@ else:
         # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
         # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
 
+class CustomDataset(Dataset):
+    def __init__(self, X, Y, transform=None):
+        self.X = X
+        self.Y = Y
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, index):
+        x = self.X[index]
+        y = self.Y[index]
+        if self.transform:
+            x = self.transform(x)
+        return x, y
+
 if not args.turn_on_unlabeled_domain_adaptation:
     num = 0
     for name, param in model.named_parameters():
@@ -1056,10 +1075,18 @@ if not args.turn_on_unlabeled_domain_adaptation:
 
     batch_size = args.batch_size
 
-    train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
-    val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    if args.model == 'vit_tiny_patch2_32':
+        resize_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
+    else:
+        resize_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+
+    train_dataset = CustomDataset(X_train, Y_train, transform=resize_transform)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    val_dataset = CustomDataset(X_validation, Y_validation, transform=resize_transform)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
     if (args.held_out_test):
-        test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+        test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
