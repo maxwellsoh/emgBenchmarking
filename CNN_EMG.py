@@ -32,6 +32,7 @@ import datetime
 from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 from semilearn.core.utils import send_model_cuda
 from PIL import Image
+from torch.utils.data import Dataset
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -1045,6 +1046,22 @@ else:
         # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
         # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
 
+class CustomDataset(Dataset):
+    def __init__(self, X, Y, transform=None):
+        self.X = X
+        self.Y = Y
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, index):
+        x = self.X[index]
+        y = self.Y[index]
+        if self.transform:
+            x = self.transform(x)
+        return x, y
+
 if not args.turn_on_unlabeled_domain_adaptation:
     num = 0
     for name, param in model.named_parameters():
@@ -1063,10 +1080,13 @@ if not args.turn_on_unlabeled_domain_adaptation:
     else:
         resize_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
 
-    train_loader = DataLoader(list(zip(X_train, Y_train)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True, transform=resize_transform)
-    val_loader = DataLoader(list(zip(X_validation, Y_validation)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True, transform=resize_transform)
+    train_dataset = CustomDataset(X_train, Y_train, transform=resize_transform)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    val_dataset = CustomDataset(X_validation, Y_validation, transform=resize_transform)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
     if (args.held_out_test):
-        test_loader = DataLoader(list(zip(X_test, Y_test)), batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True, transform=resize_transform)
+        test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
