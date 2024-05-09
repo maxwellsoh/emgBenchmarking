@@ -1469,9 +1469,9 @@ else:
     model.eval()
     with torch.no_grad():
         validation_predictions = []
-        for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=batch_size)), desc="Validation Batch Loading"):  # Or some other number that fits in memory
-            batch = batch.to(device).to(torch.float32)
-            outputs = model(batch)
+        for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading"):
+            X_batch = X_batch.to(device).to(torch.float32)
+            outputs = model(X_batch)
             preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
             validation_predictions.extend(preds)
 
@@ -1483,11 +1483,11 @@ else:
     model.eval()
     with torch.no_grad():
         train_predictions = []
-        for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=batch_size)), desc="Training Batch Loading"):  # Or some other number that fits in memory
-            batch = batch.to(device).to(torch.float32)
-            outputs = model(batch)
-            preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-            train_predictions.extend(preds)
+        for X_batch, Y_batch in tqdm(train_loader, desc="Training Batch Loading"):
+            X_batch = X_batch.to(device).to(torch.float32)
+            outputs = model(X_batch)
+            preds = torch.argmax(outputs, dim=1)
+            train_predictions.extend(preds.cpu().detach().numpy())
 
     utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
         
