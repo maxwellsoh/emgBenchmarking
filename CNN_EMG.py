@@ -1484,6 +1484,8 @@ else:
         validation_predictions = []
         for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading"):
             X_batch = X_batch.to(device).to(torch.float32)
+            if isinstance(outputs, dict):
+                    outputs = outputs['logits']
             outputs = model(X_batch)
             if isinstance(outputs, dict):
                 outputs = outputs['logits']
@@ -1500,6 +1502,8 @@ else:
         train_predictions = []
         for X_batch, Y_batch in tqdm(train_loader, desc="Training Batch Loading"):
             X_batch = X_batch.to(device).to(torch.float32)
+            if isinstance(outputs, dict):
+                    outputs = outputs['logits']
             outputs = model(X_batch)
             preds = torch.argmax(outputs, dim=1)
             train_predictions.extend(preds.cpu().detach().numpy())
