@@ -33,6 +33,7 @@ from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorit
 from semilearn.core.utils import send_model_cuda
 from PIL import Image
 from torch.utils.data import Dataset
+import VisualTransformer
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -1033,7 +1034,9 @@ else:
             nn.LogSoftmax(dim=1)
         )
         model.classifier = sequential_layers
-
+    elif args.model == 'vit_tiny_patch2_32':
+        pretrain_path = "https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_tiny_patch2_32_mlp_im_1k_32.pth"
+        model = VisualTransformer.vit_tiny_patch2_32(pretrained=True, pretrained_path=pretrain_path, num_classes=numGestures)
     else: 
         # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
         # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
@@ -1301,6 +1304,8 @@ else:
 
                 optimizer.zero_grad()
                 output = model(X_batch)
+                if isinstance(output, dict):
+                    output = output['logits']
                 loss = criterion(output, Y_batch)
                 loss.backward()
                 optimizer.step()
@@ -1330,6 +1335,8 @@ else:
 
                 #output = model(X_batch).logits
                 output = model(X_batch)
+                if isinstance(output, dict):
+                    output = output['logits']
                 val_loss += criterion(output, Y_batch).item()
                 preds = torch.argmax(output, dim=1)
                 Y_batch_long = torch.argmax(Y_batch, dim=1)
@@ -1374,6 +1381,8 @@ else:
 
                     optimizer.zero_grad()
                     output = model(X_batch)
+                    if isinstance(output, dict):
+                        output = output['logits']
                     loss = criterion(output, Y_batch)
                     loss.backward()
                     optimizer.step()
@@ -1403,6 +1412,8 @@ else:
 
                     #output = model(X_batch).logits
                     output = model(X_batch)
+                    if isinstance(output, dict):
+                        output = output['logits']
                     val_loss += criterion(output, Y_batch).item()
                     preds = torch.argmax(output, dim=1)
                     Y_batch_long = torch.argmax(Y_batch, dim=1)
@@ -1441,6 +1452,8 @@ else:
                 Y_batch = Y_batch.to(device).to(torch.float32)
 
                 output = model(X_batch)
+                if isinstance(output, dict):
+                    output = output['logits']
                 test_loss += criterion(output, Y_batch).item()
 
                 test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
@@ -1472,6 +1485,8 @@ else:
         for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading"):
             X_batch = X_batch.to(device).to(torch.float32)
             outputs = model(X_batch)
+            if isinstance(outputs, dict):
+                outputs = outputs['logits']
             preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
             validation_predictions.extend(preds)
 
