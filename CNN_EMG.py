@@ -283,7 +283,7 @@ if exercises:
         elif args.dataset == "ninapro-db5":
             args.exercises = [2]
 
-    with multiprocessing.Pool() as pool:
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
             emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
             emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
@@ -353,7 +353,7 @@ if exercises:
 else: # Not exercises
     if (args.target_normalize):
         mins, maxes = utils.getExtrema(args.leftout_subject + 1)
-        with multiprocessing.Pool() as pool:
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out:
                 NotImplementedError("leave-one-session-out not implemented with target_normalize yet")
             emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
@@ -363,7 +363,7 @@ else: # Not exercises
             labels = labels_async.get()
 
     else: # Not target_normalize
-        with multiprocessing.Pool() as pool:
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out: # based on 2 sessions for each subject
                 total_number_of_sessions = 2
                 emg = []
@@ -972,12 +972,12 @@ if args.turn_on_unlabeled_domain_adaptation:
         finetune_dataset = BasicDataset(semilearn_config, X_train_finetuning, torch.argmax(Y_train_finetuning, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
     validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
 
-    train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, semilearn_config.batch_size, num_workers=32)
+    train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, semilearn_config.batch_size, num_workers=multiprocessing.cpu_count()//8)
     if proportion_unlabeled_of_proportion_to_keep>0:
-        train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, semilearn_config.batch_size, num_workers=32)
+        train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, semilearn_config.batch_size, num_workers=multiprocessing.cpu_count()//8)
     if args.pretrain_and_finetune:
-        train_finetuning_loader = get_data_loader(semilearn_config, finetune_dataset, semilearn_config.batch_size, num_workers=32)
-    validation_loader = get_data_loader(semilearn_config, validation_dataset, semilearn_config.eval_batch_size, num_workers=32)
+        train_finetuning_loader = get_data_loader(semilearn_config, finetune_dataset, semilearn_config.batch_size, num_workers=multiprocessing.cpu_count()//8)
+    validation_loader = get_data_loader(semilearn_config, validation_dataset, semilearn_config.eval_batch_size, num_workers=multiprocessing.cpu_count()//8)
 
 else:
     if args.model == 'resnet50_custom':
@@ -1080,12 +1080,12 @@ if not args.turn_on_unlabeled_domain_adaptation:
         resize_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
 
     train_dataset = CustomDataset(X_train, Y_train, transform=resize_transform)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
     val_dataset = CustomDataset(X_validation, Y_validation, transform=resize_transform)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
     if (args.held_out_test):
         test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -1369,7 +1369,7 @@ else:
         num_epochs = args.finetuning_epochs
         # train more on fine tuning dataset
         finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
-        finetune_loader = DataLoader(finetune_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+        finetune_loader = DataLoader(finetune_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
         for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
             model.train()
             train_acc = 0.0
