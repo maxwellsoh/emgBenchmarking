@@ -750,18 +750,18 @@ else:
                     X_train_finetuning, Y_train_finetuning, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
                 X_train_finetuning = torch.tensor(X_train_labeled_leftout_subject)
                 Y_train_finetuning = torch.tensor(Y_train_labeled_leftout_subject)
-                X_train_unlabeled = torch.tensor(X_train_unlabeled_leftout_subject)
-                Y_train_unlabeled = torch.tensor(Y_train_unlabeled_leftout_subject)
+                X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_leftout_subject)
+                Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_leftout_subject)
                 
                 print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
                 print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
-                print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
-                print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
+                print("Size of X_train_finetuning_unlabeled:     ", X_train_finetuning_unlabeled.shape)
+                print("Size of Y_train_finetuning_unlabeled:     ", Y_train_finetuning_unlabeled.shape)
             else: 
                 X_train_finetuning = torch.tensor(X_train_finetuning)
                 Y_train_finetuning = torch.tensor(Y_train_finetuning)
-                X_train_unlabeled = None
-                Y_train_unlabeled = None
+                X_train_finetuning_unlabeled = None
+                Y_train_finetuning_unlabeled = None
                 
                 print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
                 print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
@@ -855,13 +855,13 @@ else:
                     if not args.pretrain_and_finetune:
                         X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
                         Y_train = torch.tensor(np.concatenate((Y_train, Y_train_labeled_partial_leftout_subject), axis=0))
-                        X_train_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
-                        Y_train_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                        X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
+                        Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
                     else:
                         X_train_finetuning = torch.tensor(X_train_labeled_partial_leftout_subject)
                         Y_train_finetuning = torch.tensor(Y_train_labeled_partial_leftout_subject)
-                        X_train_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
-                        Y_train_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                        X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
+                        Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
                         
                 else:
                     if not args.pretrain_and_finetune:
@@ -885,8 +885,8 @@ else:
         print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
         
         if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep>0:
-            print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
-            print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
+            print("Size of X_train_finetuning_unlabeled:     ", X_train_finetuning_unlabeled.shape)
+            print("Size of Y_train_finetuning_unlabeled:     ", Y_train_finetuning_unlabeled.shape)
             
         if args.pretrain_and_finetune:
             print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
