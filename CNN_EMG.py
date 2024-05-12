@@ -109,7 +109,7 @@ parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some d
 # Add argument for cross validation for time series
 parser.add_argument('--cross_validation_for_time_series', type=utils.str2bool, help='whether or not to use cross validation for time series. Set to False by default.', default=False)
 # Add argument for proportion of left-out-subject data to use for transfer learning
-parser.add_argument('--proportion_transfer_learning', type=float, help='proportion of left-out-subject data to use for transfer learning. Set to 0.25 by default.', default=0.25)
+parser.add_argument('--proportion_transfer_learning_from_leftout_subject', type=float, help='proportion of left-out-subject data to use for transfer learning. Set to 0.25 by default.', default=0.25)
 # Add argument for amount for reducing number of data to generate for transfer learning
 parser.add_argument('--reduce_data_for_transfer_learning', type=int, help='amount for reducing number of data to generate for transfer learning. Set to 1 by default.', default=1)
 # Add argument for whether to do leave-one-session-out
@@ -127,9 +127,11 @@ parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool
 # Add argument to specify algorithm to use for unlabeled domain adaptation
 parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "fixmatch" by default.', default="fixmatch")
 # Add argument to specify proportion from left-out-subject to keep as unlabeled data
-parser.add_argument('--proportion_unlabeled_data', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75)
+parser.add_argument('--proportion_unlabeled_data_from_leftout_subject', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75)
 # Add argument to specify batch size
 parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by default.', default=64)
+# Add argument for whether to use unlabeled data for subjects used for training as well
+parser.add_argument('--proportion_unlabeled_data_from_training_subjects', type=float, help='proportion of data from training subjects to use as unlabeled data. Set to 0.0 by default.', default=0.0)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -236,7 +238,7 @@ print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_o
 print(f"The value of --target_normalize is {args.target_normalize}")
 print(f"The value of --transfer_learning is {args.transfer_learning}")
 print(f"The value of --cross_validation_for_time_series is {args.cross_validation_for_time_series}")
-print(f"The value of --proportion_transfer_learning is {args.proportion_transfer_learning}")
+print(f"The value of --proportion_transfer_learning_from_leftout_subject is {args.proportion_transfer_learning_from_leftout_subject}")
 print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
 print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
 print(f"The value of --held_out_test is {args.held_out_test}")
@@ -246,10 +248,12 @@ print(f"The value of --finetuning_epochs is {args.finetuning_epochs}")
 
 print(f"The value of --turn_on_unlabeled_domain_adaptation is {args.turn_on_unlabeled_domain_adaptation}")
 print(f"The value of --unlabeled_algorithm is {args.unlabeled_algorithm}")
-print(f"The value of --proportion_unlabeled_data is {args.proportion_unlabeled_data}")
+print(f"The value of --proportion_unlabeled_data_from_leftout_subject is {args.proportion_unlabeled_data_from_leftout_subject}")
 
 print(f"The value of --batch_size is {args.batch_size}")
-    
+
+print(f"The value of --proportion_unlabeled_data_from_training_subjects is {args.proportion_unlabeled_data_from_training_subjects}")
+
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
 formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
@@ -737,10 +741,11 @@ else:
         del Y_finetune
         
         if args.turn_on_unlabeled_domain_adaptation: # while in leave one session out
-            proportion_to_keep = args.proportion_transfer_learning
-            proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
-            if args.proportion_unlabeled_data>0:
-                proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
+            proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
+            proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data_from_leftout_subject
+            proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
+            if args.proportion_unlabeled_data_from_leftout_subject>0:
+                proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data_from_leftout_subject
                 X_train_labeled_leftout_subject, X_train_unlabeled_leftout_subject, Y_train_labeled_leftout_subject, Y_train_unlabeled_leftout_subject = tts.train_test_split(
                     X_train_finetuning, Y_train_finetuning, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
                 X_train_finetuning = torch.tensor(X_train_labeled_leftout_subject)
@@ -813,16 +818,16 @@ else:
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
 
         if args.transfer_learning: # while in leave one subject out
-            proportion_to_keep = args.proportion_transfer_learning
-            proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
+            proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
+            proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data_from_leftout_subject
             
             if args.cross_validation_for_time_series:
                 X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
-                    X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=False)
+                    X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=Y_validation, random_state=args.seed, shuffle=False)
             else:
                 # Split the validation data into train and validation subsets
                 X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
-                    X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=True)
+                    X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=Y_validation, random_state=args.seed, shuffle=True)
                 
             if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep>0:
                 if args.cross_validation_for_time_series:
@@ -952,7 +957,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         'gpu': args.gpu,
         'world_size': 1,
         'distributed': False,
-    }
+    } 
     
     semilearn_config = get_config(semilearn_config_dict)
     semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
@@ -1151,7 +1156,7 @@ if args.load_few_images:
     wandb_runname += '_load-few-images'
 if args.transfer_learning:
     wandb_runname += '_transfer-learning'
-    wandb_runname += '-proportion-' + str(args.proportion_transfer_learning)
+    wandb_runname += '-proportion-' + str(args.proportion_transfer_learning_from_leftout_subject)
 if args.cross_validation_for_time_series:   
     wandb_runname += '_cross-validation-for-time-series'
 if args.reduce_data_for_transfer_learning != 1:
@@ -1169,7 +1174,7 @@ if args.pretrain_and_finetune:
 if args.turn_on_unlabeled_domain_adaptation:
     wandb_runname += '_unlabeled-adapt'
     wandb_runname += '-algo-' + args.unlabeled_algorithm
-    wandb_runname += '-proportion-unlabeled-' + str(args.proportion_unlabeled_data)
+    wandb_runname += '-proportion-unlabeled-leftout' + str(args.proportion_unlabeled_data_from_leftout_subject)
 
 if (args.held_out_test):
     if args.turn_on_kfold:
