@@ -33,6 +33,7 @@ from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorit
 from semilearn.core.utils import send_model_cuda
 from PIL import Image
 from torch.utils.data import Dataset
+import VisualTransformer
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -282,7 +283,7 @@ if exercises:
         elif args.dataset == "ninapro-db5":
             args.exercises = [2]
 
-    with multiprocessing.Pool() as pool:
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
             emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
             emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
@@ -352,7 +353,7 @@ if exercises:
 else: # Not exercises
     if (args.target_normalize):
         mins, maxes = utils.getExtrema(args.leftout_subject + 1)
-        with multiprocessing.Pool() as pool:
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out:
                 NotImplementedError("leave-one-session-out not implemented with target_normalize yet")
             emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
@@ -362,7 +363,7 @@ else: # Not exercises
             labels = labels_async.get()
 
     else: # Not target_normalize
-        with multiprocessing.Pool() as pool:
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out: # based on 2 sessions for each subject
                 total_number_of_sessions = 2
                 emg = []
@@ -662,10 +663,6 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
             print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
         data += [images]
 
-print("------------------------------------------------------------------------------------------------------------------------")
-print("NOTE: The width 224 is natively used in Resnet50, height is currently integer multiples of number of electrode channels ")
-print("------------------------------------------------------------------------------------------------------------------------")
-
 if args.leave_n_subjects_out_randomly != 0:
     
     # Instead of the below code, leave n subjects out randomly to be used as the 
@@ -952,7 +949,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         'ulb_loss_ratio': 1.0,
 
         # device configs
-        'gpu': 0,
+        'gpu': args.gpu,
         'world_size': 1,
         'distributed': False,
     }
@@ -975,12 +972,12 @@ if args.turn_on_unlabeled_domain_adaptation:
         finetune_dataset = BasicDataset(semilearn_config, X_train_finetuning, torch.argmax(Y_train_finetuning, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
     validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
 
-    train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, semilearn_config.batch_size, num_workers=32)
+    train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, semilearn_config.batch_size, num_workers=multiprocessing.cpu_count()//8)
     if proportion_unlabeled_of_proportion_to_keep>0:
-        train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, semilearn_config.batch_size, num_workers=32)
+        train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, semilearn_config.batch_size, num_workers=multiprocessing.cpu_count()//8)
     if args.pretrain_and_finetune:
-        train_finetuning_loader = get_data_loader(semilearn_config, finetune_dataset, semilearn_config.batch_size, num_workers=32)
-    validation_loader = get_data_loader(semilearn_config, validation_dataset, semilearn_config.eval_batch_size, num_workers=32)
+        train_finetuning_loader = get_data_loader(semilearn_config, finetune_dataset, semilearn_config.batch_size, num_workers=multiprocessing.cpu_count()//8)
+    validation_loader = get_data_loader(semilearn_config, validation_dataset, semilearn_config.eval_batch_size, num_workers=multiprocessing.cpu_count()//8)
 
 else:
     if args.model == 'resnet50_custom':
@@ -1037,7 +1034,9 @@ else:
             nn.LogSoftmax(dim=1)
         )
         model.classifier = sequential_layers
-
+    elif args.model == 'vit_tiny_patch2_32':
+        pretrain_path = "https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_tiny_patch2_32_mlp_im_1k_32.pth"
+        model = VisualTransformer.vit_tiny_patch2_32(pretrained=True, pretrained_path=pretrain_path, num_classes=numGestures)
     else: 
         # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
         # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
@@ -1081,12 +1080,12 @@ if not args.turn_on_unlabeled_domain_adaptation:
         resize_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
 
     train_dataset = CustomDataset(X_train, Y_train, transform=resize_transform)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
     val_dataset = CustomDataset(X_validation, Y_validation, transform=resize_transform)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
     if (args.held_out_test):
         test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -1305,6 +1304,8 @@ else:
 
                 optimizer.zero_grad()
                 output = model(X_batch)
+                if isinstance(output, dict):
+                    output = output['logits']
                 loss = criterion(output, Y_batch)
                 loss.backward()
                 optimizer.step()
@@ -1334,6 +1335,8 @@ else:
 
                 #output = model(X_batch).logits
                 output = model(X_batch)
+                if isinstance(output, dict):
+                    output = output['logits']
                 val_loss += criterion(output, Y_batch).item()
                 preds = torch.argmax(output, dim=1)
                 Y_batch_long = torch.argmax(Y_batch, dim=1)
@@ -1365,7 +1368,8 @@ else:
     if args.pretrain_and_finetune:
         num_epochs = args.finetuning_epochs
         # train more on fine tuning dataset
-        finetune_loader = DataLoader(list(zip(X_train_finetuning, Y_train_finetuning)), batch_size=batch_size, shuffle=True, num_workers=4, worker_init_fn=utils.seed_worker, pin_memory=True)
+        finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
+        finetune_loader = DataLoader(finetune_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
         for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
             model.train()
             train_acc = 0.0
@@ -1377,6 +1381,8 @@ else:
 
                     optimizer.zero_grad()
                     output = model(X_batch)
+                    if isinstance(output, dict):
+                        output = output['logits']
                     loss = criterion(output, Y_batch)
                     loss.backward()
                     optimizer.step()
@@ -1406,6 +1412,8 @@ else:
 
                     #output = model(X_batch).logits
                     output = model(X_batch)
+                    if isinstance(output, dict):
+                        output = output['logits']
                     val_loss += criterion(output, Y_batch).item()
                     preds = torch.argmax(output, dim=1)
                     Y_batch_long = torch.argmax(Y_batch, dim=1)
@@ -1444,6 +1452,8 @@ else:
                 Y_batch = Y_batch.to(device).to(torch.float32)
 
                 output = model(X_batch)
+                if isinstance(output, dict):
+                    output = output['logits']
                 test_loss += criterion(output, Y_batch).item()
 
                 test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
@@ -1472,9 +1482,11 @@ else:
     model.eval()
     with torch.no_grad():
         validation_predictions = []
-        for i, batch in tqdm(enumerate(torch.split(X_validation, split_size_or_sections=batch_size)), desc="Validation Batch Loading"):  # Or some other number that fits in memory
-            batch = batch.to(device).to(torch.float32)
-            outputs = model(batch)
+        for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading"):
+            X_batch = X_batch.to(device).to(torch.float32)
+            outputs = model(X_batch)
+            if isinstance(outputs, dict):
+                outputs = outputs['logits']
             preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
             validation_predictions.extend(preds)
 
@@ -1486,11 +1498,13 @@ else:
     model.eval()
     with torch.no_grad():
         train_predictions = []
-        for i, batch in tqdm(enumerate(torch.split(X_train, split_size_or_sections=batch_size)), desc="Training Batch Loading"):  # Or some other number that fits in memory
-            batch = batch.to(device).to(torch.float32)
-            outputs = model(batch)
-            preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-            train_predictions.extend(preds)
+        for X_batch, Y_batch in tqdm(train_loader, desc="Training Batch Loading"):
+            X_batch = X_batch.to(device).to(torch.float32)
+            outputs = model(X_batch)
+            if isinstance(outputs, dict):
+                    outputs = outputs['logits']
+            preds = torch.argmax(outputs, dim=1)
+            train_predictions.extend(preds.cpu().detach().numpy())
 
     utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
         
