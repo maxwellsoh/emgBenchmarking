@@ -62,18 +62,43 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
+def target_normalize (data, target_min, target_max, gesture):
+    source_min = np.zeros(len(data[0]), dtype=np.float32)
+    source_max = np.zeros(len(data[0]), dtype=np.float32)
+    for i in range(len(data[0])):
+        source_min[i] = np.min(data[:, i])
+        source_max[i] = np.max(data[:, i])
+
+    for i in range(len(data[0])):
+        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
+    return data
+
 def window (e):
     return e.unfold(dimension=0, size=wLen, step=50)
 
 def getData (subject, gesture, trial):
-    sub = str(subject)
-    if subject < 10:
-        sub = '0' + str(subject)
+    if (type(subject) == int):
+        sub = str(subject)
+        if subject < 10:
+            sub = '0' + sub
+    else:
+        sub = str(subject[0])
+        if subject[0] < 10:
+            sub = '0' + sub
+        target_max = subject[1]
+        target_min = subject[2]
+        leftout = subject[3]
+
     name = '0' + sub + '-00' + str(gesture) + '-00' +str(trial)
     if trial == 10:
         name = '0' + sub + '-00' + str(gesture) + '-010'
     mat_data = io.loadmat('./CapgMyo_B/dbb-preprocessed-0' + sub + '/' + name + '.mat')
     mat_array = mat_data['data']
+
+    if (type(subject) != int and leftout != subject[0]):
+        mat_array = target_normalize(mat_array, target_min, target_max, gesture - 1)
+
     tensor_data = torch.from_numpy(mat_array)
     if trial < 10:
         return torch.cat((window(tensor_data), getData(subject, gesture, trial + 1)), dim=0)
@@ -85,6 +110,24 @@ def getData (subject, gesture, trial):
 def getEMG (x):
     #return torch.cat((getData(x-1,1,1), getData(x,1,1)), dim=0)
     return getData(x, 1, 1)
+
+def getExtrema (n):
+    mins = np.zeros((numElectrodes, numGestures))
+    maxes = np.zeros((numElectrodes, numGestures))
+    
+    sub = str(n)
+    if (n < 10):
+        sub = '0' + sub
+
+    for i in range(numGestures):
+        name = '0' + sub + '-00' + str(i+1) + '-001'
+        mat_data = io.loadmat('./CapgMyo_B/dbb-preprocessed-0' + sub + '/' + name + '.mat')
+        data = mat_data['data']
+
+        for j in range(numElectrodes):
+            mins[j][i] = np.min(data[:, j])
+            maxes[j][i] = np.max(data[:, j])
+    return mins, maxes
 
 def getLabels (n):
     emg_len = len(getEMG(n))

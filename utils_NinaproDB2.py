@@ -161,6 +161,18 @@ def getRestim (n: int, exercise: int = 2):
     restim = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['restimulus'])
     return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
+def normalize (data, target_min, target_max, gesture):
+    source_min = np.zeros(len(data[0]), dtype=np.float32)
+    source_max = np.zeros(len(data[0]), dtype=np.float32)
+    for i in range(len(data[0])):
+        source_min[i] = np.min(data[:, i])
+        source_max[i] = np.max(data[:, i])
+
+    for i in range(len(data[0])):
+        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
+    return data
+
 def getEMG (args):
     n, exercise = args
     restim = getRestim(n, exercise)
@@ -205,7 +217,25 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     rgb_data = data_converted[:, :3]
     image_data = np.reshape(rgb_data, (length, width, 3))
     image = np.transpose(image_data, (2, 0, 1))
+
+    imageL, imageR = np.split(image, 2, axis=1)
+    print(imageL.shape)
+    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
     
+    # Get max and min values after interpolation
+    max_val = max(imageL.max(), imageR.max())
+    min_val = min(imageL.min(), imageR.min())
+    
+    # Contrast normalize again after interpolation
+    imageL, imageR = map(lambda img: (img - min_val) / (max_val - min_val), (imageL, imageR))
+    
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    imageL, imageR = map(normalize, (imageL, imageR))
+    
+    return torch.cat([imageL, imageR], dim=1).numpy().astype(np.float32)
+
+    '''
     resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
                                interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image = resize(torch.from_numpy(image))
@@ -220,7 +250,7 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
         plt.show(block=False)
 
     return image.numpy().astype(np.float32)
-
+    '''
 
 def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window

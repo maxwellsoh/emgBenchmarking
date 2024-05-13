@@ -68,23 +68,6 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-# not needed for Ozdemir
-def balance (restimulus):
-    numZero = 0
-    indices = []
-    #print(restimulus.shape)
-    for x in range (len(restimulus)):
-        L = torch.chunk(restimulus[x], 2, dim=1)
-        if torch.equal(L[0], L[1]):
-            if L[0][0][0] == 0:
-                if (numZero < 380):
-                    #print("working")
-                    indices += [x]
-                numZero += 1
-            else:
-                indices += [x]
-    return indices
-
 def contract(R):
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
@@ -101,23 +84,54 @@ def filter(emg):
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=2000.0)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
-# not needed for Ozdemir
-def getRestim (n):
-    assert n >= 1 and n <= num_subjects
-    # read hdf5 file 
-    restim = pd.read_hdf(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}_E2.hdf5')
-    restim = torch.tensor(restim.values)
-    return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+def target_normalize (data, target_min, target_max, gesture):
+    source_min = np.zeros(len(data[0]), dtype=np.float32)
+    source_max = np.zeros(len(data[0]), dtype=np.float32)
+    for i in range(len(data[0])):
+        source_min[i] = np.min(data[:, i])
+        source_max[i] = np.max(data[:, i])
 
-def getEMG (n):
+    for i in range(len(data[0])):
+        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
+    return data
+
+def getEMG (args):
+    if (type(args) == int):
+        n = args
+    else:
+        n = args[0]
+        target_max = args[1]
+        target_min = args[2]
+        leftout = args[3]
+
     assert n >= 1 and n <= num_subjects
     file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     emg = []
-    for gesture in gesture_labels:
+    for i, gesture in enumerate(gesture_labels):
         assert "Gesture" + gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
-        data = filter(torch.from_numpy(np.array(file["Gesture" + gesture]))).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
+        data = np.array(file["Gesture" + gesture])
+        if (type(args) != int and n != leftout):
+            data = target_normalize(data, target_min, target_max, i)
+        data = filter(torch.from_numpy(data)).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
         emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)).to(torch.float16))
     return torch.cat(emg, dim=0)
+
+# assumes first of the 4 repetitions accessed
+def getExtrema (n):
+    mins = np.zeros((numElectrodes, numGestures))
+    maxes = np.zeros((numElectrodes, numGestures))
+
+    assert n >= 1 and n <= num_subjects
+    file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
+    for i, gesture in enumerate(gesture_labels):
+        data = np.array(file["Gesture" + gesture])
+        print(data.shape)
+
+        for j in range(numElectrodes):
+            mins[j][i] = np.min(data[j, 0])
+            maxes[j][i] = np.max(data[j, 0])
+    return mins, maxes
 
 # size of 4800 assumes 250 ms window
 def getLabels (n):

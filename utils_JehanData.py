@@ -67,20 +67,63 @@ def highpassFilter (emg):
     # what axis should the filter apply to? other datasets have axis=0
     return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=-1).copy())
 
+def target_normalize (data, target_min, target_max, gesture):
+    source_min = np.zeros(len(data[0]), dtype=np.float32)
+    source_max = np.zeros(len(data[0]), dtype=np.float32)
+    for i in range(len(data[0])):
+        source_min[i] = np.min(data[:, i])
+        source_max[i] = np.max(data[:, i])
+
+    for i in range(len(data[0])):
+        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
+    return data
+
 # returns array with dimensions (# of samples)x64x10x100 [SAMPLES, CHANNELS, GESTURES, TIME]
-def getData(n, gesture):
+def getData(n, gesture, target_max=None, target_min=None, leftout=None):
     if (n<10):
         file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
     else:
         file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
-    data = highpassFilter(torch.from_numpy(np.array(file[gesture])).unfold(dimension=-1, size=wLenTimesteps, step=stepLen))
+    data = np.array(file[gesture])
+    if (leftout != None and n != leftout):
+        data = target_normalize(data, target_min, target_max, gesture_labels.index(gesture))
+    data = highpassFilter(torch.from_numpy(data).unfold(dimension=-1, size=wLenTimesteps, step=stepLen))
 
     return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2])
 
 
-def getEMG(n):
-    n = participants[n-1]
-    return torch.cat([getData(n, name) for name in gesture_labels], axis=0)
+def getEMG(args):
+    if (type(args) == int):
+        n = participants[args-1]
+        target_max = None
+        target_min = None
+        leftout = None
+    else:
+        n = participants[args[0]-1]
+        target_max = args[1]
+        target_min = args[2]
+        leftout = args[3]
+
+    return torch.cat([getData(n, name, target_max, target_min, leftout) for name in gesture_labels], axis=0)
+
+# assumes first 1/12 of target domain accessed
+def getExtrema (n):
+    mins = np.zeros((numElectrodes, numGestures))
+    maxes = np.zeros((numElectrodes, numGestures))
+    
+    if (n<10):
+            file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
+    else:
+        file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
+    
+    for i in range(numGestures):    
+        data = np.array(file[gesture_labels[0]])
+
+        for j in range(numElectrodes):
+            mins[j][i] = np.min(data[:len(data)//12, j])
+            maxes[j][i] = np.max(data[:len(data)//12, j])
+    return mins, maxes
 
 def getGestures(n):
     gesture_count = []

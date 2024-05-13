@@ -20,7 +20,7 @@ numGestures = 10
 fs = 2048.0 # Hz (actually 2048 Hz but was "decimated" to 512? unclear)
 wLen = 250.0 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = int(125.0 / 1000 * fs) # 50 ms
+stepLen = int(125.0 / 1000 * fs) # 125 ms
 numElectrodes = 256
 num_subjects = 20
 cmap = mpl.colormaps['viridis']
@@ -88,16 +88,30 @@ def format_emg (data):
             emg[i][j] = data[i * numElectrodes + j]
     return emg
 
-def getEMG_help (sub, session):
+def target_normalize (data, target_min, target_max, gesture):
+    source_min = np.zeros(len(data[0]), dtype=np.float32)
+    source_max = np.zeros(len(data[0]), dtype=np.float32)
+    for i in range(len(data[0])):
+        source_min[i] = np.min(data[:, i])
+        source_max[i] = np.max(data[:, i])
+
+    for i in range(len(data[0])):
+        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
+    return data
+
+def getEMG_help (sub, session, target_max=None, target_min=None, leftout=None):
     emg = []
 
     currFile = 1
     select_gestures = set([])
+    curr_gestures = []
     with open(f'hyser/subject{sub}_session{session}/label_dynamic.txt', 'r') as file:
         vals = file.readline().strip().split(',')
         for v in vals:
             if (v in gesture_nums):
                 select_gestures.add(currFile)
+                curr_gestures.append(gesture_nums[v])
             currFile += 1
 
     currFile = 1
@@ -121,35 +135,80 @@ def getEMG_help (sub, session):
         for col in range(len(data)):
             data[col] = (data[col] - adjustment[col][1]) / (adjustment[col][0])
 
-        emg.append(torch.from_numpy(data.transpose((1, 0))).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
+        data = data.transpose((1, 0))
+        if (leftout != None and sub != leftout):
+            data = target_normalize(data, target_min, target_max, curr_gestures.pop(0))
+
+        emg.append(torch.from_numpy(data).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
         currFile += 1
         
     return emg
 
-def getEMG (n):
-    emg = []
+def getEMG (args):
+    if (type(args) == int):
+        n = args
+        target_max = None
+        target_min = None
+        leftout = None
+    else:
+        n = args[0]
+        target_max = args[1]
+        target_min = args[2]
+        leftout = args[3]
     
     if (n < 10):
         sub = f'0{n}'
     else:
         sub = f'{n}'
 
-    emg = getEMG_help(sub, "1") + getEMG_help(sub, "2")
-
+    emg = getEMG_help(sub, "1", target_max, target_min, leftout) + getEMG_help(sub, "2", target_max, target_min, leftout)
     emg = filter(torch.cat(emg, dim=0))
-    
-    '''
-    length = numElectrodes
-    width = 256 # 512 without downsampling
-    rms_windows = 256
-
-    donwsampled_emg = np.zeros((len(emg), length, rms_windows))
-    for i in range(rms_windows):
-        donwsampled_emg[:, :, i] = emg[:, :, i*2]
-
-    return torch.from_numpy(donwsampled_emg)
-    '''
     return emg
+
+def getExtrema (n):
+    mins = np.zeros((numElectrodes, numGestures))
+    maxes = np.zeros((numElectrodes, numGestures))
+
+    currFile = 1
+    select_gestures = set([])
+    gesture_loc = []
+    gesture_order = []
+    with open(f'hyser/subject{n}_session1/label_dynamic.txt', 'r') as file:
+        vals = file.readline().strip().split(',')
+        for i, v in enumerate(vals):
+            if (v in gesture_nums and v not in select_gestures):
+                select_gestures.add(currFile)
+                gesture_loc.append(i+1)
+                gesture_order.append(gesture_nums[v])
+            currFile += 1
+
+    currFile = 1
+    while (os.path.isfile(f'hyser/subject{n}_session1/dynamic_raw_sample{currFile}.dat')):
+        if (currFile not in gesture_loc):
+            currFile += 1
+            continue
+
+        data = np.fromfile(f'hyser/subject{n}_session1/dynamic_raw_sample{currFile}.dat', dtype=np.int16).reshape((256, -1)).astype(np.float32)
+
+        adjustment = []
+        with open(f'hyser/subject{n}_session1/dynamic_raw_sample{currFile}.hea', 'r') as file:
+            ignoreFirst = True
+            for line in file:
+                if (ignoreFirst):
+                    ignoreFirst = False
+                else:
+                    values = line.split(" ")[2].split("(")
+                    adjustment.append((float(values[0]), float(values[1].split(")")[0])))
+
+        for col in range(len(data)):
+            data[col] = (data[col] - adjustment[col][1]) / (adjustment[col][0])
+
+        data = data.transpose((1, 0))
+
+        for j in range(numElectrodes):
+            mins[j][gesture_order[gesture_loc.index(currFile)]] = np.min(data[:, j])
+            maxes[j][gesture_order[gesture_loc.index(currFile)]] = np.max(data[:, j])
+    return mins, maxes
 
 def getLabels (n):
     labels = []
