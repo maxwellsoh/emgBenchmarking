@@ -718,17 +718,60 @@ else:
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
     elif args.leave_one_session_out:
-        total_number_of_sessions = 2
+        total_number_of_sessions = 2 # all datasets used in our benchmark have at most 2 sessions but this can be changed using a variable from dataset-specific utils instead
         left_out_subject_last_session_index = (total_number_of_sessions - 1) * utils.num_subjects + leaveOut-1
         left_out_subject_first_n_sessions_indices = [i for i in range(total_number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
         print("left_out_subject_last_session_index:", left_out_subject_last_session_index)
         print("left_out_subject_first_n_sessions_indices:", left_out_subject_first_n_sessions_indices)
-        X_pretrain = np.concatenate([np.array(data[i]) for i in range(total_number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-        Y_pretrain = np.concatenate([np.array(labels[i]) for i in range(total_number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-        X_finetune = np.concatenate([np.array(data[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-        Y_finetune = np.concatenate([np.array(labels[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+
+        X_pretrain = []
+        Y_pretrain = []
+        if args.proportion_unlabeled_data_from_training_subjects>0:
+            X_pretrain_unlabeled_list = []
+            Y_pretrain_unlabeled_list = []
+
+        X_finetune = []
+        Y_finetune = []
+        if args.proportion_unlabeled_data_from_leftout_subject>0:
+            X_finetune_unlabeled_list = []
+            Y_finetune_unlabeled_list = []
+
+        for i in range(total_number_of_sessions * utils.num_subjects):
+            if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices:
+                if args.proportion_unlabeled_data_from_training_subjects>0:
+                    X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled = tts.train_test_split(
+                        data[i], labels[i], train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=False)
+                    X_pretrain.append(np.array(X_pretrain_labeled))
+                    Y_pretrain.append(np.array(Y_pretrain_labeled))
+                    X_pretrain_unlabeled_list.append(np.array(X_pretrain_unlabeled))
+                    Y_pretrain_unlabeled_list.append(np.array(Y_pretrain_unlabeled))
+                else:
+                    X_pretrain.append(np.array(data[i]))
+                    Y_pretrain.append(np.array(labels[i]))
+            elif i in left_out_subject_first_n_sessions_indices:
+                if args.proportion_unlabeled_data_from_leftout_subject>0:
+                    X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled = tts.train_test_split(
+                        data[i], labels[i], train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=False)
+                    X_finetune.append(np.array(X_finetune_labeled))
+                    Y_finetune.append(np.array(Y_finetune_labeled))
+                    X_finetune_unlabeled_list.append(np.array(X_finetune_unlabeled))
+                    Y_finetune_unlabeled_list.append(np.array(Y_finetune_unlabeled))
+                else:
+                    X_finetune.append(np.array(data[i]))
+                    Y_finetune.append(np.array(labels[i]))
+
+        X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
+        Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
+        X_finetune = np.concatenate(X_finetune, axis=0, dtype=np.float16)
+        Y_finetune = np.concatenate(Y_finetune, axis=0, dtype=np.float16)
         X_validation = np.array(data[left_out_subject_last_session_index])
         Y_validation = np.array(labels[left_out_subject_last_session_index])
+        if args.proportion_unlabeled_data_from_training_subjects>0:
+            X_pretrain_unlabeled = np.concatenate(X_pretrain_unlabeled_list, axis=0, dtype=np.float16)
+            Y_pretrain_unlabeled = np.concatenate(Y_pretrain_unlabeled_list, axis=0, dtype=np.float16)
+        if args.proportion_unlabeled_data_from_leftout_subject>0:
+            X_finetune_unlabeled = np.concatenate(X_finetune_unlabeled_list, axis=0, dtype=np.float16)
+            Y_finetune_unlabeled = np.concatenate(Y_finetune_unlabeled_list, axis=0, dtype=np.float16)
         
         X_train = torch.from_numpy(X_pretrain).to(torch.float16)
         Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
@@ -736,6 +779,12 @@ else:
         Y_train_finetuning = torch.from_numpy(Y_finetune).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        if args.proportion_unlabeled_data_from_training_subjects>0:
+            X_train_unlabeled = torch.from_numpy(X_pretrain_unlabeled).to(torch.float16)
+            Y_train_unlabeled = torch.from_numpy(Y_pretrain_unlabeled).to(torch.float16)
+        if args.proportion_unlabeled_data_from_leftout_subject>0:
+            X_train_finetuning_unlabeled = torch.from_numpy(X_finetune_unlabeled).to(torch.float16)
+            Y_train_finetuning_unlabeled = torch.from_numpy(Y_finetune_unlabeled).to(torch.float16)
 
         del X_finetune
         del Y_finetune
@@ -746,26 +795,26 @@ else:
             proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
 
             if args.proportion_unlabeled_data_from_training_subjects>0:
-                X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
-                    X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=True)
-                X_train = torch.tensor(X_train_labeled)
-                Y_train = torch.tensor(Y_train_labeled)
-                X_train_unlabeled = torch.tensor(X_train_unlabeled)
-                Y_train_unlabeled = torch.tensor(Y_train_unlabeled)
+                # X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split( # DELETE
+                #     X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=True)
+                # X_train = torch.tensor(X_train_labeled)
+                # Y_train = torch.tensor(Y_train_labeled)
+                # X_train_unlabeled = torch.tensor(X_train_unlabeled)
+                # Y_train_unlabeled = torch.tensor(Y_train_unlabeled)
                 
-                print("Size of X_train:     ", X_train.size())
-                print("Size of Y_train:     ", Y_train.size())
+                # print("Size of X_train:     ", X_train.size())
+                # print("Size of Y_train:     ", Y_train.size())
                 print("Size of X_train_unlabeled:     ", X_train_unlabeled.size())
                 print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.size())
 
             if args.proportion_unlabeled_data_from_leftout_subject>0:
-                proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data_from_leftout_subject
-                X_train_labeled_leftout_subject, X_train_unlabeled_leftout_subject, Y_train_labeled_leftout_subject, Y_train_unlabeled_leftout_subject = tts.train_test_split(
-                    X_train_finetuning, Y_train_finetuning, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
-                X_train_finetuning = torch.tensor(X_train_labeled_leftout_subject)
-                Y_train_finetuning = torch.tensor(Y_train_labeled_leftout_subject)
-                X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_leftout_subject)
-                Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_leftout_subject)
+                # proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data_from_leftout_subject # DELETE
+                # X_train_labeled_leftout_subject, X_train_unlabeled_leftout_subject, Y_train_labeled_leftout_subject, Y_train_unlabeled_leftout_subject = tts.train_test_split(
+                #     X_train_finetuning, Y_train_finetuning, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
+                # X_train_finetuning = torch.tensor(X_train_labeled_leftout_subject)
+                # Y_train_finetuning = torch.tensor(Y_train_labeled_leftout_subject)
+                # X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_leftout_subject)
+                # Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_leftout_subject)
                 
                 print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
                 print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
@@ -810,6 +859,10 @@ else:
 
         X_train_list = []
         Y_train_list = []
+
+        if args.proportion_unlabeled_data_from_training_subjects>0:
+            X_train_unlabeled_list = []
+            Y_train_unlabeled_list = []
         
         for i in range(len(data)):
             if i == leaveOut-1:
@@ -822,12 +875,24 @@ else:
                 current_data, _, current_labels, _ = model_selection.train_test_split(current_data, current_labels, 
                                                                                         train_size=proportion_to_keep, stratify=current_labels, 
                                                                                         random_state=args.seed, shuffle=True)
+                
+            if args.proportion_unlabeled_data_from_training_subjects>0:
+                X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
+                    current_data, current_labels, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=True)
+                current_data = X_train_labeled
+                current_labels = Y_train_labeled
+
+                X_train_unlabeled_list.append(X_train_unlabeled)
+                Y_train_unlabeled_list.append(Y_train_unlabeled)
 
             X_train_list.append(current_data)
             Y_train_list.append(current_labels)
             
         X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
         Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
+        if args.proportion_unlabeled_data_from_training_subjects>0:
+            X_train_unlabeled = torch.from_numpy(np.concatenate(X_train_unlabeled_list, axis=0)).to(torch.float16)
+            Y_train_unlabeled = torch.from_numpy(np.concatenate(Y_train_unlabeled_list, axis=0)).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
 
@@ -854,13 +919,13 @@ else:
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
                         X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=True)
             
-            if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0:
-                if args.cross_validation_for_time_series:
-                    X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
-                        X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=False)
-                else: 
-                    X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
-                        X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=True)
+            # if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0: #DELETE
+            #     if args.cross_validation_for_time_series:
+            #         X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
+            #             X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=False)
+            #     else: 
+            #         X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
+            #             X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=True)
 
             print("Size of X_train_partial_leftout_subject:     ", X_train_partial_leftout_subject.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
             print("Size of Y_train_partial_leftout_subject:     ", Y_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE)
@@ -876,8 +941,8 @@ else:
 
             else: # unlabeled domain adaptation
                 if proportion_unlabeled_of_training_subjects>0:
-                    X_train = torch.tensor(X_train_labeled)
-                    Y_train = torch.tensor(Y_train_labeled)
+                    X_train = torch.tensor(X_train)
+                    Y_train = torch.tensor(Y_train)
                     X_train_unlabeled = torch.tensor(X_train_unlabeled)
                     Y_train_unlabeled = torch.tensor(Y_train_unlabeled)
 
