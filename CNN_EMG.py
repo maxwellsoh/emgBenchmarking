@@ -109,7 +109,7 @@ parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some d
 # Add argument for cross validation for time series
 parser.add_argument('--cross_validation_for_time_series', type=utils.str2bool, help='whether or not to use cross validation for time series. Set to False by default.', default=False)
 # Add argument for proportion of left-out-subject data to use for transfer learning
-parser.add_argument('--proportion_transfer_learning', type=float, help='proportion of left-out-subject data to use for transfer learning. Set to 0.25 by default.', default=0.25)
+parser.add_argument('--proportion_transfer_learning_from_leftout_subject', type=float, help='proportion of left-out-subject data to use for transfer learning. Set to 0.25 by default.', default=0.25)
 # Add argument for amount for reducing number of data to generate for transfer learning
 parser.add_argument('--reduce_data_for_transfer_learning', type=int, help='amount for reducing number of data to generate for transfer learning. Set to 1 by default.', default=1)
 # Add argument for whether to do leave-one-session-out
@@ -127,9 +127,11 @@ parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool
 # Add argument to specify algorithm to use for unlabeled domain adaptation
 parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "fixmatch" by default.', default="fixmatch")
 # Add argument to specify proportion from left-out-subject to keep as unlabeled data
-parser.add_argument('--proportion_unlabeled_data', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75)
+parser.add_argument('--proportion_unlabeled_data_from_leftout_subject', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75)
 # Add argument to specify batch size
 parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by default.', default=64)
+# Add argument for whether to use unlabeled data for subjects used for training as well
+parser.add_argument('--proportion_unlabeled_data_from_training_subjects', type=float, help='proportion of data from training subjects to use as unlabeled data. Set to 0.0 by default.', default=0.0)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -236,7 +238,7 @@ print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_o
 print(f"The value of --target_normalize is {args.target_normalize}")
 print(f"The value of --transfer_learning is {args.transfer_learning}")
 print(f"The value of --cross_validation_for_time_series is {args.cross_validation_for_time_series}")
-print(f"The value of --proportion_transfer_learning is {args.proportion_transfer_learning}")
+print(f"The value of --proportion_transfer_learning_from_leftout_subject is {args.proportion_transfer_learning_from_leftout_subject}")
 print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
 print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
 print(f"The value of --held_out_test is {args.held_out_test}")
@@ -246,10 +248,12 @@ print(f"The value of --finetuning_epochs is {args.finetuning_epochs}")
 
 print(f"The value of --turn_on_unlabeled_domain_adaptation is {args.turn_on_unlabeled_domain_adaptation}")
 print(f"The value of --unlabeled_algorithm is {args.unlabeled_algorithm}")
-print(f"The value of --proportion_unlabeled_data is {args.proportion_unlabeled_data}")
+print(f"The value of --proportion_unlabeled_data_from_leftout_subject is {args.proportion_unlabeled_data_from_leftout_subject}")
 
 print(f"The value of --batch_size is {args.batch_size}")
-    
+
+print(f"The value of --proportion_unlabeled_data_from_training_subjects is {args.proportion_unlabeled_data_from_training_subjects}")
+
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
 formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
@@ -714,17 +718,60 @@ else:
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
     elif args.leave_one_session_out:
-        total_number_of_sessions = 2
+        total_number_of_sessions = 2 # all datasets used in our benchmark have at most 2 sessions but this can be changed using a variable from dataset-specific utils instead
         left_out_subject_last_session_index = (total_number_of_sessions - 1) * utils.num_subjects + leaveOut-1
         left_out_subject_first_n_sessions_indices = [i for i in range(total_number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
         print("left_out_subject_last_session_index:", left_out_subject_last_session_index)
         print("left_out_subject_first_n_sessions_indices:", left_out_subject_first_n_sessions_indices)
-        X_pretrain = np.concatenate([np.array(data[i]) for i in range(total_number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-        Y_pretrain = np.concatenate([np.array(labels[i]) for i in range(total_number_of_sessions * utils.num_subjects) if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-        X_finetune = np.concatenate([np.array(data[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
-        Y_finetune = np.concatenate([np.array(labels[i]) for i in left_out_subject_first_n_sessions_indices], axis=0, dtype=np.float16)
+
+        X_pretrain = []
+        Y_pretrain = []
+        if args.proportion_unlabeled_data_from_training_subjects>0:
+            X_pretrain_unlabeled_list = []
+            Y_pretrain_unlabeled_list = []
+
+        X_finetune = []
+        Y_finetune = []
+        if args.proportion_unlabeled_data_from_leftout_subject>0:
+            X_finetune_unlabeled_list = []
+            Y_finetune_unlabeled_list = []
+
+        for i in range(total_number_of_sessions * utils.num_subjects):
+            if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices:
+                if args.proportion_unlabeled_data_from_training_subjects>0:
+                    X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled = tts.train_test_split(
+                        data[i], labels[i], train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=False)
+                    X_pretrain.append(np.array(X_pretrain_labeled))
+                    Y_pretrain.append(np.array(Y_pretrain_labeled))
+                    X_pretrain_unlabeled_list.append(np.array(X_pretrain_unlabeled))
+                    Y_pretrain_unlabeled_list.append(np.array(Y_pretrain_unlabeled))
+                else:
+                    X_pretrain.append(np.array(data[i]))
+                    Y_pretrain.append(np.array(labels[i]))
+            elif i in left_out_subject_first_n_sessions_indices:
+                if args.proportion_unlabeled_data_from_leftout_subject>0:
+                    X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled = tts.train_test_split(
+                        data[i], labels[i], train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=False)
+                    X_finetune.append(np.array(X_finetune_labeled))
+                    Y_finetune.append(np.array(Y_finetune_labeled))
+                    X_finetune_unlabeled_list.append(np.array(X_finetune_unlabeled))
+                    Y_finetune_unlabeled_list.append(np.array(Y_finetune_unlabeled))
+                else:
+                    X_finetune.append(np.array(data[i]))
+                    Y_finetune.append(np.array(labels[i]))
+
+        X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
+        Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
+        X_finetune = np.concatenate(X_finetune, axis=0, dtype=np.float16)
+        Y_finetune = np.concatenate(Y_finetune, axis=0, dtype=np.float16)
         X_validation = np.array(data[left_out_subject_last_session_index])
         Y_validation = np.array(labels[left_out_subject_last_session_index])
+        if args.proportion_unlabeled_data_from_training_subjects>0:
+            X_pretrain_unlabeled = np.concatenate(X_pretrain_unlabeled_list, axis=0, dtype=np.float16)
+            Y_pretrain_unlabeled = np.concatenate(Y_pretrain_unlabeled_list, axis=0, dtype=np.float16)
+        if args.proportion_unlabeled_data_from_leftout_subject>0:
+            X_finetune_unlabeled = np.concatenate(X_finetune_unlabeled_list, axis=0, dtype=np.float16)
+            Y_finetune_unlabeled = np.concatenate(Y_finetune_unlabeled_list, axis=0, dtype=np.float16)
         
         X_train = torch.from_numpy(X_pretrain).to(torch.float16)
         Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
@@ -732,31 +779,52 @@ else:
         Y_train_finetuning = torch.from_numpy(Y_finetune).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        if args.proportion_unlabeled_data_from_training_subjects>0:
+            X_train_unlabeled = torch.from_numpy(X_pretrain_unlabeled).to(torch.float16)
+            Y_train_unlabeled = torch.from_numpy(Y_pretrain_unlabeled).to(torch.float16)
+        if args.proportion_unlabeled_data_from_leftout_subject>0:
+            X_train_finetuning_unlabeled = torch.from_numpy(X_finetune_unlabeled).to(torch.float16)
+            Y_train_finetuning_unlabeled = torch.from_numpy(Y_finetune_unlabeled).to(torch.float16)
 
         del X_finetune
         del Y_finetune
         
         if args.turn_on_unlabeled_domain_adaptation: # while in leave one session out
-            proportion_to_keep = args.proportion_transfer_learning
-            proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
-            if args.proportion_unlabeled_data>0:
-                proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
-                X_train_labeled_leftout_subject, X_train_unlabeled_leftout_subject, Y_train_labeled_leftout_subject, Y_train_unlabeled_leftout_subject = tts.train_test_split(
-                    X_train_finetuning, Y_train_finetuning, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
-                X_train_finetuning = torch.tensor(X_train_labeled_leftout_subject)
-                Y_train_finetuning = torch.tensor(Y_train_labeled_leftout_subject)
-                X_train_unlabeled = torch.tensor(X_train_unlabeled_leftout_subject)
-                Y_train_unlabeled = torch.tensor(Y_train_unlabeled_leftout_subject)
+            proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
+            proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data_from_leftout_subject
+            proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
+
+            if args.proportion_unlabeled_data_from_training_subjects>0:
+                # X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split( # DELETE
+                #     X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=True)
+                # X_train = torch.tensor(X_train_labeled)
+                # Y_train = torch.tensor(Y_train_labeled)
+                # X_train_unlabeled = torch.tensor(X_train_unlabeled)
+                # Y_train_unlabeled = torch.tensor(Y_train_unlabeled)
+                
+                # print("Size of X_train:     ", X_train.size())
+                # print("Size of Y_train:     ", Y_train.size())
+                print("Size of X_train_unlabeled:     ", X_train_unlabeled.size())
+                print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.size())
+
+            if args.proportion_unlabeled_data_from_leftout_subject>0:
+                # proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data_from_leftout_subject # DELETE
+                # X_train_labeled_leftout_subject, X_train_unlabeled_leftout_subject, Y_train_labeled_leftout_subject, Y_train_unlabeled_leftout_subject = tts.train_test_split(
+                #     X_train_finetuning, Y_train_finetuning, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
+                # X_train_finetuning = torch.tensor(X_train_labeled_leftout_subject)
+                # Y_train_finetuning = torch.tensor(Y_train_labeled_leftout_subject)
+                # X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_leftout_subject)
+                # Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_leftout_subject)
                 
                 print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
                 print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
-                print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
-                print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
+                print("Size of X_train_finetuning_unlabeled:     ", X_train_finetuning_unlabeled.shape)
+                print("Size of Y_train_finetuning_unlabeled:     ", Y_train_finetuning_unlabeled.shape)
             else: 
                 X_train_finetuning = torch.tensor(X_train_finetuning)
                 Y_train_finetuning = torch.tensor(Y_train_finetuning)
-                X_train_unlabeled = None
-                Y_train_unlabeled = None
+                X_train_finetuning_unlabeled = None
+                Y_train_finetuning_unlabeled = None
                 
                 print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
                 print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
@@ -791,6 +859,10 @@ else:
 
         X_train_list = []
         Y_train_list = []
+
+        if args.proportion_unlabeled_data_from_training_subjects>0:
+            X_train_unlabeled_list = []
+            Y_train_unlabeled_list = []
         
         for i in range(len(data)):
             if i == leaveOut-1:
@@ -803,26 +875,39 @@ else:
                 current_data, _, current_labels, _ = model_selection.train_test_split(current_data, current_labels, 
                                                                                         train_size=proportion_to_keep, stratify=current_labels, 
                                                                                         random_state=args.seed, shuffle=True)
+                
+            if args.proportion_unlabeled_data_from_training_subjects>0:
+                X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
+                    current_data, current_labels, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=True)
+                current_data = X_train_labeled
+                current_labels = Y_train_labeled
+
+                X_train_unlabeled_list.append(X_train_unlabeled)
+                Y_train_unlabeled_list.append(Y_train_unlabeled)
 
             X_train_list.append(current_data)
             Y_train_list.append(current_labels)
             
         X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
         Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
+        if args.proportion_unlabeled_data_from_training_subjects>0:
+            X_train_unlabeled = torch.from_numpy(np.concatenate(X_train_unlabeled_list, axis=0)).to(torch.float16)
+            Y_train_unlabeled = torch.from_numpy(np.concatenate(Y_train_unlabeled_list, axis=0)).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
 
         if args.transfer_learning: # while in leave one subject out
-            proportion_to_keep = args.proportion_transfer_learning
-            proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data
+            proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
+            proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data_from_leftout_subject
+            proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
             
             if args.cross_validation_for_time_series:
                 X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
-                    X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=False)
+                    X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=Y_validation, random_state=args.seed, shuffle=False)
             else:
                 # Split the validation data into train and validation subsets
                 X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
-                    X_validation, Y_validation, train_size=proportion_to_keep, stratify=Y_validation, random_state=args.seed, shuffle=True)
+                    X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=Y_validation, random_state=args.seed, shuffle=True)
                 
             if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep>0:
                 if args.cross_validation_for_time_series:
@@ -833,7 +918,15 @@ else:
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
                         X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=True)
-                    
+            
+            # if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0: #DELETE
+            #     if args.cross_validation_for_time_series:
+            #         X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
+            #             X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=False)
+            #     else: 
+            #         X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
+            #             X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=True)
+
             print("Size of X_train_partial_leftout_subject:     ", X_train_partial_leftout_subject.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
             print("Size of Y_train_partial_leftout_subject:     ", Y_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE)
 
@@ -845,18 +938,25 @@ else:
                 else:
                     X_train_finetuning = torch.tensor(X_train_partial_leftout_subject)
                     Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
+
             else: # unlabeled domain adaptation
+                if proportion_unlabeled_of_training_subjects>0:
+                    X_train = torch.tensor(X_train)
+                    Y_train = torch.tensor(Y_train)
+                    X_train_unlabeled = torch.tensor(X_train_unlabeled)
+                    Y_train_unlabeled = torch.tensor(Y_train_unlabeled)
+
                 if proportion_unlabeled_of_proportion_to_keep>0:
                     if not args.pretrain_and_finetune:
                         X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
                         Y_train = torch.tensor(np.concatenate((Y_train, Y_train_labeled_partial_leftout_subject), axis=0))
-                        X_train_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
-                        Y_train_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                        X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
+                        Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
                     else:
                         X_train_finetuning = torch.tensor(X_train_labeled_partial_leftout_subject)
                         Y_train_finetuning = torch.tensor(Y_train_labeled_partial_leftout_subject)
-                        X_train_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
-                        Y_train_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                        X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
+                        Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
                         
                 else:
                     if not args.pretrain_and_finetune:
@@ -879,9 +979,12 @@ else:
         print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
         
-        if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep>0:
+        if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0:
             print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
             print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
+        if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep>0:
+            print("Size of X_train_finetuning_unlabeled:     ", X_train_finetuning_unlabeled.shape)
+            print("Size of Y_train_finetuning_unlabeled:     ", Y_train_finetuning_unlabeled.shape)
             
         if args.pretrain_and_finetune:
             print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
@@ -952,7 +1055,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         'gpu': args.gpu,
         'world_size': 1,
         'distributed': False,
-    }
+    } 
     
     semilearn_config = get_config(semilearn_config_dict)
     semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
@@ -965,18 +1068,24 @@ if args.turn_on_unlabeled_domain_adaptation:
         semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
     
     labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
-    if proportion_unlabeled_of_proportion_to_keep>0:
+    if proportion_unlabeled_of_training_subjects>0:
         unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
+                                        is_ulb=True, strong_transform=semilearn_transform)
+    elif proportion_unlabeled_of_proportion_to_keep>0:
+        unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                         is_ulb=True, strong_transform=semilearn_transform)
     if args.pretrain_and_finetune:
         finetune_dataset = BasicDataset(semilearn_config, X_train_finetuning, torch.argmax(Y_train_finetuning, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
+        finetune_unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), 
+                                                  semilearn_config.num_classes, semilearn_transform, is_ulb=True, strong_transform=semilearn_transform)
     validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
 
     train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, semilearn_config.batch_size, num_workers=multiprocessing.cpu_count()//8)
-    if proportion_unlabeled_of_proportion_to_keep>0:
+    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep>0:
         train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, semilearn_config.batch_size, num_workers=multiprocessing.cpu_count()//8)
     if args.pretrain_and_finetune:
         train_finetuning_loader = get_data_loader(semilearn_config, finetune_dataset, semilearn_config.batch_size, num_workers=multiprocessing.cpu_count()//8)
+        train_finetuning_unlabeled_loader = get_data_loader(semilearn_config, finetune_unlabeled_dataset, semilearn_config.batch_size, num_workers=multiprocessing.cpu_count()//8)
     validation_loader = get_data_loader(semilearn_config, validation_dataset, semilearn_config.eval_batch_size, num_workers=multiprocessing.cpu_count()//8)
 
 else:
@@ -988,7 +1097,6 @@ else:
         # #num_features = model.fc.in_features
         dropout = 0.5
         model.add_module('avgpool', nn.AdaptiveAvgPool2d(1))
-        model.add_module('flatten', nn.Flatten())
         model.add_module('fc1', nn.Linear(num_features, 512))
         model.add_module('relu', nn.ReLU())
         model.add_module('dropout1', nn.Dropout(dropout))
@@ -1151,7 +1259,7 @@ if args.load_few_images:
     wandb_runname += '_load-few-images'
 if args.transfer_learning:
     wandb_runname += '_transfer-learning'
-    wandb_runname += '-proportion-' + str(args.proportion_transfer_learning)
+    wandb_runname += '-proportion-' + str(args.proportion_transfer_learning_from_leftout_subject)
 if args.cross_validation_for_time_series:   
     wandb_runname += '_cross-validation-for-time-series'
 if args.reduce_data_for_transfer_learning != 1:
@@ -1169,7 +1277,7 @@ if args.pretrain_and_finetune:
 if args.turn_on_unlabeled_domain_adaptation:
     wandb_runname += '_unlabeled-adapt'
     wandb_runname += '-algo-' + args.unlabeled_algorithm
-    wandb_runname += '-proportion-unlabeled-' + str(args.proportion_unlabeled_data)
+    wandb_runname += '-proportion-unlabeled-leftout' + str(args.proportion_unlabeled_data_from_leftout_subject)
 
 if (args.held_out_test):
     if args.turn_on_kfold:
@@ -1287,6 +1395,8 @@ if args.turn_on_unlabeled_domain_adaptation:
         semilearn_algorithm.scheduler = None
         
         if proportion_unlabeled_of_proportion_to_keep>0:
+            semilearn_algorithm.loader_dict['train_ulb'] = train_finetuning_unlabeled_loader
+        elif proportion_unlabeled_of_training_subjects>0:
             semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
 
         semilearn_algorithm.loader_dict['eval'] = validation_loader
