@@ -1,6 +1,7 @@
 # Inspiration: https://stackoverflow.com/questions/62662480/using-python-requests-to-download-multiple-zip-files-from-links
 
 from bs4 import BeautifulSoup 
+import zipfile
 import requests
 import re
 import os
@@ -22,14 +23,22 @@ def download(url, folder_name):
 
     for link in zip_links:
         file_link = link.get('href')
-        print(file_link)
-
+        
         # create new directory adress
         final_path = os.path.join(new_dir, link.text)
 
-        with open(final_path, 'wb') as file: 
+        # write the zip folder
+        with open(final_path, 'wb') as file:
             response = requests.get(url + file_link)
             file.write(response.content) 
+
+        # unzip the folder 
+        with zipfile.ZipFile(final_path, 'r') as zip_ref:
+            zip_ref.extractall(new_dir)
+
+        # TODO: delete the old zip folder
+
+        print("Downloaded and extracted:", file_link)
 
 def get_DB5():
     url = "https://ninapro.hevs.ch/files/DB5_Preproc/"
