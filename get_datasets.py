@@ -5,7 +5,8 @@ import zipfile
 import requests
 import re
 import os
-
+import argparse
+import process_NinaproDB5
 
 
 def get_soup(url):
@@ -27,6 +28,8 @@ def download(url, folder_name):
         # create new directory adress
         final_path = os.path.join(new_dir, link.text)
 
+        # TODO: error catch if folder already exists
+
         # write the zip folder
         with open(final_path, 'wb') as file:
             response = requests.get(url + file_link)
@@ -40,11 +43,41 @@ def download(url, folder_name):
 
         print("Downloaded and extracted:", file_link)
 
+
 def get_DB5():
+    print("Retrieving NinaproDB5...")
     url = "https://ninapro.hevs.ch/files/DB5_Preproc/"
     folder_name = "NinaproDB5"
     download(url, folder_name)
+    print("Downloaded NinaproDB5")
+    print("Processing NinaproDB5...")
+    process_NinaproDB5.get()
+    print("Done processing Ninapro DB5")
+
+def get_DB2():
+    print("Retrieving NinaproDB2...")
+    url = "https://ninapro.hevs.ch/files/DB2_Preproc/"
+    folder_name = "NinaproDB2"
+    download(url, folder_name)
+    print("Done retrieving NinaproDB2")
 
 
+def main(): 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--NinaproDB5', help="Creates NinaproDB5 folder", action='store_true')
+    parser.add_argument('--NinaproDB2', help="Creates NinaproDB2 folder", required=False)    
 
-get_DB5()
+    args = parser.parse_args()
+
+    if args.NinaproDB5:
+        get_DB5()
+
+    if args.NinaproDB2:
+        get_DB2()
+
+
+main()
+
+    
+
+
