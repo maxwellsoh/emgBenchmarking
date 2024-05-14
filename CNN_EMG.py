@@ -132,6 +132,8 @@ parser.add_argument('--proportion_unlabeled_data_from_leftout_subject', type=flo
 parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by default.', default=64)
 # Add argument for whether to use unlabeled data for subjects used for training as well
 parser.add_argument('--proportion_unlabeled_data_from_training_subjects', type=float, help='proportion of data from training subjects to use as unlabeled data. Set to 0.0 by default.', default=0.0)
+# Add argument for cutting down amount of total data for training subjects
+parser.add_argument('--proportion_data_from_training_subjects', type=float, help='proportion of data from training subjects to use. Set to 1.0 by default.', default=1.0)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -253,6 +255,7 @@ print(f"The value of --proportion_unlabeled_data_from_leftout_subject is {args.p
 print(f"The value of --batch_size is {args.batch_size}")
 
 print(f"The value of --proportion_unlabeled_data_from_training_subjects is {args.proportion_unlabeled_data_from_training_subjects}")
+print(f"The value of --proportion_data_from_training_subjects is {args.proportion_data_from_training_subjects}")
 
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -737,28 +740,33 @@ else:
             Y_finetune_unlabeled_list = []
 
         for i in range(total_number_of_sessions * utils.num_subjects):
+            X_train_temp = data[i]
+            Y_train_temp = labels[i]
             if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices:
+                if args.proportion_data_from_training_subjects<1.0:
+                    X_train_temp, _, Y_train_temp, _ = tts.train_test_split(
+                        X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=Y_train_temp, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                 if args.proportion_unlabeled_data_from_training_subjects>0:
                     X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled = tts.train_test_split(
-                        data[i], labels[i], train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=False)
+                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                     X_pretrain.append(np.array(X_pretrain_labeled))
                     Y_pretrain.append(np.array(Y_pretrain_labeled))
                     X_pretrain_unlabeled_list.append(np.array(X_pretrain_unlabeled))
                     Y_pretrain_unlabeled_list.append(np.array(Y_pretrain_unlabeled))
                 else:
-                    X_pretrain.append(np.array(data[i]))
-                    Y_pretrain.append(np.array(labels[i]))
+                    X_pretrain.append(np.array(X_train_temp))
+                    Y_pretrain.append(np.array(Y_train_temp))
             elif i in left_out_subject_first_n_sessions_indices:
                 if args.proportion_unlabeled_data_from_leftout_subject>0:
                     X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled = tts.train_test_split(
-                        data[i], labels[i], train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=False)
+                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                     X_finetune.append(np.array(X_finetune_labeled))
                     Y_finetune.append(np.array(Y_finetune_labeled))
                     X_finetune_unlabeled_list.append(np.array(X_finetune_unlabeled))
                     Y_finetune_unlabeled_list.append(np.array(Y_finetune_unlabeled))
                 else:
-                    X_finetune.append(np.array(data[i]))
-                    Y_finetune.append(np.array(labels[i]))
+                    X_finetune.append(np.array(X_train_temp))
+                    Y_finetune.append(np.array(Y_train_temp))
 
         X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
         Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
@@ -874,11 +882,15 @@ else:
                 proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
                 current_data, _, current_labels, _ = model_selection.train_test_split(current_data, current_labels, 
                                                                                         train_size=proportion_to_keep, stratify=current_labels, 
-                                                                                        random_state=args.seed, shuffle=True)
+                                                                                        random_state=args.seed, shuffle=args.cross_validation_for_time_series)
+                
+            if args.proportion_data_from_training_subjects<1.0:
+                current_data, _, current_labels, _ = tts.train_test_split(
+                    current_data, current_labels, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                 
             if args.proportion_unlabeled_data_from_training_subjects>0:
                 X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
-                    current_data, current_labels, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=True)
+                    current_data, current_labels, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                 current_data = X_train_labeled
                 current_labels = Y_train_labeled
 
@@ -1278,6 +1290,8 @@ if args.turn_on_unlabeled_domain_adaptation:
     wandb_runname += '_unlabeled-adapt'
     wandb_runname += '-algo-' + args.unlabeled_algorithm
     wandb_runname += '-proportion-unlabeled-leftout' + str(args.proportion_unlabeled_data_from_leftout_subject)
+if args.proportion_data_from_training_subjects<1.0:
+    wandb_runname += '_train-subj-prop-' + str(args.proportion_data_from_training_subjects)
 
 if (args.held_out_test):
     if args.turn_on_kfold:
