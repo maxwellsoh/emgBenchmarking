@@ -882,7 +882,7 @@ else:
                 proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
                 current_data, _, current_labels, _ = model_selection.train_test_split(current_data, current_labels, 
                                                                                         train_size=proportion_to_keep, stratify=current_labels, 
-                                                                                        random_state=args.seed, shuffle=args.cross_validation_for_time_series)
+                                                                                        random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                 
             if args.proportion_data_from_training_subjects<1.0:
                 current_data, _, current_labels, _ = tts.train_test_split(
