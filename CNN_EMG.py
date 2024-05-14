@@ -1237,24 +1237,24 @@ if args.turn_on_cyclical_lr:
 if args.turn_on_cosine_annealing: 
     wandb_runname += '_cosine-annealing'
 if args.turn_on_rms:
-    wandb_runname += '_rms-windows-'+str(args.rms_input_windowsize)
+    wandb_runname += '_rms-'+str(args.rms_input_windowsize)
 if args.turn_on_magnitude:  
-    wandb_runname += '_magnitude'
+    wandb_runname += '_mag-'
 if args.leftout_subject != 0:
     wandb_runname += '_LOSO-'+str(args.leftout_subject)
 wandb_runname += '_' + model_name
 if (exercises and not args.partial_dataset_ninapro):
-    wandb_runname += '_exercises-' + ''.join(character for character in str(args.exercises) if character.isalnum())
+    wandb_runname += '_exer-' + ''.join(character for character in str(args.exercises) if character.isalnum())
 if args.dataset == "OzdemirEMG":
     if args.full_dataset_ozdemir:
-        wandb_runname += '_full-dataset'
+        wandb_runname += '_full'
     else:
-        wandb_runname += '_partial-dataset'
+        wandb_runname += '_partial'
 if args.dataset == "ninapro-db2" or args.dataset == "ninapro-db5":
     if args.partial_dataset_ninapro:
-        wandb_runname += '_partial-dataset'
+        wandb_runname += '_partial'
 if args.turn_on_spectrogram:
-    wandb_runname += '_spectrogram'
+    wandb_runname += '_spect'
 if args.turn_on_cwt:
     wandb_runname += '_cwt'
 if args.turn_on_hht:
@@ -1262,36 +1262,38 @@ if args.turn_on_hht:
 if args.reduce_training_data_size:
     wandb_runname += '_reduced-training-data-size-' + str(args.reduced_training_data_size)
 if args.leave_n_subjects_out_randomly != 0:
-    wandb_runname += '_leave_n_subjects_out_randomly-'+str(args.leave_n_subjects_out_randomly)
+    wandb_runname += '_leave_n_subjects_out-'+str(args.leave_n_subjects_out_randomly)
 if args.turn_off_scaler_normalization:
-    wandb_runname += '_no-scaler-normalization'
+    wandb_runname += '_no-scal-norm'
 if args.target_normalize:
-    wandb_runname += '_target-normalize'
+    wandb_runname += '_targ-norm'
 if args.load_few_images:
-    wandb_runname += '_load-few-images'
+    wandb_runname += '_load-few'
 if args.transfer_learning:
-    wandb_runname += '_transfer-learning'
-    wandb_runname += '-proportion-' + str(args.proportion_transfer_learning_from_leftout_subject)
+    wandb_runname += '_tran-learn'
+    wandb_runname += '-prop-' + str(args.proportion_transfer_learning_from_leftout_subject)
 if args.cross_validation_for_time_series:   
-    wandb_runname += '_cross-validation-for-time-series'
+    wandb_runname += '_cv-for-ts'
 if args.reduce_data_for_transfer_learning != 1:
-    wandb_runname += '_reduce-data-for-transfer-learning-' + str(args.reduce_data_for_transfer_learning)
+    wandb_runname += '_red-data-for-tran-learn-' + str(args.reduce_data_for_transfer_learning)
 if args.leave_one_session_out:
-    wandb_runname += '_leave-one-session-out'
+    wandb_runname += '_leave-one-sess-out'
 if args.leave_one_subject_out:
-    wandb_runname += '_leave-one-subject-out'
+    wandb_runname += '_loso'
 if args.one_subject_for_training_set_for_session_test:
-    wandb_runname += '_one-subject-for-training-set-for-session-test'
+    wandb_runname += '_one-subj-for-training-set'
 if args.held_out_test:
-    wandb_runname += '_held-out-test'
+    wandb_runname += '_held-out'
 if args.pretrain_and_finetune:
-    wandb_runname += '_pretrain-and-finetune'
+    wandb_runname += '_pretrain-finetune'
 if args.turn_on_unlabeled_domain_adaptation:
     wandb_runname += '_unlabeled-adapt'
     wandb_runname += '-algo-' + args.unlabeled_algorithm
-    wandb_runname += '-proportion-unlabeled-leftout' + str(args.proportion_unlabeled_data_from_leftout_subject)
+    wandb_runname += '-prop-unlabel-leftout' + str(args.proportion_unlabeled_data_from_leftout_subject)
 if args.proportion_data_from_training_subjects<1.0:
     wandb_runname += '_train-subj-prop-' + str(args.proportion_data_from_training_subjects)
+if args.proportion_unlabeled_data_from_training_subjects>0:
+    wandb_runname += '_unlabel-subj-prop-' + str(args.proportion_unlabeled_data_from_training_subjects)
 
 if (args.held_out_test):
     if args.turn_on_kfold:
