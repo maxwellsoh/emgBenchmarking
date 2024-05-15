@@ -34,6 +34,13 @@ from semilearn.core.utils import send_model_cuda
 from PIL import Image
 from torch.utils.data import Dataset
 import VisualTransformer
+from sklearn.neural_network import MLPClassifier
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from joblib import dump
+from sklearn.metrics import accuracy_score, log_loss
+import torch.nn.functional as F
+
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -139,6 +146,13 @@ parser.add_argument('--proportion_data_from_training_subjects', type=float, help
 args = parser.parse_args()
 
 exercises = False
+
+if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
+    print("Warning: not using pytorch, many arguments will be ignored")
+    if args.turn_on_unlabeled_domain_adaptation:
+        NotImplementedError("Cannot use unlabeled domain adaptation with MLP, SVC, or RF")
+    if args.pretrain_and_finetune:
+        NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
 
 if (args.dataset == "uciEMG"):
     import utils_UCI as utils
@@ -950,12 +964,13 @@ else:
 
             if not args.turn_on_unlabeled_domain_adaptation:
                 # Append the partial validation data to the training data
-                if not args.pretrain_and_finetune:
-                    X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
-                    Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
-                else:
-                    X_train_finetuning = torch.tensor(X_train_partial_leftout_subject)
-                    Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
+                if proportion_to_keep_of_leftout_subject_for_training>0:
+                    if not args.pretrain_and_finetune:
+                        X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
+                        Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
+                    else:
+                        X_train_finetuning = torch.tensor(X_train_partial_leftout_subject)
+                        Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
 
             else: # unlabeled domain adaptation
                 if proportion_unlabeled_of_training_subjects>0:
@@ -1093,17 +1108,19 @@ if args.turn_on_unlabeled_domain_adaptation:
     if proportion_unlabeled_of_training_subjects>0:
         unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                         is_ulb=True, strong_transform=semilearn_transform)
+        proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_training_subjects
     elif proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
         unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                         is_ulb=True, strong_transform=semilearn_transform)
+        proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_leftout_subject
     if args.pretrain_and_finetune:
         finetune_dataset = BasicDataset(semilearn_config, X_train_finetuning, torch.argmax(Y_train_finetuning, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
         finetune_unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), 
                                                   semilearn_config.num_classes, semilearn_transform, is_ulb=True, strong_transform=semilearn_transform)
     validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
 
-    labeled_batch_size = int(semilearn_config.batch_size * (1-args.proportion_unlabeled_data_from_training_subjects))
-    unlabeled_batch_size = int(semilearn_config.batch_size * args.proportion_unlabeled_data_from_training_subjects)
+    labeled_batch_size = int(semilearn_config.batch_size * (1-proportion_unlabeled_to_use))
+    unlabeled_batch_size = int(semilearn_config.batch_size * proportion_unlabeled_to_use)
     labeled_iters = len(labeled_dataset) * ceildiv(args.epochs, labeled_batch_size)
     unlabeled_iters = len(unlabeled_dataset) * ceildiv(args.epochs, unlabeled_batch_size)
     iters_for_loader = max(labeled_iters, unlabeled_iters)
@@ -1114,11 +1131,15 @@ if args.turn_on_unlabeled_domain_adaptation:
                                                  num_epochs=args.epochs, num_iters=iters_for_loader)
         
     if args.pretrain_and_finetune:
+        if args.proportion_unlabeled_data_from_leftout_subject>0:
+            proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_leftout_subject
+        elif args.proportion_unlabeled_data_from_training_subjects>0:
+            proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_training_subjects
+        labeled_batch_size = int(semilearn_config.batch_size * (1-proportion_unlabeled_to_use))
+        unlabeled_batch_size = int(semilearn_config.batch_size * proportion_unlabeled_to_use)
         labeled_iters = len(finetune_dataset) * ceildiv(args.epochs, labeled_batch_size)
         unlabeled_iters = len(finetune_unlabeled_dataset) * ceildiv(args.epochs, unlabeled_batch_size)
         iters_for_loader = max(labeled_iters, unlabeled_iters)
-        labeled_batch_size = int(semilearn_config.batch_size * (1-args.proportion_unlabeled_data_from_leftout_subject))
-        unlabeled_batch_size = int(semilearn_config.batch_size * args.proportion_unlabeled_data_from_leftout_subject)
         train_finetuning_loader = get_data_loader(semilearn_config, finetune_dataset, labeled_batch_size, num_workers=multiprocessing.cpu_count()//8,
                                                   num_epochs=args.epochs, num_iters=iters_for_loader)
         train_finetuning_unlabeled_loader = get_data_loader(semilearn_config, finetune_unlabeled_dataset, unlabeled_batch_size, num_workers=multiprocessing.cpu_count()//8,
@@ -1182,6 +1203,8 @@ else:
     elif args.model == 'vit_tiny_patch2_32':
         pretrain_path = "https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_tiny_patch2_32_mlp_im_1k_32.pth"
         model = VisualTransformer.vit_tiny_patch2_32(pretrained=True, pretrained_path=pretrain_path, num_classes=numGestures)
+    elif args.model == 'MLP' or args.model == 'SVC' or args.model == 'RF':
+        model = None # Will be initialized later
     else: 
         # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
         # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
@@ -1207,15 +1230,16 @@ class CustomDataset(Dataset):
         return x, y
 
 if not args.turn_on_unlabeled_domain_adaptation:
-    num = 0
-    for name, param in model.named_parameters():
-        num += 1
-        if (num > 0):
-        #if (num > 72): # for -3
-        #if (num > 33): # for -4
-            param.requires_grad = True
-        else:
-            param.requires_grad = False
+    if args.model not in ['MLP', 'SVC', 'RF']:
+        num = 0
+        for name, param in model.named_parameters():
+            num += 1
+            if (num > 0):
+            #if (num > 72): # for -3
+            #if (num > 33): # for -4
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
 
     batch_size = args.batch_size
 
@@ -1235,7 +1259,8 @@ if not args.turn_on_unlabeled_domain_adaptation:
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
     learn = args.learning_rate
-    optimizer = torch.optim.Adam(model.parameters(), lr=learn)
+    if args.model not in ['MLP', 'SVC', 'RF']:
+        optimizer = torch.optim.Adam(model.parameters(), lr=learn)
 
     num_epochs = args.epochs
     if args.turn_on_cosine_annealing:
@@ -1358,7 +1383,7 @@ if args.leave_n_subjects_out_randomly != 0:
 
 device = torch.device("cuda:" + str(args.gpu) if torch.cuda.is_available() else "cpu")
 print("Device:", device)
-if not args.turn_on_unlabeled_domain_adaptation:
+if not args.turn_on_unlabeled_domain_adaptation and args.model not in ['MLP', 'SVC', 'RF']:
     model.to(device)
 
     wandb.watch(model)
@@ -1442,88 +1467,151 @@ if args.turn_on_unlabeled_domain_adaptation:
         semilearn_algorithm.train()
 
 else: 
-    for epoch in tqdm(range(num_epochs), desc="Epoch"):
-        model.train()
-        train_acc = 0.0
-        train_loss = 0.0
-        with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
-            for X_batch, Y_batch in t:
-                X_batch = X_batch.to(device).to(torch.float32)
-                Y_batch = Y_batch.to(device).to(torch.float32)
+    if args.model in ['MLP', 'SVC', 'RF']:
+        class MLP(nn.Module):
+            def __init__(self, input_size, hidden_sizes, output_size):
+                super(MLP, self).__init__()
+                self.hidden_layers = nn.ModuleList()
+                self.hidden_layers.append(nn.Linear(input_size, hidden_sizes[0]))
+                for i in range(1, len(hidden_sizes)):
+                    self.hidden_layers.append(nn.Linear(hidden_sizes[i-1], hidden_sizes[i]))
+                self.output_layer = nn.Linear(hidden_sizes[-1], output_size)
 
-                optimizer.zero_grad()
-                output = model(X_batch)
-                if isinstance(output, dict):
-                    output = output['logits']
-                loss = criterion(output, Y_batch)
-                loss.backward()
-                optimizer.step()
+            def forward(self, x):
+                for hidden in self.hidden_layers:
+                    x = F.relu(hidden(x))
+                x = self.output_layer(x)
+                return x
+            
+        def get_data_from_loader(loader):
+            X = []
+            Y = []
+            for X_batch, Y_batch in tqdm(loader, desc="Batches convert to Numpy"):
+                # Flatten each image from [batch_size, 3, 224, 224] to [batch_size, 3*224*224]
+                X_batch_flat = X_batch.view(X_batch.size(0), -1).cpu().numpy().astype(np.float64)
+                Y_batch_indices = torch.argmax(Y_batch, dim=1)  # Convert one-hot to class indices
+                X.append(X_batch_flat)
+                Y.append(Y_batch_indices.cpu().numpy().astype(np.int64))
+            return np.vstack(X), np.hstack(Y)
+        
+        if args.model == 'MLP':
+            # PyTorch MLP model
+            input_size = 3 * 224 * 224  # Change according to your input size
+            hidden_sizes = [512, 256]  # Example hidden layer sizes
+            output_size = 10  # Number of classes
+            model = MLP(input_size, hidden_sizes, output_size).to(device)
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            criterion = nn.CrossEntropyLoss()
+        
+        elif args.model == 'SVC':
+            model = SVC(probability=True)
+        
+        elif args.model == 'RF':
+            model = RandomForestClassifier()
+            
+        if args.model == 'MLP':
+            # PyTorch training loop for MLP
+            for epoch in tqdm(range(num_epochs), desc="Epoch"):
+                model.train()
+                train_acc = 0.0
+                train_loss = 0.0
+                with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+                    for X_batch, Y_batch in t:
+                        X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
+                        Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
 
-                train_loss += loss.item()
-                preds = torch.argmax(output, dim=1)
-                Y_batch_long = torch.argmax(Y_batch, dim=1)
-                train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+                        optimizer.zero_grad()
+                        output = model(X_batch)
+                        loss = criterion(output, Y_batch)
+                        loss.backward()
+                        optimizer.step()
 
-                # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
-                # Update the inner tqdm loop with metrics
-                # Only set_postfix every 10 batches to avoid slowing down the loop
-                if t.n % 10 == 0:
-                    t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
+                        train_loss += loss.item()
+                        preds = torch.argmax(output, dim=1)
+                        train_acc += torch.mean((preds == Y_batch).type(torch.float)).item()
 
-                del X_batch, Y_batch, output, preds
-                torch.cuda.empty_cache()
+                        if t.n % 10 == 0:
+                            t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": train_acc / (t.n + 1)})
 
-        # Validation
-        model.eval()
-        val_loss = 0.0
-        val_acc = 0.0
-        with torch.no_grad():
-            for X_batch, Y_batch in val_loader:
-                X_batch = X_batch.to(device).to(torch.float32)
-                Y_batch = Y_batch.to(device).to(torch.float32)
+                        del X_batch, Y_batch, output, preds
+                        torch.cuda.empty_cache()
 
-                #output = model(X_batch).logits
-                output = model(X_batch)
-                if isinstance(output, dict):
-                    output = output['logits']
-                val_loss += criterion(output, Y_batch).item()
-                preds = torch.argmax(output, dim=1)
-                Y_batch_long = torch.argmax(Y_batch, dim=1)
+                # Validation
+                model.eval()
+                val_loss = 0.0
+                val_acc = 0.0
+                with torch.no_grad():
+                    for X_batch, Y_batch in val_loader:
+                        X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
+                        Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
 
-                val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+                        output = model(X_batch)
+                        val_loss += criterion(output, Y_batch).item()
+                        preds = torch.argmax(output, dim=1)
+                        val_acc += torch.mean((preds == Y_batch).type(torch.float)).item()
 
-                del X_batch, Y_batch
-                torch.cuda.empty_cache()
+                        del X_batch, Y_batch
+                        torch.cuda.empty_cache()
 
-        train_loss /= len(train_loader)
-        train_acc /= len(train_loader)
-        val_loss /= len(val_loader)
-        val_acc /= len(val_loader)
+                train_loss /= len(train_loader)
+                train_acc /= len(train_loader)
+                val_loss /= len(val_loader)
+                val_acc /= len(val_loader)
 
-        print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
-        print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
-        #print(f"{val_acc:.4f}")
-        wandb.log({
-            "Epoch": epoch,
-            "Train Loss": train_loss,
-            "Train Acc": train_acc,
-            "Valid Loss": val_loss,
-            "Valid Acc": val_acc, 
-            "Learning Rate": optimizer.param_groups[0]['lr']})
+                print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+                print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+                wandb.log({
+                    "Epoch": epoch,
+                    "Train Loss": train_loss,
+                    "Train Acc": train_acc,
+                    "Valid Loss": val_loss,
+                    "Valid Acc": val_acc,
+                    "Learning Rate": optimizer.param_groups[0]['lr']
+                })
 
-    torch.save(model.state_dict(), model_filename)
-    wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
+            torch.save(model.state_dict(), model_filename)
+            wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
-    if args.pretrain_and_finetune:
-        num_epochs = args.finetuning_epochs
-        # train more on fine tuning dataset
-        finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
-        finetune_loader = DataLoader(finetune_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
-        for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
+        else:
+            X_train, Y_train = get_data_from_loader(train_loader)
+            X_val, Y_val = get_data_from_loader(val_loader)
+            # X_test, Y_test = get_data_from_loader(test_loader)
+
+            print("Data loaded")
+            model.fit(X_train, Y_train)
+            print("Model trained")
+            train_preds = model.predict(X_train)
+            print("Train predictions made")
+            val_preds = model.predict(X_val)
+            print("Validation predictions made")
+            # test_preds = model.predict(X_test)
+
+            train_acc = accuracy_score(Y_train, train_preds)
+            val_acc = accuracy_score(Y_val, val_preds)
+            # test_acc = accuracy_score(Y_test, test_preds)
+
+            train_loss = log_loss(Y_train, model.predict_proba(X_train))
+            val_loss = log_loss(Y_val, model.predict_proba(X_val))
+            # test_loss = log_loss(Y_test, model.predict_proba(X_test))
+
+            print(f"Train Loss: {train_loss:.4f} | Train Accuracy: {train_acc:.4f}")
+            print(f"Val Loss: {val_loss:.4f} | Val Accuracy: {val_acc:.4f}")
+            # print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f}")
+
+            wandb.log({
+                "Train Loss": train_loss,
+                "Train Acc": train_acc,
+                "Valid Loss": val_loss,
+                "Valid Acc": val_acc,
+                # "Test Loss": test_loss,
+                # "Test Acc": test_acc
+            })
+    else: # CNN training
+        for epoch in tqdm(range(num_epochs), desc="Epoch"):
             model.train()
             train_acc = 0.0
             train_loss = 0.0
-            with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+            with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
                 for X_batch, Y_batch in t:
                     X_batch = X_batch.to(device).to(torch.float32)
                     Y_batch = Y_batch.to(device).to(torch.float32)
@@ -1572,89 +1660,166 @@ else:
                     del X_batch, Y_batch
                     torch.cuda.empty_cache()
 
-            train_loss /= len(finetune_loader)
-            train_acc /= len(finetune_loader)
+            train_loss /= len(train_loader)
+            train_acc /= len(train_loader)
             val_loss /= len(val_loader)
             val_acc /= len(val_loader)
 
-            print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+            print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
             print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+            #print(f"{val_acc:.4f}")
             wandb.log({
-                "Finetuning Epoch": epoch,
+                "Epoch": epoch,
                 "Train Loss": train_loss,
                 "Train Acc": train_acc,
                 "Valid Loss": val_loss,
                 "Valid Acc": val_acc, 
                 "Learning Rate": optimizer.param_groups[0]['lr']})
+
+        torch.save(model.state_dict(), model_filename)
+        wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
+
+        if args.pretrain_and_finetune:
+            num_epochs = args.finetuning_epochs
+            # train more on fine tuning dataset
+            finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
+            finetune_loader = DataLoader(finetune_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
+            for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
+                model.train()
+                train_acc = 0.0
+                train_loss = 0.0
+                with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+                    for X_batch, Y_batch in t:
+                        X_batch = X_batch.to(device).to(torch.float32)
+                        Y_batch = Y_batch.to(device).to(torch.float32)
+
+                        optimizer.zero_grad()
+                        output = model(X_batch)
+                        if isinstance(output, dict):
+                            output = output['logits']
+                        loss = criterion(output, Y_batch)
+                        loss.backward()
+                        optimizer.step()
+
+                        train_loss += loss.item()
+                        preds = torch.argmax(output, dim=1)
+                        Y_batch_long = torch.argmax(Y_batch, dim=1)
+                        train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+
+                        # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
+                        # Update the inner tqdm loop with metrics
+                        # Only set_postfix every 10 batches to avoid slowing down the loop
+                        if t.n % 10 == 0:
+                            t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
+
+                        del X_batch, Y_batch, output, preds
+                        torch.cuda.empty_cache()
+
+                # Validation
+                model.eval()
+                val_loss = 0.0
+                val_acc = 0.0
+                with torch.no_grad():
+                    for X_batch, Y_batch in val_loader:
+                        X_batch = X_batch.to(device).to(torch.float32)
+                        Y_batch = Y_batch.to(device).to(torch.float32)
+
+                        #output = model(X_batch).logits
+                        output = model(X_batch)
+                        if isinstance(output, dict):
+                            output = output['logits']
+                        val_loss += criterion(output, Y_batch).item()
+                        preds = torch.argmax(output, dim=1)
+                        Y_batch_long = torch.argmax(Y_batch, dim=1)
+
+                        val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+
+                        del X_batch, Y_batch
+                        torch.cuda.empty_cache()
+
+                train_loss /= len(finetune_loader)
+                train_acc /= len(finetune_loader)
+                val_loss /= len(val_loader)
+                val_acc /= len(val_loader)
+
+                print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+                print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+                wandb.log({
+                    "Finetuning Epoch": epoch,
+                    "Train Loss": train_loss,
+                    "Train Acc": train_acc,
+                    "Valid Loss": val_loss,
+                    "Valid Acc": val_acc, 
+                    "Learning Rate": optimizer.param_groups[0]['lr']})
+                
+        # Testing
+        if (args.held_out_test):
+            pred = []
+            true = []
+
+            model.eval()
+            test_loss = 0.0
+            test_acc = 0.0
+            with torch.no_grad():
+                for X_batch, Y_batch in test_loader:
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    Y_batch = Y_batch.to(device).to(torch.float32)
+
+                    output = model(X_batch)
+                    if isinstance(output, dict):
+                        output = output['logits']
+                    test_loss += criterion(output, Y_batch).item()
+
+                    test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
+
+                    output = np.argmax(output.cpu().detach().numpy(), axis=1)
+                    pred.extend(output)
+                    labels = np.argmax(Y_batch.cpu().detach().numpy(), axis=1)
+                    true.extend(labels)
+
+            test_loss /= len(test_loader)
+            test_acc /= len(test_loader)
+            print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f}")
             
-    # Testing
-    if (args.held_out_test):
-        pred = []
-        true = []
+            wandb.log({
+                "Test Loss": test_loss,
+                "Test Acc": test_acc}) 
+            
+            
+            # %% Confusion Matrix
+            # Plot and log confusion matrix in wandb
+            utils.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+
+        # Load validation in smaller batches for memory purposes
+        torch.cuda.empty_cache()  # Clear cache if needed
 
         model.eval()
-        test_loss = 0.0
-        test_acc = 0.0
         with torch.no_grad():
-            for X_batch, Y_batch in test_loader:
+            validation_predictions = []
+            for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading"):
                 X_batch = X_batch.to(device).to(torch.float32)
-                Y_batch = Y_batch.to(device).to(torch.float32)
-
-                output = model(X_batch)
-                if isinstance(output, dict):
-                    output = output['logits']
-                test_loss += criterion(output, Y_batch).item()
-
-                test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
-
-                output = np.argmax(output.cpu().detach().numpy(), axis=1)
-                pred.extend(output)
-                labels = np.argmax(Y_batch.cpu().detach().numpy(), axis=1)
-                true.extend(labels)
-
-        test_loss /= len(test_loader)
-        test_acc /= len(test_loader)
-        print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f}")
-        
-        wandb.log({
-            "Test Loss": test_loss,
-            "Test Acc": test_acc}) 
-        
-        
-        # %% Confusion Matrix
-        # Plot and log confusion matrix in wandb
-        utils.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-
-    # Load validation in smaller batches for memory purposes
-    torch.cuda.empty_cache()  # Clear cache if needed
-
-    model.eval()
-    with torch.no_grad():
-        validation_predictions = []
-        for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading"):
-            X_batch = X_batch.to(device).to(torch.float32)
-            outputs = model(X_batch)
-            if isinstance(outputs, dict):
-                outputs = outputs['logits']
-            preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-            validation_predictions.extend(preds)
-
-    utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
-
-    # Load training in smaller batches for memory purposes
-    torch.cuda.empty_cache()  # Clear cache if needed
-
-    model.eval()
-    with torch.no_grad():
-        train_predictions = []
-        for X_batch, Y_batch in tqdm(train_loader, desc="Training Batch Loading"):
-            X_batch = X_batch.to(device).to(torch.float32)
-            outputs = model(X_batch)
-            if isinstance(outputs, dict):
+                outputs = model(X_batch)
+                if isinstance(outputs, dict):
                     outputs = outputs['logits']
-            preds = torch.argmax(outputs, dim=1)
-            train_predictions.extend(preds.cpu().detach().numpy())
+                preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+                validation_predictions.extend(preds)
 
-    utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-        
+        utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+
+        # Load training in smaller batches for memory purposes
+        torch.cuda.empty_cache()  # Clear cache if needed
+
+        model.eval()
+        with torch.no_grad():
+            train_predictions = []
+            for X_batch, Y_batch in tqdm(train_loader, desc="Training Batch Loading"):
+                X_batch = X_batch.to(device).to(torch.float32)
+                outputs = model(X_batch)
+                if isinstance(outputs, dict):
+                        outputs = outputs['logits']
+                preds = torch.argmax(outputs, dim=1)
+                train_predictions.extend(preds.cpu().detach().numpy())
+
+        utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+            
     run.finish()
