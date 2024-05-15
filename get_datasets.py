@@ -24,7 +24,6 @@ if not any(vars(args).values()):
     
 if args.CapgMyo_B or args.all:
     subprocess.run(['sh', './get_datasets/get_CapgMyo_B.sh'])
-
     # TODO: call respecitve utils? 
 
 if args.Hyser or args.all:
