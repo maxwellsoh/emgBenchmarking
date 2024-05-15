@@ -35,9 +35,13 @@ $ pip install git+https://github.com/jehanyang/lightning-bolts.git@v0.7
 ```
 
 # Benchmarking
-Currently, to download the datasets, you will have to go to the website that hosts the datasets, download each individuals data (for Ninapro DB2, DB5, and Capgmyo), download the whole dataset (for Ozdemir's open dataset), or request the dataset (for Jehan's dataset). 
+To get the publicly available datasets Ninapro DB2, Ninapro DB5, CapgMyo, Hyser, M (Myoband), Ozdemir, and UCI, run:
+`./get_datasets.py`
 
-You will follow this up with running the python notebooks `dataset_processing_[DATASET-NAME].ipynb` in order to process the dataset into hdf5 files (with the exception of Jehan's dataset, which is already in hdf5 format). 
+This will download, organize, and process the datasets into hdf5 files. 
+
+Jehan's dataset must be requested. 
+
 
 ## Diffusion Augmentation
 Go to the `diffusion_augmentation` folder and run the scripts as specified in that `README.md`.
