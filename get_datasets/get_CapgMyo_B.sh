@@ -1,0 +1,1 @@
+echo "CapgMyo_B database is a work in progres."

@@ -1,0 +1,52 @@
+
+import argparse
+import subprocess
+import os
+
+
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument("--all", action="store_true", help="downloads all datasets")
+parser.add_argument("--CapgMyo_B", action="store_true")
+parser.add_argument("--Hyser", action="store_true")
+parser.add_argument("--Jehan_Dataset", action="store_true")
+parser.add_argument("--M_Dataset", action="store_true")
+parser.add_argument("--NinaproDB2", action="store_true")
+parser.add_argument("--NinaproDB5", action="store_true")
+parser.add_argument("--OzdemirEMG", action="store_true")
+parser.add_argument("--UCI", action="store_true")
+
+args = parser.parse_args()
+
+if not any(vars(args).values()):
+    print("You must specify which datasets you would like to download as an argument.")
+    
+if args.CapgMyo_B or args.all:
+    subprocess.run(['sh', './get_datasets/get_CapgMyo_B.sh'])
+
+    # TODO: call respecitve utils? 
+
+if args.Hyser or args.all:
+    subprocess.run(['sh', './get_datasets/get_Hyser.sh'])
+
+if args.Jehan_Dataset or args.all:
+    subprocess.run(['sh', './get_datasets/get_Jehan_Dataset.sh'])
+
+if args.M_Dataset or args.all:
+    subprocess.run(['sh', './get_datasets/get_M_dataset.sh'])
+
+if args.NinaproDB2 or args.all:
+    subprocess.run(['sh', './get_datasets/get_NinaproDB2.sh'])
+
+if args.NinaproDB5 or args.all:
+    subprocess.run(['sh', './get_datasets/get_NinaproDB5.sh'])
+
+if args.OzdemirEMG or args.all:
+    subprocess.run(['sh', './get_datasets/get_OzdemirEMG.sh'])
+    # TODO: call processing ipynb
+
+if args.UCI or args.all:
+    subprocess.run(['sh', './get_datasets/get_UCI.sh'])
+
+
