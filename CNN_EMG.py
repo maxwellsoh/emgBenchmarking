@@ -1108,17 +1108,19 @@ if args.turn_on_unlabeled_domain_adaptation:
     if proportion_unlabeled_of_training_subjects>0:
         unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                         is_ulb=True, strong_transform=semilearn_transform)
+        proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_training_subjects
     elif proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
         unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                         is_ulb=True, strong_transform=semilearn_transform)
+        proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_leftout_subject
     if args.pretrain_and_finetune:
         finetune_dataset = BasicDataset(semilearn_config, X_train_finetuning, torch.argmax(Y_train_finetuning, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
         finetune_unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), 
                                                   semilearn_config.num_classes, semilearn_transform, is_ulb=True, strong_transform=semilearn_transform)
     validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
 
-    labeled_batch_size = int(semilearn_config.batch_size * (1-args.proportion_unlabeled_data_from_training_subjects))
-    unlabeled_batch_size = int(semilearn_config.batch_size * args.proportion_unlabeled_data_from_training_subjects)
+    labeled_batch_size = int(semilearn_config.batch_size * (1-proportion_unlabeled_to_use))
+    unlabeled_batch_size = int(semilearn_config.batch_size * proportion_unlabeled_to_use)
     labeled_iters = len(labeled_dataset) * ceildiv(args.epochs, labeled_batch_size)
     unlabeled_iters = len(unlabeled_dataset) * ceildiv(args.epochs, unlabeled_batch_size)
     iters_for_loader = max(labeled_iters, unlabeled_iters)
@@ -1129,11 +1131,15 @@ if args.turn_on_unlabeled_domain_adaptation:
                                                  num_epochs=args.epochs, num_iters=iters_for_loader)
         
     if args.pretrain_and_finetune:
+        if args.proportion_unlabeled_data_from_leftout_subject>0:
+            proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_leftout_subject
+        elif args.proportion_unlabeled_data_from_training_subjects>0:
+            proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_training_subjects
+        labeled_batch_size = int(semilearn_config.batch_size * (1-proportion_unlabeled_to_use))
+        unlabeled_batch_size = int(semilearn_config.batch_size * proportion_unlabeled_to_use)
         labeled_iters = len(finetune_dataset) * ceildiv(args.epochs, labeled_batch_size)
         unlabeled_iters = len(finetune_unlabeled_dataset) * ceildiv(args.epochs, unlabeled_batch_size)
         iters_for_loader = max(labeled_iters, unlabeled_iters)
-        labeled_batch_size = int(semilearn_config.batch_size * (1-args.proportion_unlabeled_data_from_leftout_subject))
-        unlabeled_batch_size = int(semilearn_config.batch_size * args.proportion_unlabeled_data_from_leftout_subject)
         train_finetuning_loader = get_data_loader(semilearn_config, finetune_dataset, labeled_batch_size, num_workers=multiprocessing.cpu_count()//8,
                                                   num_epochs=args.epochs, num_iters=iters_for_loader)
         train_finetuning_unlabeled_loader = get_data_loader(semilearn_config, finetune_unlabeled_dataset, unlabeled_batch_size, num_workers=multiprocessing.cpu_count()//8,
@@ -1571,9 +1577,13 @@ else:
             X_val, Y_val = get_data_from_loader(val_loader)
             # X_test, Y_test = get_data_from_loader(test_loader)
 
+            print("Data loaded")
             model.fit(X_train, Y_train)
+            print("Model trained")
             train_preds = model.predict(X_train)
+            print("Train predictions made")
             val_preds = model.predict(X_val)
+            print("Validation predictions made")
             # test_preds = model.predict(X_test)
 
             train_acc = accuracy_score(Y_train, train_preds)
