@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python
 import argparse
 import subprocess
 import os
@@ -43,8 +43,8 @@ if args.NinaproDB5 or args.all:
 
 if args.OzdemirEMG or args.all:
     subprocess.run(['sh', './get_datasets/get_OzdemirEMG.sh'])
-    # TODO: call processing ipynb
-
+    subprocess.run(['python', './process_Ozdemir.py'])
+    
 if args.UCI or args.all:
     subprocess.run(['sh', './get_datasets/get_UCI.sh'])
 
