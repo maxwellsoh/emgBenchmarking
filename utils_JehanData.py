@@ -80,18 +80,18 @@ def target_normalize (data, target_min, target_max, gesture):
     return data
 
 # returns array with dimensions (# of samples)x64x10x100 [SAMPLES, CHANNELS, GESTURES, TIME]
-def getData(n, gesture, target_max=None, target_min=None, leftout=None):
+def getData(n, gesture, target_max=None, target_min=None, leftout=None, session_number=1):
+    session_number_mapping = {1: 'initial', 2: 'recalibration'}
     if (n<10):
-        file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
+        file = h5py.File('./Jehan_Dataset/p00' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
     else:
-        file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
+        file = h5py.File('./Jehan_Dataset/p0' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
     data = np.array(file[gesture])
     if (leftout != None and n != leftout):
         data = target_normalize(data, target_min, target_max, gesture_labels.index(gesture))
     data = highpassFilter(torch.from_numpy(data).unfold(dimension=-1, size=wLenTimesteps, step=stepLen))
 
     return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2])
-
 
 def getEMG(args):
     if (type(args) == int):
@@ -107,13 +107,30 @@ def getEMG(args):
 
     return torch.cat([getData(n, name, target_max, target_min, leftout) for name in gesture_labels], axis=0)
 
+def getEMG_separateSessions(args):
+    subject_number, session_number = args
+    if (len(args) == 2):
+        subject_number = participants[subject_number-1]
+        session_number = session_number
+        target_max = None
+        target_min = None
+        leftout = None
+    else:
+        subject_number = participants[subject_number-1]
+        session_number = session_number
+        target_max = args[2]
+        target_min = args[3]
+        leftout = args[4]
+        
+    return torch.cat([getData(subject_number, name, target_max, target_min, leftout, session_number) for name in gesture_labels], axis=0)
+
 # assumes first 1/12 of target domain accessed
 def getExtrema (n):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
     
     if (n<10):
-            file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
+        file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
     else:
         file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
     
@@ -141,6 +158,30 @@ def getLabels (n):
     curr = 0
     for x in range (numGestures):
         #labels[curr:curr+gesture_count[x]][x] = 1.0
+        for y in range(gesture_count[x]):
+            labels[curr + y][x] = 1.0
+        curr += gesture_count[x]
+    return labels
+
+def getGestures_separateSessions(args):
+    subject_number, session_number = args
+    subject_number = participants[int(subject_number)-1]
+    session_number_mapping = {1: 'initial', 2: 'recalibration'}
+    file = h5py.File(f'./Jehan_Dataset/p{subject_number:03}/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
+    gesture_count = []
+    for gesture in gesture_labels: 
+        data = np.array(file[gesture])
+        gesture_count.append(len(data))
+    return gesture_count
+
+def getLabels_separateSessions(args):
+    subject_number, session_number = args
+    gesture_count = getGestures_separateSessions((subject_number, session_number))
+    emg_len = sum(gesture_count)
+    labels = torch.tensor(())
+    labels = labels.new_zeros(size=(emg_len, numGestures))
+    curr = 0
+    for x in range (numGestures):
         for y in range(gesture_count[x]):
             labels[curr + y][x] = 1.0
         curr += gesture_count[x]
