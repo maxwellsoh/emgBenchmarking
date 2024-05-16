@@ -24,11 +24,12 @@ wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 50 #50 ms
 numElectrodes = 128
-num_subjects = 20
+num_subjects = 10 # 10 subjects with 2 sessions each
 cmap = mpl.colormaps['viridis']
 gesture_labels = ["thumb up", "extension of index and middle, flexion of the others", "flexion of ring and little finger, extension of the others", 
 "thumb opposing base of little finger", "abduction of all fingers", "fingers flexed together in fist", "pointing index", "adduction of extended fingers"]
-
+participants_first_session_index = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+participants_second_session_index = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
         self.data = data
@@ -77,8 +78,8 @@ def target_normalize (data, target_min, target_max, gesture):
 def window (e):
     return e.unfold(dimension=0, size=wLen, step=50)
 
-def getData (subject, gesture, trial):
-    if (type(subject) == int):
+def getData (subject, gesture, trial, session=None):    
+    if (isinstance(subject, int)):  
         sub = str(subject)
         if subject < 10:
             sub = '0' + sub
@@ -96,7 +97,7 @@ def getData (subject, gesture, trial):
     mat_data = io.loadmat('./CapgMyo_B/dbb-preprocessed-0' + sub + '/' + name + '.mat')
     mat_array = mat_data['data']
 
-    if (type(subject) != int and leftout != subject[0]):
+    if (not isinstance(subject, int) and leftout != subject[0]):
         mat_array = target_normalize(mat_array, target_min, target_max, gesture - 1)
 
     tensor_data = torch.from_numpy(mat_array)
@@ -110,6 +111,11 @@ def getData (subject, gesture, trial):
 def getEMG (x):
     #return torch.cat((getData(x-1,1,1), getData(x,1,1)), dim=0)
     return getData(x, 1, 1)
+
+def getEMG_separateSessions(args):
+    subject_number, session_number = args
+    data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
+    return getData(data_index, 1, 1)
 
 def getExtrema (n):
     mins = np.zeros((numElectrodes, numGestures))
@@ -131,6 +137,17 @@ def getExtrema (n):
 
 def getLabels (n):
     emg_len = len(getEMG(n))
+    labels = torch.tensor(())
+    labels = labels.new_zeros(size=(emg_len, 8))
+    for x in range (8):
+        for y in range (int(emg_len / 8)):
+            labels[int(x * (emg_len / 8) + y)][x] = 1.0
+    return labels
+
+def getLabels_separateSessions(args):
+    subject_number, session_number = args
+    data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
+    emg_len = len(getData(data_index, 1, 1))
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(emg_len, 8))
     for x in range (8):
