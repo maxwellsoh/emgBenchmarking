@@ -1,16 +1,23 @@
+"""
+File: get_config.py
+Description: Parses either command line arguments (argparse) or a given yaml file (yaml) to configure a given run.  
+"""
 import argparse
 import yaml
 import utils_OzdemirEMG as utils # needed for parser
 
-# Define a custom argument type for a list of integers
 def list_of_ints(arg):
+    """
+    Define a custom argument type for a list of integers.
+    """
     return list(map(int, arg.split(',')))
-
 
 def override_with_config(args):
     """
     Overrides the default and manually passed in arguments with config file value passed in --config
     """
+
+    print("passed in args.config:", args.config)
     with open(args.config, "r") as file: 
         data = yaml.safe_load(file)
 
@@ -21,7 +28,8 @@ def override_with_config(args):
         arg_dict[key] = data[key]
 
 def initialize_parser():
-    """Sets up the arg parser for CNN_EMG
+    """
+    Sets up the arg parser for CNN_EMG
     """
     # Create the parser
     parser = argparse.ArgumentParser(description="Include arguments for running different trials")
@@ -121,20 +129,23 @@ def initialize_parser():
 
     # Parse the arguments
     args = parser.parse_args()
-    
     return args
 
-def run():
+def get():
+    """
+    Parses either command line arguments (argparse) or a given yaml file (yaml) to configure a given run.  
+
+    Returns:
+        args: Final list of args and their values. 
+    """
+
     args = initialize_parser()
-    print("before:", args)
     if args.config:
         override_with_config(args)
-    print("after", args)
+    return args
 
-if __name__ == "__main__":
-    run()
     
-    
+
     
 
 
