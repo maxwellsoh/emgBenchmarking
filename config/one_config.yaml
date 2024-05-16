@@ -5,7 +5,7 @@ epochs: 50
 project_name_suffix: __jehan_unlabeled_study_v2 
 turn_off_scaler_normalization: True
 leftout_subject: 1
-leave_one_subject_out: True
+leftout_subject: 1
 transfer_learning: True
 cross_validation_for_time_series: True
 turn_on_rms: True
@@ -20,4 +20,4 @@ proportion_transfer_learning: 0.0
 proportion_unlabeled_data_from_leftout_subject: 0.0
 proportion_data_from_training_subjects: 1.0
 proportion_unlabeled_data_from_training_subjects: 0.8
-learning_rate: 5e-4
+leftout_subject: 1

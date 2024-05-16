@@ -47,7 +47,7 @@ import get_config as get_config
 
 
 # Parse Arguments
-args = get_config.get()
+args = get_config.get() 
 
 exercises = False
 
