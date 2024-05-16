@@ -40,7 +40,10 @@ from sklearn.ensemble import RandomForestClassifier
 from joblib import dump
 from sklearn.metrics import accuracy_score, log_loss
 import torch.nn.functional as F
+import subprocess
+import get_datasets
 
+# TODO: get it to automatically call the right programs if it is missing them... should be just a straight call. need to work on actually running it 
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -155,11 +158,19 @@ if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
         NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
 
 if (args.dataset == "uciEMG"):
+    if (not os.path.exists("./uciEMG")):
+        print("uciEMG dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--UCI'])
+
     import utils_UCI as utils
     print(f"The dataset being tested is uciEMG")
     project_name = 'emg_benchmarking_uci'
 
 elif (args.dataset == "ninapro-db2"):
+    if (not os.path.exists("./NinaproDB2")):
+        print("NinaproDB2 dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--NinaproDB2'])
+
     import utils_NinaproDB2 as utils
     print(f"The dataset being tested is ninapro-db2")
     project_name = 'emg_benchmarking_ninapro-db2'
@@ -168,6 +179,10 @@ elif (args.dataset == "ninapro-db2"):
         ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
 
 elif (args.dataset == "ninapro-db5"):
+    if (not os.path.exists("./NinaproDB5")):
+        print("NinaproDB5 dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--NinaproDB5'])
+
     import utils_NinaproDB5 as utils
     print(f"The dataset being tested is ninapro-db5")
     project_name = 'emg_benchmarking_ninapro-db5'
@@ -176,6 +191,9 @@ elif (args.dataset == "ninapro-db5"):
         ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
 
 elif (args.dataset == "M_dataset"):
+    if (not os.path.exists("./M_dataset")):
+        print("M_dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--M_Dataset'])
     import utils_M_dataset as utils
     print(f"The dataset being tested is M_dataset")
     project_name = 'emg_benchmarking_M_dataset'
@@ -183,22 +201,39 @@ elif (args.dataset == "M_dataset"):
         ValueError("leave-one-session-out not implemented for M_dataset; only one session exists")
 
 elif (args.dataset == "hyser"):
+    if (not os.path.exists("./hyser")):
+        print("Hyser dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--hyser'])
     import utils_Hyser as utils
     print(f"The dataset being tested is hyser")
     project_name = 'emg_benchmarking_hyser'
+
 elif (args.dataset == "capgmyo"):
+    if (not os.path.exists("./CapgMyo_B")):
+        print("CapgMyo_B dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--CapgMyo_B'])
     import utils_CapgMyo as utils
     print(f"The dataset being tested is CapgMyo")
     project_name = 'emg_benchmarking_capgmyo'
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for CapgMyo; only one session exists")
+
 elif (args.dataset == "jehan"):
+    if (not os.path.exists("./Jehan_Dataset")):
+        print("Jehan dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--Jehan_Dataset'])
+
     import utils_JehanData as utils
     print(f"The dataset being tested is JehanDataset")
     project_name = 'emg_benchmarking_jehandataset'
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for JehanDataset; only one session exists")
 else:
+    
+    if (not os.path.exists("./OzdemirEMG")):
+        print("Ozdemir dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--OzdemirEMG'])
+
     print(f"The dataset being tested is OzdemirEMG")
     project_name = 'emg_benchmarking_ozdemir'
     if args.full_dataset_ozdemir:

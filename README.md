@@ -35,9 +35,10 @@ $ pip install git+https://github.com/jehanyang/lightning-bolts.git@v0.7
 ```
 
 # Benchmarking
-To get the publicly available datasets Ninapro DB2, Ninapro DB5, CapgMyo, Hyser, M (Myoband), Ozdemir, and UCI, run:
-`./get_datasets.py`
-
+To download, organize, and process the publicly available datasets (Ninapro DB2, Ninapro DB5, CapgMyo, Hyser, M (Myoband), Ozdemir, and UCI) into hdf5 files, run:
+```console
+$ ./get_datasets.py
+```
 This will download, organize, and process the datasets into hdf5 files. 
 
 Jehan's dataset must be requested. 
