@@ -191,7 +191,7 @@ elif (args.dataset == "capgmyo"):
     print(f"The dataset being tested is CapgMyo")
     project_name = 'emg_benchmarking_capgmyo'
     if args.leave_one_session_out:
-        ValueError("leave-one-session-out not implemented for CapgMyo; only one session exists")
+        utils.num_subjects = 10
 elif (args.dataset == "jehan"):
     import utils_JehanData as utils
     print(f"The dataset being tested is JehanDataset")
@@ -397,14 +397,24 @@ else: # Not exercises
                     labels.extend(labels_async.get())
                 
             else: # Not leave one session out
-                emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
+                if args.dataset == "capgmyo":
+                    dataset_identifiers = 20 # 20 identifiers for capgmyo dbb (10 subjects, 2 sessions each)
+                else:
+                    dataset_identifiers = utils.num_subjects
+                    
+                emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(dataset_identifiers)])
                 emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
                 
-                labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
+                labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(dataset_identifiers)])
                 labels = labels_async.get()
 
     print("subject 1 mean", torch.mean(emg[0]))
     numGestures = utils.numGestures
+
+if args.dataset == "capgmyo" and not args.leave_one_session_out:
+    # Condense lists of 20 into list of 10
+    emg = [torch.cat((emg[i], emg[i+1]), dim=0) for i in range(0, len(emg), 2)]
+    labels = [torch.cat((labels[i], labels[i+1]), dim=0) for i in range(0, len(labels), 2)]
 
 length = emg[0].shape[1]
 width = emg[0].shape[2]

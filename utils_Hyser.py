@@ -165,6 +165,31 @@ def getEMG (args):
     emg = filter(torch.cat(emg, dim=0))
     return emg
 
+def getEMG_separateSessions(args):
+    if (len(args) == 2):
+        subject_number = args[0]
+        session_number = args[1]
+        target_max = None
+        target_min = None
+        leftout = None
+        
+    else:
+        subject_number = args[0]
+        session_number = args[1]
+        target_max = args[2]
+        target_min = args[3]
+        leftout = args[4]
+    
+    if (subject_number < 10):
+        sub = f'0{subject_number}'
+    else:
+        sub = f'{subject_number}'
+
+    emg = getEMG_help(sub, str(session_number), target_max, target_min, leftout)
+    emg = filter(torch.cat(emg, dim=0))
+    return emg
+        
+    
 def getExtrema (n):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
@@ -227,6 +252,29 @@ def getLabels (n):
                     labels.append(v)
         file.close()
 
+    return contract(labels)
+
+def getLabels_separateSessions(args):
+    if (len(args) == 2):
+        subject_number = args[0]
+        session_number = args[1]
+    else:
+        subject_number = args[0]
+        session_number = args[1]
+    
+    if (subject_number < 10):
+        sub = f'0{subject_number}'
+    else:
+        sub = f'{subject_number}'
+    
+    labels = []
+    file = open(f'hyser/subject{sub}_session{session_number}/label_dynamic.txt', 'r')
+    vals = file.readline().strip().split(',')
+    for v in vals:
+        if (v in gesture_nums):
+            for i in range(7):
+                labels.append(v)
+    file.close()
     return contract(labels)
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
