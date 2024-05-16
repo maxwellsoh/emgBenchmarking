@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import spectrogram, stft
 import pywt
 from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
+import glob
 
 numGestures = 10
 fs = 4000 #Hz
@@ -28,6 +29,7 @@ num_subjects = 13
 cmap = mpl.colormaps['viridis']
 gesture_labels = ['abduct_p1', 'adduct_p1', 'extend_p1', 'grip_p1', 'pronate_p1', 'rest_p1', 'supinate_p1', 'tripod_p1', 'wextend_p1', 'wflex_p1']
 participants = [8, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22]
+participants_with_online_data = [8, 9, 11, 15, 18, 21, 22]
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -87,11 +89,25 @@ def getData(n, gesture, target_max=None, target_min=None, leftout=None, session_
     else:
         file = h5py.File('./Jehan_Dataset/p0' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
     data = np.array(file[gesture])
-    if (leftout != None and n != leftout):
+    if (leftout is not None and n != leftout):
         data = target_normalize(data, target_min, target_max, gesture_labels.index(gesture))
     data = highpassFilter(torch.from_numpy(data).unfold(dimension=-1, size=wLenTimesteps, step=stepLen))
 
     return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2])
+
+def getOnlineUnlabeledData(subject_number):
+    subject_number = participants[subject_number-1]
+    assert subject_number in participants_with_online_data, "Subject number does not have online data."
+    folder_paths = glob.glob(f"./Jehan_Unlabeled_Dataset/p{subject_number:03}_online_part-*/")
+    data_all = []
+    for folder_path in folder_paths:
+        file_paths = glob.glob(f"{folder_path}/*.h5")
+        for file_path in file_paths:
+            file = h5py.File(file_path, 'r')
+            data = np.array(file['realtime_emgdata']) # shape: (num_channels, num_samples)
+            data = highpassFilter(torch.from_numpy(data).unfold(dimension=-1, size=wLenTimesteps, step=stepLen))
+            data_all.append(data)
+    return torch.cat(data_all, axis=1).permute([1, 0, 2])
 
 def getEMG(args):
     if (type(args) == int):
@@ -329,11 +345,10 @@ def process_optimized_makeOneMagnitudeImage(args_tuple):
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None,
               turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
     
-    
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
     else:
-        emg = np.array(emg.view(len(emg), length*width))
+        emg = np.array(emg.reshape(len(emg), length*width))
 
     # Use RMS preprocessing
     if turn_on_rms:

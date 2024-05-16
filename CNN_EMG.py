@@ -141,6 +141,8 @@ parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by def
 parser.add_argument('--proportion_unlabeled_data_from_training_subjects', type=float, help='proportion of data from training subjects to use as unlabeled data. Set to 0.0 by default.', default=0.0)
 # Add argument for cutting down amount of total data for training subjects
 parser.add_argument('--proportion_data_from_training_subjects', type=float, help='proportion of data from training subjects to use. Set to 1.0 by default.', default=1.0)
+# Add argument for loading unlabeled data from jehan dataset
+parser.add_argument('--load_unlabeled_data_jehan', type=utils.str2bool, help='whether or not to load unlabeled data from Jehan dataset. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -270,6 +272,7 @@ print(f"The value of --batch_size is {args.batch_size}")
 
 print(f"The value of --proportion_unlabeled_data_from_training_subjects is {args.proportion_unlabeled_data_from_training_subjects}")
 print(f"The value of --proportion_data_from_training_subjects is {args.proportion_data_from_training_subjects}")
+print(f"The value of --load_unlabeled_data_jehan is {args.load_unlabeled_data_jehan}")
 
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -415,6 +418,11 @@ if args.dataset == "capgmyo" and not args.leave_one_session_out:
     # Condense lists of 20 into list of 10
     emg = [torch.cat((emg[i], emg[i+1]), dim=0) for i in range(0, len(emg), 2)]
     labels = [torch.cat((labels[i], labels[i+1]), dim=0) for i in range(0, len(labels), 2)]
+    
+if args.load_unlabeled_data_jehan:
+    assert args.dataset == "jehan", "Can only load unlabeled online data from Jehan dataset"
+    print("Loading unlabeled online data from Jehan dataset")
+    unlabeled_online_data = utils.getOnlineUnlabeledData(args.leftout_subject)
 
 length = emg[0].shape[1]
 width = emg[0].shape[2]
@@ -439,7 +447,7 @@ else:
     
 leaveOutIndices = []
 # Generate scaler for normalization
-if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not args.target_normalize):
+if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not args.target_normalize): # will have to run and test this again, or just remove
     leaveOut = args.leave_n_subjects_out_randomly
     print(f"Leaving out {leaveOut} subjects randomly")
     # subject indices to leave out randomly
@@ -473,7 +481,7 @@ if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normali
     del emg_reshaped
 
 else: # Not leave n subjects out randomly
-    if (args.held_out_test):
+    if (args.held_out_test): # should be deprecated and deleted
         if args.turn_on_kfold:
             skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
             
@@ -693,6 +701,16 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
         else:
             print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
         data += [images]
+        
+if args.load_unlabeled_data_jehan:
+    unlabeled_images = utils.getImages(unlabeled_online_data, scaler, length, width,
+                                                turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize,
+                                                turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value,
+                                                turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt,
+                                                turn_on_hht=args.turn_on_hht)
+    unlabeled_images = np.array(unlabeled_images, dtype=np.float16)
+    unlabeled_data = unlabeled_images
+    del unlabeled_images, unlabeled_online_data
 
 if args.leave_n_subjects_out_randomly != 0:
     
@@ -791,6 +809,9 @@ else:
                 else:
                     X_finetune.append(np.array(X_train_temp))
                     Y_finetune.append(np.array(Y_train_temp))
+        if args.load_unlabeled_data_jehan:
+            X_finetune_unlabeled_list.append(unlabeled_data)
+            Y_finetune_unlabeled_list.append(np.zeros(unlabeled_data.shape[0]))
 
         X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
         Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
@@ -801,7 +822,7 @@ else:
         if args.proportion_unlabeled_data_from_training_subjects>0:
             X_pretrain_unlabeled = np.concatenate(X_pretrain_unlabeled_list, axis=0, dtype=np.float16)
             Y_pretrain_unlabeled = np.concatenate(Y_pretrain_unlabeled_list, axis=0, dtype=np.float16)
-        if args.proportion_unlabeled_data_from_leftout_subject>0:
+        if args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_jehan:
             X_finetune_unlabeled = np.concatenate(X_finetune_unlabeled_list, axis=0, dtype=np.float16)
             Y_finetune_unlabeled = np.concatenate(Y_finetune_unlabeled_list, axis=0, dtype=np.float16)
         
@@ -814,7 +835,7 @@ else:
         if args.proportion_unlabeled_data_from_training_subjects>0:
             X_train_unlabeled = torch.from_numpy(X_pretrain_unlabeled).to(torch.float16)
             Y_train_unlabeled = torch.from_numpy(Y_pretrain_unlabeled).to(torch.float16)
-        if args.proportion_unlabeled_data_from_leftout_subject>0:
+        if args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_jehan:
             X_train_finetuning_unlabeled = torch.from_numpy(X_finetune_unlabeled).to(torch.float16)
             Y_train_finetuning_unlabeled = torch.from_numpy(Y_finetune_unlabeled).to(torch.float16)
 
@@ -860,6 +881,7 @@ else:
                 
                 print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
                 print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
+            
                 
             if not args.pretrain_and_finetune:
                 X_train = torch.concat((X_train, X_train_finetuning), axis=0)
@@ -882,7 +904,7 @@ else:
         del emg
         del labels
         
-    elif args.leave_one_subject_out: # Running LOSO
+    elif args.leave_one_subject_out: # Running LOSO rather than leave one session out
         if args.reduce_training_data_size:
             reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
 
@@ -961,13 +983,13 @@ else:
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
                         X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=True)
             
-            # if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0: #DELETE
-            #     if args.cross_validation_for_time_series:
-            #         X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
-            #             X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=False)
-            #     else: 
-            #         X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
-            #             X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=True)
+            if args.load_unlabeled_data_jehan:
+                if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
+                    X_train_unlabeled_partial_leftout_subject = np.concatenate([X_train_unlabeled_partial_leftout_subject, unlabeled_data], axis=0)
+                    Y_train_unlabeled_partial_leftout_subject = np.concatenate([Y_train_unlabeled_partial_leftout_subject, np.zeros((unlabeled_data.shape[0], utils.numGestures))], axis=0)
+                else:
+                    X_train_unlabeled_partial_leftout_subject = unlabeled_data
+                    Y_train_unlabeled_partial_leftout_subject = np.zeros((unlabeled_data.shape[0], utils.numGestures))
 
             print("Size of X_train_partial_leftout_subject:     ", X_train_partial_leftout_subject.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
             print("Size of Y_train_partial_leftout_subject:     ", Y_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE)
@@ -989,18 +1011,20 @@ else:
                     X_train_unlabeled = torch.tensor(X_train_unlabeled)
                     Y_train_unlabeled = torch.tensor(Y_train_unlabeled)
 
-                if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
+                if proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_jehan:
+                    if proportion_unlabeled_of_proportion_to_keep_of_leftout==0:
+                        X_train_labeled_partial_leftout_subject = X_train_partial_leftout_subject
+                        Y_train_labeled_partial_leftout_subject = Y_train_partial_leftout_subject
                     if not args.pretrain_and_finetune:
                         X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
                         Y_train = torch.tensor(np.concatenate((Y_train, Y_train_labeled_partial_leftout_subject), axis=0))
-                        X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
-                        Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                        X_train_unlabeled = torch.tensor(np.concatenate((X_train_unlabeled, X_train_unlabeled_partial_leftout_subject), axis=0))
+                        Y_train_unlabeled = torch.tensor(np.concatenate((Y_train_unlabeled, Y_train_unlabeled_partial_leftout_subject), axis=0))
                     else:
                         X_train_finetuning = torch.tensor(X_train_labeled_partial_leftout_subject)
                         Y_train_finetuning = torch.tensor(Y_train_labeled_partial_leftout_subject)
                         X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
                         Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
-                        
                 else:
                     if proportion_to_keep_of_leftout_subject_for_training>0:
                         if not args.pretrain_and_finetune:
@@ -1050,7 +1074,6 @@ def ceildiv(a, b):
         return -(a // -b)
     
 if args.turn_on_unlabeled_domain_adaptation:
-    print("Number of total batches in training data:", X_train.shape[0] // args.batch_size)
     current_date_and_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     assert (args.transfer_learning and args.cross_validation_for_time_series) or args.leave_one_session_out, \
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
@@ -1064,9 +1087,9 @@ if args.turn_on_unlabeled_domain_adaptation:
 
         # optimization configs
         'epoch': args.epochs,  # set to 100
-        'num_train_iter': args.epochs * ceildiv(X_train.shape[0], args.batch_size),
-        'num_eval_iter': ceildiv(X_train.shape[0], args.batch_size),
-        'num_log_iter': ceildiv(X_train.shape[0], args.batch_size),
+        # 'num_train_iter': args.epochs * ceildiv(X_train.shape[0], args.batch_size),
+        # 'num_eval_iter': ceildiv(X_train.shape[0], args.batch_size),
+        # 'num_log_iter': ceildiv(X_train.shape[0], args.batch_size),
         'optim': 'AdamW',   # AdamW optimizer
         'lr': args.learning_rate,  # Learning rate
         'layer_decay': 0.5,  # Layer-wise decay learning rate  
@@ -1105,9 +1128,6 @@ if args.turn_on_unlabeled_domain_adaptation:
     } 
     
     semilearn_config = get_config(semilearn_config_dict)
-    semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
-    semilearn_algorithm.model = send_model_cuda(semilearn_config, semilearn_algorithm.model)
-    semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
 
     if args.model == 'vit_tiny_patch2_32':
         semilearn_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
@@ -1118,37 +1138,57 @@ if args.turn_on_unlabeled_domain_adaptation:
     if proportion_unlabeled_of_training_subjects>0:
         unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                         is_ulb=True, strong_transform=semilearn_transform)
-        proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_training_subjects
-    elif proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
+        # proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_training_subjects
+    elif proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_jehan:
         unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                         is_ulb=True, strong_transform=semilearn_transform)
-        proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_leftout_subject
+        # proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_leftout_subject
     if args.pretrain_and_finetune:
         finetune_dataset = BasicDataset(semilearn_config, X_train_finetuning, torch.argmax(Y_train_finetuning, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
         finetune_unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), 
                                                   semilearn_config.num_classes, semilearn_transform, is_ulb=True, strong_transform=semilearn_transform)
+        
     validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
 
+    proportion_unlabeled_to_use = len(unlabeled_dataset) / (len(labeled_dataset) + len(unlabeled_dataset)) 
     labeled_batch_size = int(semilearn_config.batch_size * (1-proportion_unlabeled_to_use))
     unlabeled_batch_size = int(semilearn_config.batch_size * proportion_unlabeled_to_use)
-    labeled_iters = len(labeled_dataset) * ceildiv(args.epochs, labeled_batch_size)
-    unlabeled_iters = len(unlabeled_dataset) * ceildiv(args.epochs, unlabeled_batch_size)
+    if labeled_batch_size + unlabeled_batch_size < semilearn_config.batch_size:
+        if labeled_batch_size < unlabeled_batch_size:
+            labeled_batch_size += 1
+        else:
+            unlabeled_batch_size += 1
+        
+    labeled_iters = args.epochs * ceildiv(len(labeled_dataset), labeled_batch_size)
+    unlabeled_iters = args.epochs * ceildiv(len(unlabeled_dataset), unlabeled_batch_size)
     iters_for_loader = max(labeled_iters, unlabeled_iters)
     train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, labeled_batch_size, num_workers=multiprocessing.cpu_count()//8, 
                                            num_epochs=args.epochs, num_iters=iters_for_loader)
-    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
+    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_jehan:
         train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, unlabeled_batch_size, num_workers=multiprocessing.cpu_count()//8,
                                                  num_epochs=args.epochs, num_iters=iters_for_loader)
         
+    semilearn_config.num_train_iter = iters_for_loader
+    semilearn_config.num_eval_iter = ceildiv(iters_for_loader, args.epochs)
+    semilearn_config.num_log_iter = ceildiv(iters_for_loader, args.epochs)
+    
+    semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
+    semilearn_algorithm.model = send_model_cuda(semilearn_config, semilearn_algorithm.model)
+    semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
+    
+    print("Batches per epoch:", semilearn_config.num_eval_iter)
+        
     if args.pretrain_and_finetune:
-        if args.proportion_unlabeled_data_from_leftout_subject>0:
-            proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_leftout_subject
-        elif args.proportion_unlabeled_data_from_training_subjects>0:
-            proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_training_subjects
+        proportion_unlabeled_to_use = len(finetune_unlabeled_dataset) / (len(finetune_dataset) + len(finetune_unlabeled_dataset))
         labeled_batch_size = int(semilearn_config.batch_size * (1-proportion_unlabeled_to_use))
         unlabeled_batch_size = int(semilearn_config.batch_size * proportion_unlabeled_to_use)
-        labeled_iters = len(finetune_dataset) * ceildiv(args.epochs, labeled_batch_size)
-        unlabeled_iters = len(finetune_unlabeled_dataset) * ceildiv(args.epochs, unlabeled_batch_size)
+        if labeled_batch_size + unlabeled_batch_size < semilearn_config.batch_size:
+            if labeled_batch_size < unlabeled_batch_size:
+                labeled_batch_size += 1
+            else:
+                unlabeled_batch_size += 1
+        labeled_iters = args.epochs * ceildiv(len(finetune_dataset), labeled_batch_size)
+        unlabeled_iters = args.epochs * ceildiv(len(finetune_unlabeled_dataset), unlabeled_batch_size)
         iters_for_loader = max(labeled_iters, unlabeled_iters)
         train_finetuning_loader = get_data_loader(semilearn_config, finetune_dataset, labeled_batch_size, num_workers=multiprocessing.cpu_count()//8,
                                                   num_epochs=args.epochs, num_iters=iters_for_loader)
@@ -1354,6 +1394,8 @@ if args.proportion_data_from_training_subjects<1.0:
     wandb_runname += '_train-subj-prop-' + str(args.proportion_data_from_training_subjects)
 if args.proportion_unlabeled_data_from_training_subjects>0:
     wandb_runname += '_unlabel-subj-prop-' + str(args.proportion_unlabeled_data_from_training_subjects)
+if args.load_unlabeled_data_jehan:
+    wandb_runname += '_load-unlabel-data-jehan'
 
 if (args.held_out_test):
     if args.turn_on_kfold:
@@ -1452,9 +1494,9 @@ if args.turn_on_unlabeled_domain_adaptation:
         run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
         wandb.config.lr = args.learning_rate
         
-        semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + args.finetuning_epochs * ceildiv(X_train_finetuning.shape[0], args.batch_size)
-        semilearn_config_dict['num_eval_iter'] = ceildiv(X_train_finetuning.shape[0], args.batch_size)
-        semilearn_config_dict['num_log_iter'] = ceildiv(X_train_finetuning.shape[0], args.batch_size)
+        semilearn_config_dict['num_train_iter'] = semilearn_config.num_train_iter + iters_for_loader
+        semilearn_config_dict['num_eval_iter'] = ceildiv(iters_for_loader, args.finetuning_epochs)
+        semilearn_config_dict['num_log_iter'] = ceildiv(iters_for_loader, args.finetuning_epochs)
         semilearn_config_dict['epoch'] = args.finetuning_epochs + args.epochs
         semilearn_config_dict['algorithm'] = args.unlabeled_algorithm
         
@@ -1677,7 +1719,7 @@ else:
 
             print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
             print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
-            #print(f"{val_acc:.4f}")
+
             wandb.log({
                 "Epoch": epoch,
                 "Train Loss": train_loss,
