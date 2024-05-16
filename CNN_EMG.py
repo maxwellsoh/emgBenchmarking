@@ -1074,7 +1074,6 @@ def ceildiv(a, b):
         return -(a // -b)
     
 if args.turn_on_unlabeled_domain_adaptation:
-    print("Number of total batches in training data:", X_train.shape[0] // args.batch_size)
     current_date_and_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     assert (args.transfer_learning and args.cross_validation_for_time_series) or args.leave_one_session_out, \
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
@@ -1088,9 +1087,9 @@ if args.turn_on_unlabeled_domain_adaptation:
 
         # optimization configs
         'epoch': args.epochs,  # set to 100
-        'num_train_iter': args.epochs * ceildiv(X_train.shape[0], args.batch_size),
-        'num_eval_iter': ceildiv(X_train.shape[0], args.batch_size),
-        'num_log_iter': ceildiv(X_train.shape[0], args.batch_size),
+        # 'num_train_iter': args.epochs * ceildiv(X_train.shape[0], args.batch_size),
+        # 'num_eval_iter': ceildiv(X_train.shape[0], args.batch_size),
+        # 'num_log_iter': ceildiv(X_train.shape[0], args.batch_size),
         'optim': 'AdamW',   # AdamW optimizer
         'lr': args.learning_rate,  # Learning rate
         'layer_decay': 0.5,  # Layer-wise decay learning rate  
@@ -1160,8 +1159,8 @@ if args.turn_on_unlabeled_domain_adaptation:
         else:
             unlabeled_batch_size += 1
         
-    labeled_iters = len(labeled_dataset) * ceildiv(args.epochs, labeled_batch_size)
-    unlabeled_iters = len(unlabeled_dataset) * ceildiv(args.epochs, unlabeled_batch_size)
+    labeled_iters = args.epochs * ceildiv(len(labeled_dataset), labeled_batch_size)
+    unlabeled_iters = args.epochs * ceildiv(len(unlabeled_dataset), unlabeled_batch_size)
     iters_for_loader = max(labeled_iters, unlabeled_iters)
     train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, labeled_batch_size, num_workers=multiprocessing.cpu_count()//8, 
                                            num_epochs=args.epochs, num_iters=iters_for_loader)
@@ -1176,6 +1175,8 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm = get_algorithm(semilearn_config, get_net_builder(semilearn_config.net, from_name=False), tb_log=None, logger=None)
     semilearn_algorithm.model = send_model_cuda(semilearn_config, semilearn_algorithm.model)
     semilearn_algorithm.ema_model = send_model_cuda(semilearn_config, semilearn_algorithm.ema_model, clip_batch=False)
+    
+    print("Batches per epoch:", semilearn_config.num_eval_iter)
         
     if args.pretrain_and_finetune:
         proportion_unlabeled_to_use = len(finetune_unlabeled_dataset) / (len(finetune_dataset) + len(finetune_unlabeled_dataset))
@@ -1186,9 +1187,8 @@ if args.turn_on_unlabeled_domain_adaptation:
                 labeled_batch_size += 1
             else:
                 unlabeled_batch_size += 1
-        
-        labeled_iters = len(finetune_dataset) * ceildiv(args.epochs, labeled_batch_size)
-        unlabeled_iters = len(finetune_unlabeled_dataset) * ceildiv(args.epochs, unlabeled_batch_size)
+        labeled_iters = args.epochs * ceildiv(len(finetune_dataset), labeled_batch_size)
+        unlabeled_iters = args.epochs * ceildiv(len(finetune_unlabeled_dataset), unlabeled_batch_size)
         iters_for_loader = max(labeled_iters, unlabeled_iters)
         train_finetuning_loader = get_data_loader(semilearn_config, finetune_dataset, labeled_batch_size, num_workers=multiprocessing.cpu_count()//8,
                                                   num_epochs=args.epochs, num_iters=iters_for_loader)
@@ -1494,7 +1494,6 @@ if args.turn_on_unlabeled_domain_adaptation:
         run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
         wandb.config.lr = args.learning_rate
         
-        semilearn_config.num_log_iter = ceildiv(iters_for_loader, args.epochs)
         semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + iters_for_loader
         semilearn_config_dict['num_eval_iter'] = ceildiv(iters_for_loader, args.finetuning_epochs)
         semilearn_config_dict['num_log_iter'] = ceildiv(iters_for_loader, args.finetuning_epochs)
