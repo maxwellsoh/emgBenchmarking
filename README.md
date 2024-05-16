@@ -34,6 +34,23 @@ $ ./get_datasets.py
 Jehan's dataset must be requested. 
 Or, CNN_EMG will automatically download the necessary datasets for each run. 
 
+# Running
+To use a preset configuration, run:
+```console
+$ ./run_config.py --preset {name}
+```
+
+To use a custom configuration, run: 
+```console
+$ .run_config.py --custom --config {config_file} --fields {fields} --max {i}
+```
+This runs CNN_EMG i many times where at each iteration each field of fields = $i. 
+
+To use the command line to pass in arguments, run: 
+```console
+$ ./CNN_EMG --argument
+```
+
 # Troubleshooting
 If you run into an error, `OSError: [Errno 24] Too many open files`
 Run the command 

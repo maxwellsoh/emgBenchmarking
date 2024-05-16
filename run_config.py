@@ -1,3 +1,7 @@
+"""
+File: run_config.py
+Description: Takes in arguments to either do a (1) preset run or (2) create a custom run. (To use the argparse and manually specify each, must directly run CNN_EMG). Then calls CNN_EMG with the given config for max amount of times. 
+"""
 import subprocess
 import argparse
 import utils_OzdemirEMG as utils # needed for parser
@@ -9,15 +13,9 @@ def list_of_ints(arg):
     """
     return list(map(int, arg.split(',')))
 
-# def list_of_strings(arg):
-#     """
-#     Define a custom argument type for a list of strings.
-#     """
-#     return list(map(str, arg.split(',')))
-
 def initialize_parser():
     """
-    Sets up the arg parser for CNN_EMG
+    Takes in arguments to either do a (1) preset run or (2) create a custom run. To use the argparse and manually specify each, must directly run CNN_EMG. 
     """
     # Create the parser
     parser = argparse.ArgumentParser(description="Specifiy the configurations for a given run.")
@@ -32,9 +30,6 @@ def initialize_parser():
     parser.add_argument("--config", type=str, help="Specify the config .yaml file.")
     parser.add_argument("--fields", help="List of fields whose value should iterate each run.", nargs="+", default=[])
     parser.add_argument("--max", help="Max range of iterations.", default=2, type=int)
-
-    # (3) argparse: take in manually given arguments
-    # this one has to be manually called using ./CNN_EMG --argument
 
     # Parse the arguments
     args = parser.parse_args()
@@ -55,8 +50,7 @@ def update_yaml(yaml_file, update_fields, new_value):
     new_yaml = []
 
     for line in lines:
-        for field in update_fields: 
-            # print("field:", field)       
+        for field in update_fields:       
             if line.startswith(field):
                 line = f"{field}: {new_value}\n"
         new_yaml.append(line)
@@ -79,7 +73,7 @@ def run_config(yaml_file, fields, max):
         
 def main():
     """
-    Takes in arguments for specific, preset runs. 
+    Parses arguments and runs CNN_EMG with the correct config. 
     To add a new preset run, (1) add an argument (2) run_config 
     """
 
@@ -108,9 +102,6 @@ def main():
         else:
             print("--config, --fields, and --max must all be specified.")
             
-    # (3) arg parse (pass in specific arguments to read)
-    # need to call CNN_EMG for that 
-    
 
     # TODO: name the different runs
     # TODO: check that the for i in range is going the full amount
