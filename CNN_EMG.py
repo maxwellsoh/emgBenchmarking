@@ -1494,7 +1494,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
         wandb.config.lr = args.learning_rate
         
-        semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + iters_for_loader
+        semilearn_config_dict['num_train_iter'] = semilearn_config.num_train_iter + iters_for_loader
         semilearn_config_dict['num_eval_iter'] = ceildiv(iters_for_loader, args.finetuning_epochs)
         semilearn_config_dict['num_log_iter'] = ceildiv(iters_for_loader, args.finetuning_epochs)
         semilearn_config_dict['epoch'] = args.finetuning_epochs + args.epochs
@@ -1719,7 +1719,7 @@ else:
 
             print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
             print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
-            #print(f"{val_acc:.4f}")
+
             wandb.log({
                 "Epoch": epoch,
                 "Train Loss": train_loss,
