@@ -45,7 +45,7 @@ To use a preset configuration, run:
 $ ./run_config.py --preset {name}
 ```
 
-To use a custom configuration, in the form ('''for i {1..max}; run CNN_EMG with field = $i'''), run: 
+To use a custom configuration, in the form (<code>for i {1..max}; run CNN_EMG with field = $i<code>), run: 
 ```console
 $ .run_config.py --custom --config {config_file} --fields {fields} --max {i}
 ```
