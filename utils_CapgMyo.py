@@ -62,6 +62,8 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
+# data is [# samples, # channels]
+# target min/max is [# channels, # gestures]
 def target_normalize (data, target_min, target_max, gesture):
     source_min = np.zeros(len(data[0]), dtype=np.float32)
     source_max = np.zeros(len(data[0]), dtype=np.float32)
@@ -305,9 +307,7 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         del data_chunks
 
     # Parameters that don't change can be set once
-    resize_length_factor = 6
-    if turn_on_magnitude:
-        resize_length_factor = 3
+    resize_length_factor = 1
     native_resnet_size = 224
     
     args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
