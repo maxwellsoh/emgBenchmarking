@@ -63,11 +63,13 @@ class my_class(object):
         self.lables = None
         self.leaveOut = None
         self.numGestures = None
+        self.project_name = None
     
     def run(self):
         self.initialize()
         self.setup_datasets()
         self.add_lables()
+        self.reshape_data()
         self.rest()
 
     def initialize(self):
@@ -107,7 +109,7 @@ class my_class(object):
                 subprocess.run(['python', './get_datasets.py', '--UCI'])
             import utils_UCI as utils
             print(f"The dataset being tested is uciEMG")
-            project_name = 'emg_benchmarking_uci'
+            self.project_name = 'emg_benchmarking_uci'
 
         elif (self.args.dataset == "ninapro-db2"):
             if (not os.path.exists("./NinaproDB2")):
@@ -115,7 +117,7 @@ class my_class(object):
                 subprocess.run(['python', './get_datasets.py', '--NinaproDB2'])
             import utils_NinaproDB2 as utils
             print(f"The dataset being tested is ninapro-db2")
-            project_name = 'emg_benchmarking_ninapro-db2'
+            self.project_name = 'emg_benchmarking_ninapro-db2'
             exercises = True
             if self.args.leave_one_session_out:
                 ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
@@ -127,7 +129,7 @@ class my_class(object):
 
             import utils_NinaproDB5 as utils
             print(f"The dataset being tested is ninapro-db5")
-            project_name = 'emg_benchmarking_ninapro-db5'
+            self.project_name = 'emg_benchmarking_ninapro-db5'
             exercises = True
             if self.args.leave_one_session_out:
                 ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
@@ -138,7 +140,7 @@ class my_class(object):
                 subprocess.run(['python', './get_datasets.py', '--M_Dataset'])
             import utils_M_dataset as utils
             print(f"The dataset being tested is M_dataset")
-            project_name = 'emg_benchmarking_M_dataset'
+            self.project_name = 'emg_benchmarking_M_dataset'
             if self.args.leave_one_session_out:
                 ValueError("leave-one-session-out not implemented for M_dataset; only one session exists")
 
@@ -148,7 +150,7 @@ class my_class(object):
                 subprocess.run(['python', './get_datasets.py', '--hyser'])
             import utils_Hyser as utils
             print(f"The dataset being tested is hyser")
-            project_name = 'emg_benchmarking_hyser'
+            self.project_name = 'emg_benchmarking_hyser'
 
         elif (self.args.dataset == "capgmyo"):
             if (not os.path.exists("./CapgMyo_B")):
@@ -156,7 +158,7 @@ class my_class(object):
                 subprocess.run(['python', './get_datasets.py', '--CapgMyo_B'])
             import utils_CapgMyo as utils
             print(f"The dataset being tested is CapgMyo")
-            project_name = 'emg_benchmarking_capgmyo'
+            self.project_name = 'emg_benchmarking_capgmyo'
             if self.args.leave_one_session_out:
                 ValueError("leave-one-session-out not implemented for CapgMyo; only one session exists")
 
@@ -166,7 +168,7 @@ class my_class(object):
                 subprocess.run(['python', './get_datasets.py', '--Jehan_Dataset'])
             import utils_JehanData as utils
             print(f"The dataset being tested is JehanDataset")
-            project_name = 'emg_benchmarking_jehandataset'
+            self.project_name = 'emg_benchmarking_jehandataset'
             if self.args.leave_one_session_out:
                 ValueError("leave-one-session-out not implemented for JehanDataset; only one session exists")
             
@@ -176,7 +178,7 @@ class my_class(object):
                 print("Ozdemir dataset does not exist yet. Downloading now...")
                 subprocess.run(['python', './get_datasets.py', '--OzdemirEMG'])
             print(f"The dataset being tested is OzdemirEMG")
-            project_name = 'emg_benchmarking_ozdemir'
+            self.project_name = 'emg_benchmarking_ozdemir'
             if self.args.full_dataset_ozdemir:
                 print(f"Using the full dataset for Ozdemir EMG")
                 utils.gesture_labels = utils.gesture_labels_full
@@ -263,7 +265,9 @@ class my_class(object):
         print("------------------------------------------------------------------------------------------------------------------------")
     
     def add_lables(self):
-
+        """
+        Adds labels to the data.
+        """
         if self.exercises:
             self.emg = []
             self.labels = []
@@ -382,8 +386,10 @@ class my_class(object):
         print("Number of Electrode Channels: ", self.length)
         print("Number of Timesteps per Trial:", self.width)
 
-    def rest(self):
-            
+    def reshape_data(self):
+        """
+        Modifies data to be normalized, reshaped, and grouped as needed based on whether n_subjects_out_randomly, held_out_test, k_folds, scalar_normalization, target_normalization are selected.
+        """
 
         # These can be tuned to change the normalization
         # This is the coefficient for the standard deviation
@@ -552,7 +558,10 @@ class my_class(object):
                 global_low_value = None
                 global_high_value = None
                 scaler = None
-                
+
+    def rest(self):
+            
+
         data = []
 
         class ToNumpy:
@@ -1078,7 +1087,7 @@ class my_class(object):
                 semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
             
             labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
-            if proportion_unlabeled_of_training_subjects>0:=
+            if proportion_unlabeled_of_training_subjects>0:
                 unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                                 is_ulb=True, strong_transform=semilearn_transform)
                 proportion_unlabeled_to_use = self.args.proportion_unlabeled_data_from_training_subjects
@@ -1320,13 +1329,13 @@ class my_class(object):
 
         if (self.args.held_out_test):
             if self.args.turn_on_kfold:
-                project_name += '_k-fold-'+str(self.args.kfold)
+                self.project_name += '_k-fold-'+str(self.args.kfold)
             else:
-                project_name += '_heldout'
+                self.project_name += '_heldout'
         elif self.args.leave_one_subject_out:
-            project_name += '_LOSO'
+            self.project_name += '_LOSO'
         elif self.args.leave_one_session_out:
-            project_name += '_leave-one-session-out'
+            self.project_name += '_leave-one-session-out'
             
         def freezeAllLayersButLastLayer(model):
             # Convert model children to a list
@@ -1346,9 +1355,9 @@ class my_class(object):
                 param.requires_grad = True
             return model
 
-        project_name += self.args.project_name_suffix
+        self.project_name += self.args.project_name_suffix
 
-        run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
+        run = wandb.init(name=wandb_runname, project=self.project_name, entity='jehanyang')
         wandb.config.lr = self.args.learning_rate
 
         if self.args.leave_n_subjects_out_randomly != 0:
@@ -1361,7 +1370,7 @@ class my_class(object):
 
             wandb.watch(model)
 
-        testrun_foldername = f'test/{project_name}/{wandb_runname}/{self.formatted_datetime}/'
+        testrun_foldername = f'test/{self.project_name}/{wandb_runname}/{self.formatted_datetime}/'
         # Make folder if it doesn't exist
         if not os.path.exists(testrun_foldername):
             os.makedirs(testrun_foldername)
@@ -1412,7 +1421,7 @@ class my_class(object):
             semilearn_algorithm.train()
             
             if self.args.pretrain_and_finetune:
-                run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
+                run = wandb.init(name=wandb_runname, project=self.project_name, entity='jehanyang')
                 wandb.config.lr = self.args.learning_rate
                 
                 semilearn_config_dict['num_train_iter'] = semilearn_config_dict['num_train_iter'] + self.args.finetuning_epochs * ceildiv(X_train_finetuning.shape[0], self.args.batch_size)
