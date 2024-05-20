@@ -42,12 +42,12 @@ from sklearn.metrics import accuracy_score, log_loss
 import torch.nn.functional as F
 import subprocess
 import get_datasets
-import get_config as get_config
+import parse_config as parse_config
 
 
 
 # Parse Arguments
-args = get_config.get() 
+args = parse_config.get() 
 
 exercises = False
 
