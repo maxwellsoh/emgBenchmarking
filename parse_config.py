@@ -1,6 +1,6 @@
 """
 File: get_config.py
-Description: Parses either command line arguments (argparse) or a given yaml file (yaml) to configure a given run.  
+Description: Sets up argparse to either take in command line arguments or override defaults with a given yaml config file for a single run. 
 """
 import argparse
 import yaml
@@ -8,7 +8,7 @@ import utils_OzdemirEMG as utils # needed for parser
 
 def list_of_ints(arg):
     """
-    Define a custom argument type for a list of integers.
+    Define a custom argument type for a list of integers. (Needed for argparse)
     """
     return list(map(int, arg.split(',')))
 
@@ -17,7 +17,6 @@ def override_with_config(args):
     Overrides the default and manually passed in arguments with config file value passed in --config
     """
 
-    print("passed in args.config:", args.config)
     with open(args.config, "r") as file: 
         data = yaml.safe_load(file)
 
@@ -26,6 +25,8 @@ def override_with_config(args):
     
     for key in data:
         arg_dict[key] = data[key]
+
+    return args
 
 def initialize_parser():
     """
@@ -141,11 +142,13 @@ def get():
 
     args = initialize_parser()
     if args.config:
-        override_with_config(args)
+        args = override_with_config(args)
+
     return args
 
-    
 
+if __name__ == "__main__":
+    get()
     
 
 
