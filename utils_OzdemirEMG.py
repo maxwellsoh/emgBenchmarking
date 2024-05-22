@@ -84,15 +84,20 @@ def filter(emg):
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=2000.0)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
+# NOTE: modified version of target_normalize where data is [# channels, # timesteps]
+# target min/max is [# channels, # gestures]
 def target_normalize (data, target_min, target_max, gesture):
-    source_min = np.zeros(len(data[0]), dtype=np.float32)
-    source_max = np.zeros(len(data[0]), dtype=np.float32)
-    for i in range(len(data[0])):
-        source_min[i] = np.min(data[:, i])
-        source_max[i] = np.max(data[:, i])
+    source_min = np.zeros(numElectrodes, dtype=np.float32)
+    source_max = np.zeros(numElectrodes, dtype=np.float32)
+    for i in range(numElectrodes):
+        source_min[i] = np.min(data[i])
+        source_max[i] = np.max(data[i])
+        # was getting 1 divide by 0 error
+        if (source_max[i] == source_min[i]):
+            source_max[i]  += 0.01
 
-    for i in range(len(data[0])):
-        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+    for i in range(numElectrodes):
+        data[i] = ((data[i] - source_min[i]) / (source_max[i] 
         - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
     return data
 
@@ -110,9 +115,13 @@ def getEMG (args):
     emg = []
     for i, gesture in enumerate(gesture_labels):
         assert "Gesture" + gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
+        # [# repetitions, # electrodes, # timesteps]
         data = np.array(file["Gesture" + gesture])
+        
         if (type(args) != int and n != leftout):
-            data = target_normalize(data, target_min, target_max, i)
+            for j in range(len(data)):
+                data[j] = target_normalize(data[j], target_min, target_max, i)
+        
         data = filter(torch.from_numpy(data)).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
         emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)).to(torch.float16))
     return torch.cat(emg, dim=0)
@@ -125,12 +134,12 @@ def getExtrema (n):
     assert n >= 1 and n <= num_subjects
     file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     for i, gesture in enumerate(gesture_labels):
-        data = np.array(file["Gesture" + gesture])
-        print(data.shape)
+        # get the first repetition for each gesture
+        data = np.array(file["Gesture" + gesture])[0]
 
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[j, 0])
-            maxes[j][i] = np.max(data[j, 0])
+            mins[j][i] = np.min(data[j])
+            maxes[j][i] = np.max(data[j])
     return mins, maxes
 
 # size of 4800 assumes 250 ms window
@@ -380,9 +389,7 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         emg = emg.reshape(len(emg), length*width)
 
     # Parameters that don't change can be set once
-    resize_length_factor = 6
-    if turn_on_magnitude:
-        resize_length_factor = 3
+    resize_length_factor = 1
     native_resnet_size = 224
 
     with multiprocessing.Pool(processes=16) as pool:

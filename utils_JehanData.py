@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import spectrogram, stft
 import pywt
 from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
+import glob
 
 numGestures = 10
 fs = 4000 #Hz
@@ -28,6 +29,7 @@ num_subjects = 13
 cmap = mpl.colormaps['viridis']
 gesture_labels = ['abduct_p1', 'adduct_p1', 'extend_p1', 'grip_p1', 'pronate_p1', 'rest_p1', 'supinate_p1', 'tripod_p1', 'wextend_p1', 'wflex_p1']
 participants = [8, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22]
+participants_with_online_data = [8, 9, 11, 15, 18, 21, 22]
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -64,34 +66,53 @@ def seed_worker(worker_id):
 
 def highpassFilter (emg):
     b, a = butter(N=1, Wn=120.0, btype='highpass', analog=False, fs=fs)
-    # what axis should the filter apply to? other datasets have axis=0
     return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=-1).copy())
 
+# NOTE: modified version of target_normalize where data is [# channels, # timesteps]
+# target min/max is [# channels, # gestures]
 def target_normalize (data, target_min, target_max, gesture):
-    source_min = np.zeros(len(data[0]), dtype=np.float32)
-    source_max = np.zeros(len(data[0]), dtype=np.float32)
-    for i in range(len(data[0])):
-        source_min[i] = np.min(data[:, i])
-        source_max[i] = np.max(data[:, i])
+    source_min = np.zeros(numElectrodes, dtype=np.float32)
+    source_max = np.zeros(numElectrodes, dtype=np.float32)
+    for i in range(numElectrodes):
+        source_min[i] = np.min(data[i])
+        source_max[i] = np.max(data[i])
 
-    for i in range(len(data[0])):
-        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+    for i in range(numElectrodes):
+        data[i] = ((data[i] - source_min[i]) / (source_max[i] 
         - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
     return data
 
-# returns array with dimensions (# of samples)x64x10x100 [SAMPLES, CHANNELS, GESTURES, TIME]
-def getData(n, gesture, target_max=None, target_min=None, leftout=None):
+# returns array with dimensions [# samples, # channels, # timesteps]
+def getData(n, gesture, target_max=None, target_min=None, leftout=None, session_number=1):
+    session_number_mapping = {1: 'initial', 2: 'recalibration'}
     if (n<10):
-        file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
+        file = h5py.File('./Jehan_Dataset/p00' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
     else:
-        file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
+        file = h5py.File('./Jehan_Dataset/p0' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
+    # initially [# repetitions, # channels, # timesteps]
     data = np.array(file[gesture])
+    
     if (leftout != None and n != leftout):
-        data = target_normalize(data, target_min, target_max, gesture_labels.index(gesture))
+        for i in range(len(data)):
+            data[i] = target_normalize(data[i], target_min, target_max, gesture_labels.index(gesture))
+
     data = highpassFilter(torch.from_numpy(data).unfold(dimension=-1, size=wLenTimesteps, step=stepLen))
 
     return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2])
 
+def getOnlineUnlabeledData(subject_number):
+    subject_number = participants[subject_number-1]
+    assert subject_number in participants_with_online_data, "Subject number does not have online data."
+    folder_paths = glob.glob(f"./Jehan_Unlabeled_Dataset/p{subject_number:03}_online_part-*/")
+    data_all = []
+    for folder_path in folder_paths:
+        file_paths = glob.glob(f"{folder_path}/*.h5")
+        for file_path in file_paths:
+            file = h5py.File(file_path, 'r')
+            data = np.array(file['realtime_emgdata']) # shape: (num_channels, num_samples)
+            data = highpassFilter(torch.from_numpy(data).unfold(dimension=-1, size=wLenTimesteps, step=stepLen))
+            data_all.append(data)
+    return torch.cat(data_all, axis=1).permute([1, 0, 2])
 
 def getEMG(args):
     if (type(args) == int):
@@ -107,22 +128,41 @@ def getEMG(args):
 
     return torch.cat([getData(n, name, target_max, target_min, leftout) for name in gesture_labels], axis=0)
 
+def getEMG_separateSessions(args):
+    subject_number, session_number = args
+    if (len(args) == 2):
+        subject_number = participants[subject_number-1]
+        session_number = session_number
+        target_max = None
+        target_min = None
+        leftout = None
+    else:
+        subject_number = participants[subject_number-1]
+        session_number = session_number
+        target_max = args[2]
+        target_min = args[3]
+        leftout = args[4]
+        
+    return torch.cat([getData(subject_number, name, target_max, target_min, leftout, session_number) for name in gesture_labels], axis=0)
+
 # assumes first 1/12 of target domain accessed
 def getExtrema (n):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
     
     if (n<10):
-            file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
+        file = h5py.File('./Jehan_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
     else:
         file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
     
-    for i in range(numGestures):    
-        data = np.array(file[gesture_labels[0]])
+    for i in range(numGestures):
+        # get first repetition only for the gesture
+        data = np.array(file[gesture_labels[i]])[0]
 
+        # data will be [# channel, # timestep]
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[:len(data)//12, j])
-            maxes[j][i] = np.max(data[:len(data)//12, j])
+            mins[j][i] = np.min(data[j])
+            maxes[j][i] = np.max(data[j])
     return mins, maxes
 
 def getGestures(n):
@@ -141,6 +181,30 @@ def getLabels (n):
     curr = 0
     for x in range (numGestures):
         #labels[curr:curr+gesture_count[x]][x] = 1.0
+        for y in range(gesture_count[x]):
+            labels[curr + y][x] = 1.0
+        curr += gesture_count[x]
+    return labels
+
+def getGestures_separateSessions(args):
+    subject_number, session_number = args
+    subject_number = participants[int(subject_number)-1]
+    session_number_mapping = {1: 'initial', 2: 'recalibration'}
+    file = h5py.File(f'./Jehan_Dataset/p{subject_number:03}/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
+    gesture_count = []
+    for gesture in gesture_labels: 
+        data = np.array(file[gesture])
+        gesture_count.append(len(data))
+    return gesture_count
+
+def getLabels_separateSessions(args):
+    subject_number, session_number = args
+    gesture_count = getGestures_separateSessions((subject_number, session_number))
+    emg_len = sum(gesture_count)
+    labels = torch.tensor(())
+    labels = labels.new_zeros(size=(emg_len, numGestures))
+    curr = 0
+    for x in range (numGestures):
         for y in range(gesture_count[x]):
             labels[curr + y][x] = 1.0
         curr += gesture_count[x]
@@ -288,11 +352,10 @@ def process_optimized_makeOneMagnitudeImage(args_tuple):
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None,
               turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
     
-    
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
     else:
-        emg = np.array(emg.view(len(emg), length*width))
+        emg = np.array(emg.reshape(len(emg), length*width))
 
     # Use RMS preprocessing
     if turn_on_rms:
@@ -313,9 +376,7 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         del data_chunks
 
     # Parameters that don't change can be set once
-    resize_length_factor = 6
-    if turn_on_magnitude:
-        resize_length_factor = 3
+    resize_length_factor = 1
     native_resnet_size = 224
     
     args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]

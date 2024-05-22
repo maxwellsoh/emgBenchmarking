@@ -82,8 +82,11 @@ class Poly5Reader:
             channel_description = struct.unpack("=41p4x11pffffH62x", f.read(136))
             name = channel_description[0][5:].decode('ascii')
             unit_name = channel_description[1].decode('utf-8')
+            '''
             ch = Channel(name, unit_name)
             chan_list.append(ch)
+            '''
+            chan_list.append(name)
             f.read(136)
         return chan_list
 
@@ -102,6 +105,7 @@ class Channel:
     def __init__(self, name, unit_name):
         self.__unit_name = unit_name
         self.__name = name
+        self.n = name
 
 if __name__ == "__main__":
     data=Poly5Reader(r'D:\ЗАГРУЗКИ\DASA\Session1\DASA_Resting_1_1_20181109_030747.Poly5')
