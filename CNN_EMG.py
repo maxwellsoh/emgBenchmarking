@@ -168,6 +168,15 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
 
+elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
+    import utils_NinaproDB3 as utils
+    assert args.exercises == [1], "Exercises C and D are not implemented due to missing data."
+    print(f"The dataset being tested is ninapro-db3")
+    project_name = 'emg_benchmarking_ninapro-db3'
+    exercises = True
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for ninapro-db3; only one session exists")
+
 elif (args.dataset.lower() == "m-dataset" or args.dataset.lower() == "m_dataset"):
     import utils_M_dataset as utils
     print(f"The dataset being tested is M_dataset")
