@@ -77,7 +77,7 @@ def filter(emg):
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
-# partition data by channel
+# partition data by channel; returns [# samples, # channels]
 def format_emg (data):
     emg = np.zeros((len(data) // numElectrodes, numElectrodes))
     for i in range(len(data) // numElectrodes):
@@ -85,14 +85,15 @@ def format_emg (data):
             emg[i][j] = data[i * numElectrodes + j]
     return emg
 
-# target is [# channels, # gestures]
+# data is [# samples, # channels]
+# target min/max is [# channels, # gestures]
 def normalize (data, target_min, target_max, gesture):
     source_min = np.zeros(len(data[0]), dtype=np.float32)
     source_max = np.zeros(len(data[0]), dtype=np.float32)
     for i in range(len(data[0])):
         source_min[i] = np.min(data[:, i])
         source_max[i] = np.max(data[:, i])
-
+    # normalizes each channel's data separately
     for i in range(len(data[0])):
         data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
         - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]

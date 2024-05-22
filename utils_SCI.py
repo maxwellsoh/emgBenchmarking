@@ -13,23 +13,142 @@ import wandb
 from sklearn.metrics import confusion_matrix
 import seaborn as sn
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-import h5py
+from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
 import os
-from scipy.signal import spectrogram, stft
-import pywt
+from poly5_reader import Poly5Reader
+import mne
 
-numGestures = 6 # 7 total, but not all subjects have 7
-fs = 1000 #Hz
-wLen = 250 # ms
+numGestures = 14
+fs = 2000.0 # Hz (actually 2048 Hz but was "decimated" to 512? unclear)
+wLen = 250.0 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 50 #50 ms
-numElectrodes = 8
-num_subjects = 36
+stepLen = int(50.0 / 1000 * fs) # 50 ms
+numElectrodes = 256
+num_subjects = 1
 cmap = mpl.colormaps['viridis']
-# Gesture Labels
-gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations","extended palm"]
-gesture_labels = gesture_labels[:numGestures]
+# labels for feb data
+gesture_labels_02 = ["Pinky Extension", "Wrist Extension", "Wrist Flexion", "Middle Extension", 
+                    "Pinky Flexion", "Middle Flexion", "Index Extension", "Index Flexion",
+                    "Ring Flexion", "Thumb Extension", "Ring Extension", "Thumb Flexion"]
+# all gestures here (for april data)
+gesture_labels = ["Wrist Flexion", "Ring Extension", "Wrist Extension", "Pinky Extension", 
+                    "Thumb Flexion", "Middle Flexion", "Middle Extension", "Ulnar Deviation", 
+                    "Index Extension", "Radial Deviation", "Index Flexion", "Thumb Extension",
+                    "Ring Flexion", "Pinky Flexion"]
+
+# 4 kHz sampling rate for april 1 and 2; 2 kHz sampling rate for all other groups
+april_1 = ["A_FLX/MCP01_2024_04_12_A_FLX_2.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_3.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_4.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_5.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_6.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_7.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_8.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_9.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_10.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_11.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_12.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_13.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_14.poly5",
+"A_FLX/MCP01_2024_04_12_A_FLX_15.poly5"]
+
+april_2 = ["B_EXT/MCP01_2024_04_12_B_EXT_2.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_3.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_4.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_5.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_6.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_7.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_8.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_9.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_10.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_11.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_12.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_13.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_14.poly5",
+"B_EXT/MCP01_2024_04_12_B_EXT_15.poly5"]
+
+april_3 = ["Gestures GUI/Wrist Flexion/1712945596.6765876_dev1_-20240412_141316.poly5",
+"Gestures GUI/Ring Extension/1712945730.9449246_dev1_-20240412_141530.poly5",
+"Gestures GUI/Wrist Extension/1712945861.4286742_dev1_-20240412_141741.poly5",
+"Gestures GUI/Pinky Extension/1712945980.8491514_dev1_-20240412_141940.poly5",
+"Gestures GUI/Thumb Flexion/1712946162.160045_dev1_-20240412_142242.poly5",
+"Gestures GUI/Middle Flexion/1712946292.6193693_dev1_-20240412_142452.poly5",
+"Gestures GUI/Middle Extension/1712946480.0932148_dev1_-20240412_142800.poly5",
+"Gestures GUI/Ulnar Deviation/1712946600.397335_dev1_-20240412_143000.poly5",
+"Gestures GUI/Index Extension/1712946730.8848639_dev1_-20240412_143210.poly5",
+"Gestures GUI/Radial Deviation/1712946856.289373_dev1_-20240412_143416.poly5",
+"Gestures GUI/Index Flexion/1712946974.4568_dev1_-20240412_143614.poly5",
+"Gestures GUI/Thumb Extension/1712947125.3284779_dev1_-20240412_143845.poly5",
+"Gestures GUI/Ring Flexion/1712947246.0819142_dev1_-20240412_144046.poly5",
+"Gestures GUI/Pinky Flexion/1712947367.0070963_dev1_-20240412_144247.poly5"]
+
+april_4 = ["Gestures GUI/Wrist Flexion/1712945596.6765876_dev2_-20240412_141316.poly5",
+"Gestures GUI/Ring Extension/1712945730.9449246_dev2_-20240412_141531.poly5",
+"Gestures GUI/Wrist Extension/1712945861.4286742_dev2_-20240412_141741.poly5",
+"Gestures GUI/Pinky Extension/1712945980.8491514_dev2_-20240412_141940.poly5",
+"Gestures GUI/Thumb Flexion/1712946162.160045_dev2_-20240412_142242.poly5",
+"Gestures GUI/Middle Flexion/1712946292.6193693_dev2_-20240412_142452.poly5",
+"Gestures GUI/Middle Extension/1712946480.0932148_dev2_-20240412_142800.poly5",
+"Gestures GUI/Ulnar Deviation/1712946600.397335_dev2_-20240412_143000.poly5",
+"Gestures GUI/Index Extension/1712946730.8848639_dev2_-20240412_143210.poly5",
+"Gestures GUI/Radial Deviation/1712946856.289373_dev2_-20240412_143416.poly5",
+"Gestures GUI/Index Flexion/1712946974.4568_dev2_-20240412_143614.poly5",
+"Gestures GUI/Thumb Extension/1712947125.3284779_dev2_-20240412_143845.poly5",
+"Gestures GUI/Ring Flexion/1712947246.0819142_dev2_-20240412_144046.poly5",
+"Gestures GUI/Pinky Flexion/1712947367.0070963_dev2_-20240412_144247.poly5"]
+
+
+feb_1 = ["TMSi Saga 1 Flx Proximal/Pinky Extension/1708456044.613826_dev1_-20240220_140724.poly5",
+"TMSi Saga 1 Flx Proximal/Wrist Extension/1708456142.5931377_dev1_-20240220_140902.poly5",
+"TMSi Saga 1 Flx Proximal/Wrist Flexion/1708456230.4484155_dev1_-20240220_141030.poly5",
+"TMSi Saga 1 Flx Proximal/Middle Extension/1708456320.5650508_dev1_-20240220_141200.poly5",
+"TMSi Saga 1 Flx Proximal/Pinky Flexion/1708456398.2925904_dev1_-20240220_141318.poly5",
+"TMSi Saga 1 Flx Proximal/Middle Flexion/1708456480.2945535_dev1_-20240220_141440.poly5",
+"TMSi Saga 1 Flx Proximal/Index Extension/1708456570.5487607_dev1_-20240220_141610.poly5",
+"TMSi Saga 1 Flx Proximal/Index Flexion/1708456661.0879076_dev1_-20240220_141741.poly5",
+"TMSi Saga 1 Flx Proximal/Ring Flexion/1708456744.4323034_dev1_-20240220_141904.poly5",
+"TMSi Saga 1 Flx Proximal/Thumb Extension/1708456837.9119933_dev1_-20240220_142037.poly5",
+"TMSi Saga 1 Flx Proximal/Ring Extension/1708456927.8494475_dev1_-20240220_142207.poly5",
+"TMSi Saga 1 Flx Proximal/Thumb Flexion/1708457024.8391547_dev1_-20240220_142344.poly5"]
+
+feb_2 = ["TMSi Saga 5 Ext Proximal/Pinky Extension/1708456044.613826_dev2_-20240220_140724.poly5",
+"TMSi Saga 5 Ext Proximal/Wrist Extension/1708456142.5931377_dev2_-20240220_140902.poly5",
+"TMSi Saga 5 Ext Proximal/Wrist Flexion/1708456230.4484155_dev2_-20240220_141030.poly5",
+"TMSi Saga 5 Ext Proximal/Middle Extension/1708456320.5650508_dev2_-20240220_141200.poly5",
+"TMSi Saga 5 Ext Proximal/Pinky Flexion/1708456398.2925904_dev2_-20240220_141318.poly5",
+"TMSi Saga 5 Ext Proximal/Middle Flexion/1708456480.2945535_dev2_-20240220_141440.poly5",
+"TMSi Saga 5 Ext Proximal/Index Extension/1708456570.5487607_dev2_-20240220_141610.poly5",
+"TMSi Saga 5 Ext Proximal/Index Flexion/1708456661.0879076_dev2_-20240220_141741.poly5",
+"TMSi Saga 5 Ext Proximal/Ring Flexion/1708456744.4323034_dev2_-20240220_141904.poly5",
+"TMSi Saga 5 Ext Proximal/Thumb Extension/1708456837.9119933_dev2_-20240220_142038.poly5",
+"TMSi Saga 5 Ext Proximal/Ring Extension/1708456927.8494475_dev2_-20240220_142207.poly5",
+"TMSi Saga 5 Ext Proximal/Thumb Flexion/1708457024.8391547_dev2_-20240220_142345.poly5"]
+
+feb_3 = ["TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_001-20240220T140714.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_002-20240220T140849.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_003-20240220T141021.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_004-20240220T141152.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_005-20240220T141310.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_006-20240220T141430.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_007-20240220T141601.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_008-20240220T141730.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_009-20240220T141856.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_010-20240220T142029.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_011-20240220T142158.DATA.Poly5",
+"TMSi Saga 3 Flex Distal/20240220_FlxDist_Trl_012-20240220T142333.DATA.Poly5"]
+
+feb_4 = ["TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_001-20240220T140803.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_002-20240220T140940.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_003-20240220T141109.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_004-20240220T141241.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_005-20240220T141359.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_006-20240220T141521.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_007-20240220T141651.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_008-20240220T141821.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_009-20240220T141945.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_010-20240220T142118.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_011-20240220T142248.DATA.Poly5",
+"TMSi Saga 4 Ext Distal/20240220_ExtDist_Trl_012-20240220T142425.DATA.Poly5"]
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -64,23 +183,6 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance (restimulus):
-    numZero = 0
-    indices = []
-    for x in range (len(restimulus)):
-        L = torch.chunk(restimulus[x], 2, dim=0)
-        if torch.equal(L[0], L[1]):
-            if (L[0][0] > 0 and L[0][0] < 7):
-                indices.append(x)
-    return indices
-
-def contract(R):
-    labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(R), numGestures))
-    for x in range(len(R)):
-        labels[x][int(R[x][0]) - 1] = 1.0
-    return labels
-
 def filter(emg):
     # sixth-order Butterworth highpass filter
     b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=fs)
@@ -90,94 +192,142 @@ def filter(emg):
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
-def getRestim (n):
-    restim = []
-    n = "{:02d}".format(n)
-    for file in os.listdir(f"uciEMG/{n}/"):
-        try:
-            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-            restim.append(data[:, -1][balance(data[:, -1])])
-        except:
-            print("Error reading file", file, "Subject", n)
-    if numGestures == 6:
-        for i in range(len(restim)):
-            restim[i] = restim[i][torch.all(restim[i] != 7, axis=1)]
-        return torch.cat(restim, dim=0)
-    return torch.cat(restim, dim=0)
-
-def normalize (data, target_min, target_max, gesture):
-    source_min = np.zeros(len(data[0]), dtype=np.float32)
-    source_max = np.zeros(len(data[0]), dtype=np.float32)
-    for i in range(len(data[0])):
-        source_min[i] = np.min(data[:, i])
-        source_max[i] = np.max(data[:, i])
-
-    for i in range(len(data[0])):
-        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
-        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
-    return data
-
 def getEMG (n):
-    emg = []
-    restim = []
-    n = "{:02d}".format(n)
-    for file in os.listdir(f"uciEMG/{n}/"):
-        try: 
-            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-            emg.append(data[:, :-1][balance(data[:, -1])])
-            restim.append(data[:, -1][balance(data[:, -1])])
-        except Exception as e:
-            print("Error reading file", file, "Subject", n)
-            print(e)
-    if numGestures == 6:
-        for i in range(len(restim)):
-            emg[i] = emg[i][torch.all(restim[i] != 7, axis=1)]
-        return torch.cat(emg, dim=0)
-    return torch.cat(emg, dim=0)
+    return torch.cat((getEMG_separateSessions((1, 1)), getEMG_separateSessions((1, 2))), dim=0)
 
 def getEMG_separateSessions(args):
-    subject_number, session_number = args
-    emg = [] 
-    restim = []  
-    n = "{:02d}".format(subject_number)
-    for file in os.listdir(f"uciEMG/{n}/"):
-        try: 
-            if file[0] == str(session_number):
-                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-                emg.append(data[:, :-1][balance(data[:, -1])])
-                restim.append(data[:, -1][balance(data[:, -1])])
-        except Exception as e:
-            print("Error reading file", file, "Subject", n)
-            print(e)
-    if numGestures == 6:
-        for i in range(len(restim)):
-            emg[i] = emg[i][torch.all(restim[i] != 7, axis=1)]
-        return torch.cat(emg, dim=0)
-    return torch.cat(emg, dim=0)
+    subject_number, session = args
+    if (session == 1):
+        numFiles = 12
+        path_start = "SCI/02-20/"
+        fileGroups = [feb_1, feb_2, feb_3, feb_4]
+    else:
+        numFiles = 14
+        path_start = "SCI/04-12/"
+        fileGroups = [april_1, april_2, april_3, april_4]
 
-def getRestim_separateSessions(args):
-    subject_number, session_number = args
-    restim = []
-    n = "{:02d}".format(subject_number)
-    for file in os.listdir(f"uciEMG/{n}/"):
-        try:
-            if file[0] == str(session_number):
-                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-                restim.append(data[:, -1][balance(data[:, -1])])
-        except:
-            print("Error reading file", file, "Subject", n)
-    if numGestures == 6:
-        for i in range(len(restim)):
-            restim[i] = restim[i][torch.all(restim[i] != 7, axis=1)]
-        return torch.cat(restim, dim=0)
-    return torch.cat(restim, dim=0)
+    cummulative_emg = []
+    for i in range(numFiles):
+        data = [Poly5Reader(path_start + file[i]) for file in fileGroups]
+        emg = []
+        for d in data:
+            info = mne.create_info(d.num_channels, sfreq=d.sample_rate)
+            mne_raw = mne.io.RawArray(d.samples, info)
+            emg.append(np.array(mne_raw.get_data()))
+        
+        # subsample APRIL 1 and 2
+        if (session == 2):
+            emg[0] = emg[0][:, ::2]
+            emg[1] = emg[1][:, ::2]
+
+        rep_inits = [[], [], [], []]
+        rep_durations = []
+
+        for group in range(4):
+            subseq = emg[group][len(emg[group]) - 3]
+            global_min = np.min(subseq)
+            total_elapsed = 0
+            skipped = False
+
+            #while (np.max(subseq) != global_min):
+            while(len(rep_inits[group]) < 10):
+                start = np.argmax(subseq)
+                subseq = subseq[start:]
+                total_elapsed += start
+
+                end = np.argmin(subseq)
+                subseq = subseq[end:]
+
+                if (skipped):
+                    rep_inits[group].append(total_elapsed)
+                    if (group == 0):
+                        rep_durations.append(end)
+                elif (end < 1000):
+                    skipped = True
+                
+                total_elapsed += end
+        
+        for j in range(len(rep_durations)):
+            # feb 1 and 2 have 1-63 as electrodes (missing last electrode)
+            # feb 3 and 4 have 0-63 as electrodes
+            if (session == 1):
+                missing = np.zeros((1, rep_durations[j]))
+                combined = np.concatenate((emg[0][1:64, rep_inits[0][j]:rep_inits[0][j]+rep_durations[j]], missing,
+                                        emg[1][1:64, rep_inits[1][j]:rep_inits[1][j]+rep_durations[j]], missing,
+                                        emg[2][:64, rep_inits[2][j]:rep_inits[2][j]+rep_durations[j]],
+                                        emg[3][:64, rep_inits[3][j]:rep_inits[3][j]+rep_durations[j]]), axis=0)
+            # april has 1-64 as electrodes
+            else:
+                combined = np.concatenate([emg[n][1:65, rep_inits[n][j]:rep_inits[n][j]+rep_durations[j]] for n in range(len(emg))], axis=0)
+            
+            combined = filter(torch.from_numpy(combined)).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
+            cummulative_emg.append(combined.permute((1, 0, 2)))
+
+    return torch.cat(cummulative_emg, dim=0)
 
 def getLabels (n):
-    return contract(getRestim(n))
+    return torch.cat((getLabels_separateSessions((1, 1)), getLabels_separateSessions((1, 2))), dim=0)
 
 def getLabels_separateSessions(args):
-    subject_number, session_number = args
-    return contract(getRestim_separateSessions((subject_number, session_number)))
+    subject_number, session = args
+    if (session == 1):
+        numFiles = 12
+        path_start = "SCI/02-20/"
+        fileGroups = [feb_1, feb_2, feb_3, feb_4]
+    else:
+        numFiles = 14
+        path_start = "SCI/04-12/"
+        fileGroups = [april_1, april_2, april_3, april_4]
+
+    gesture_reps = [0 for i in range(numFiles)]
+    for i in range(numFiles):
+        data = [Poly5Reader(path_start + file[i]) for file in fileGroups]
+        emg = []
+        for d in data:
+            info = mne.create_info(d.num_channels, sfreq=d.sample_rate)
+            mne_raw = mne.io.RawArray(d.samples, info)
+            emg.append(np.array(mne_raw.get_data()))
+        
+        # subsample APRIL 1
+        if (session == 2):
+            emg[0] = emg[0][:, ::2]
+
+        rep_durations = []
+        subseq = emg[0][len(emg[0]) - 3]
+        global_min = np.min(subseq)
+        total_elapsed = 0
+        skipped = False
+
+        while (len(rep_durations) < 10):
+            start = np.argmax(subseq)
+            subseq = subseq[start:]
+
+            end = np.argmin(subseq)
+            subseq = subseq[end:]
+
+            if (skipped):
+                rep_durations.append(end)
+            elif (end < 1000):
+                skipped = True
+        
+        for j in range(len(rep_durations)):
+            gesture_reps[i] += (rep_durations[j] - wLenTimesteps) // stepLen + 1
+
+    curr = 0
+    labels = torch.tensor(())
+    labels = labels.new_zeros(size=(sum(gesture_reps), numGestures))
+
+    if (session == 1):
+        for i, ges in enumerate(gesture_labels_02):
+            pos = gesture_labels.index(ges)
+            labels[curr:curr+gesture_reps[i], pos] = 1
+            curr += gesture_reps[i]
+    else:
+        for i in range(14):
+            labels[curr:curr+gesture_reps[i], i] = 1
+            curr += gesture_reps[i]
+    
+    return labels
 
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
     emg_sample = data
@@ -334,30 +484,26 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
     resize_length_factor = 1
     native_resnet_size = 224
 
-    with multiprocessing.Pool(processes=5) as pool:
-        args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-        images_async = pool.starmap_async(optimized_makeOneImage, args)
-        images = images_async.get()
+    images = []
+    for i in range(len(emg)):
+        images.append(optimized_makeOneImage(emg[i], cmap, length, width, resize_length_factor, native_resnet_size))
 
     if turn_on_magnitude:
-        with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
-            images_magnitude = images_async.get()
+        images_magnitude = []
+        for i in range(len(emg)):
+            images_magnitude.append(optimized_makeOneMagnitudeImage(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max))
         images = np.concatenate((images, images_magnitude), axis=2)
 
     elif turn_on_spectrogram:
-        with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
-            images_spectrogram = images_async.get()
+        images_spectrogram = []
+        for i in range(len(emg)):
+            images_spectrogram.append(optimized_makeOneSpectrogramImage(emg[i], length, width, resize_length_factor, native_resnet_size))
         images = images_spectrogram
     
     elif turn_on_cwt:
-        with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
-            images_cwt = images_async.get()
+        images_cwt = []
+        for i in range(len(emg)):
+            images_cwt.append(optimized_makeOneCWTImage(emg[i], length, width, resize_length_factor, native_resnet_size))
         images = images_cwt
         
     elif turn_on_hht:
@@ -480,4 +626,3 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     firstThreeImages_filename = f'{testrun_foldername}firstFifteenImages_seed{args.seed}_{partition_name}_{formatted_datetime}.png'
     plt.savefig(firstThreeImages_filename, dpi=300)
     wandb.log({f"First Fifteen {partition_name.capitalize()} Images of Each Gesture": wandb.Image(firstThreeImages_filename)})
-
