@@ -314,6 +314,8 @@ if exercises:
             args.exercises = [1]
         elif args.dataset == "ninapro-db5":
             args.exercises = [2]
+        elif args.dataset == "ninapro-db3":
+            args.exercises = [1]
 
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
