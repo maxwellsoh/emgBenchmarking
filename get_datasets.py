@@ -38,6 +38,9 @@ def run():
     if args.NinaproDB2 or args.all:
         subprocess.run(['sh', './get_datasets/get_NinaproDB2.sh'])
 
+    if args.NinaproDB3 or args.all:
+        subprocess.run(['sh', './get_datasets/get_NinaproDB3.sh'])
+
     if args.NinaproDB5 or args.all:
         subprocess.run(['sh', './get_datasets/get_NinaproDB5.sh'])
 
