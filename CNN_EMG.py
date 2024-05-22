@@ -1437,7 +1437,7 @@ def unfreezeAllLayers(model):
 
 project_name += args.project_name_suffix
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
+run = wandb.init(name=wandb_runname, project=project_name)
 wandb.config.lr = args.learning_rate
 
 if args.leave_n_subjects_out_randomly != 0:
@@ -1501,7 +1501,7 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.train()
     
     if args.pretrain_and_finetune:
-        run = wandb.init(name=wandb_runname+"_unlab_finetune", project=project_name, entity='jehanyang')
+        run = wandb.init(name=wandb_runname+"_unlab_finetune", project=project_name)
         wandb.config.lr = args.learning_rate
         
         semilearn_config_dict['num_train_iter'] = semilearn_config.num_train_iter + iters_for_loader
