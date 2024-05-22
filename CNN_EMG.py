@@ -228,8 +228,8 @@ elif (args.dataset == "jehan"):
     project_name = 'emg_benchmarking_jehandataset'
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for JehanDataset; only one session exists")
-else:
-    
+
+elif (args.dataset.lower() == "ozdemir" or args.dataset.lower() == "ozdemiremg"):
     if (not os.path.exists("./OzdemirEMG")):
         print("Ozdemir dataset does not exist yet. Downloading now...")
         subprocess.run(['python', './get_datasets.py', '--OzdemirEMG'])
@@ -246,6 +246,9 @@ else:
         utils.numGestures = len(utils.gesture_labels)
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for OzdemirEMG; only one session exists")
+
+else: 
+    raise ValueError("Dataset not recognized. Please choose from 'uciEMG', 'ninapro-db2', 'ninapro-db5', 'M_dataset', 'hyser', 'capgmyo', 'jehan', or 'ozdemir'")
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
