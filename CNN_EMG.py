@@ -4,11 +4,8 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from torchvision.models import resnet50, ResNet50_Weights
 import numpy as np
-import pandas as pd
 from sklearn import preprocessing, model_selection
 import wandb
-from sklearn.metrics import confusion_matrix
-import pandas as pd
 import multiprocessing
 from tqdm import tqdm
 import argparse
@@ -19,18 +16,12 @@ import os
 import datetime
 import logging
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
-import matplotlib.pyplot as plt
 import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
 import cross_validation_utilities.train_test_split as tts # custom train test split to split stratified without shuffling
-from torchvision.utils import save_image
-import json
-import shutil
 import gc
 import datetime
-from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
-from semilearn.core.utils import send_model_cuda
 from PIL import Image
 from torch.utils.data import Dataset
 import VisualTransformer
@@ -156,12 +147,12 @@ if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
     if args.pretrain_and_finetune:
         NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
 
-if (args.dataset == "uciEMG"):
+if (args.dataset.lower() == "uciemg" or args.dataset.lower() == "uci"):
     import utils_UCI as utils
     print(f"The dataset being tested is uciEMG")
     project_name = 'emg_benchmarking_uci'
 
-elif (args.dataset == "ninapro-db2"):
+elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_db2"):
     import utils_NinaproDB2 as utils
     print(f"The dataset being tested is ninapro-db2")
     project_name = 'emg_benchmarking_ninapro-db2'
@@ -169,7 +160,7 @@ elif (args.dataset == "ninapro-db2"):
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
 
-elif (args.dataset == "ninapro-db5"):
+elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_db5"):
     import utils_NinaproDB5 as utils
     print(f"The dataset being tested is ninapro-db5")
     project_name = 'emg_benchmarking_ninapro-db5'
@@ -177,29 +168,37 @@ elif (args.dataset == "ninapro-db5"):
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
 
-elif (args.dataset == "M_dataset"):
+elif (args.dataset.lower() == "m-dataset" or args.dataset.lower() == "m_dataset"):
     import utils_M_dataset as utils
     print(f"The dataset being tested is M_dataset")
     project_name = 'emg_benchmarking_M_dataset'
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for M_dataset; only one session exists")
 
-elif (args.dataset == "hyser"):
+elif (args.dataset.lower() == "hyser"):
     import utils_Hyser as utils
     print(f"The dataset being tested is hyser")
     project_name = 'emg_benchmarking_hyser'
-elif (args.dataset == "capgmyo"):
+
+elif (args.dataset.lower() == "capgmyo"):
     import utils_CapgMyo as utils
     print(f"The dataset being tested is CapgMyo")
     project_name = 'emg_benchmarking_capgmyo'
     if args.leave_one_session_out:
         utils.num_subjects = 10
-elif (args.dataset == "jehan"):
+
+elif (args.dataset.lower() == "jehan"):
     import utils_JehanData as utils
     print(f"The dataset being tested is JehanDataset")
     project_name = 'emg_benchmarking_jehandataset'
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for JehanDataset; only one session exists")
+
+elif (args.dataset.lower() == "sci"):
+    import utils_SCI as utils
+    print(f"The dataset being tested is SCI")
+    project_name = 'emg_benchmarking_sci'
+
 else:
     print(f"The dataset being tested is OzdemirEMG")
     project_name = 'emg_benchmarking_ozdemir'
@@ -1427,7 +1426,7 @@ def unfreezeAllLayers(model):
 
 project_name += args.project_name_suffix
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='jehanyang')
+run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
 wandb.config.lr = args.learning_rate
 
 if args.leave_n_subjects_out_randomly != 0:

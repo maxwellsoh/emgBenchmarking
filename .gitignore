@@ -7,14 +7,12 @@ wandb/
 __pycache__/
 .vscode/
 DatasetsProcessed_hdf5/
-test/
 LOSOimages_zarr/
 .gitignore
 OzdemirEMG/
 uciEMG/
 M_dataset/
 hyser/
-doug/
+SCI/
 temp.ipynb
-utils_doug.py
 *.zip

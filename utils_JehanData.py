@@ -66,31 +66,36 @@ def seed_worker(worker_id):
 
 def highpassFilter (emg):
     b, a = butter(N=1, Wn=120.0, btype='highpass', analog=False, fs=fs)
-    # what axis should the filter apply to? other datasets have axis=0
     return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=-1).copy())
 
+# NOTE: modified version of target_normalize where data is [# channels, # timesteps]
+# target min/max is [# channels, # gestures]
 def target_normalize (data, target_min, target_max, gesture):
-    source_min = np.zeros(len(data[0]), dtype=np.float32)
-    source_max = np.zeros(len(data[0]), dtype=np.float32)
-    for i in range(len(data[0])):
-        source_min[i] = np.min(data[:, i])
-        source_max[i] = np.max(data[:, i])
+    source_min = np.zeros(numElectrodes, dtype=np.float32)
+    source_max = np.zeros(numElectrodes, dtype=np.float32)
+    for i in range(numElectrodes):
+        source_min[i] = np.min(data[i])
+        source_max[i] = np.max(data[i])
 
-    for i in range(len(data[0])):
-        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+    for i in range(numElectrodes):
+        data[i] = ((data[i] - source_min[i]) / (source_max[i] 
         - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
     return data
 
-# returns array with dimensions (# of samples)x64x10x100 [SAMPLES, CHANNELS, GESTURES, TIME]
+# returns array with dimensions [# samples, # channels, # timesteps]
 def getData(n, gesture, target_max=None, target_min=None, leftout=None, session_number=1):
     session_number_mapping = {1: 'initial', 2: 'recalibration'}
     if (n<10):
         file = h5py.File('./Jehan_Dataset/p00' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
     else:
         file = h5py.File('./Jehan_Dataset/p0' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
+    # initially [# repetitions, # channels, # timesteps]
     data = np.array(file[gesture])
-    if (leftout is not None and n != leftout):
-        data = target_normalize(data, target_min, target_max, gesture_labels.index(gesture))
+    
+    if (leftout != None and n != leftout):
+        for i in range(len(data)):
+            data[i] = target_normalize(data[i], target_min, target_max, gesture_labels.index(gesture))
+
     data = highpassFilter(torch.from_numpy(data).unfold(dimension=-1, size=wLenTimesteps, step=stepLen))
 
     return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2])
@@ -150,12 +155,14 @@ def getExtrema (n):
     else:
         file = h5py.File('./Jehan_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
     
-    for i in range(numGestures):    
-        data = np.array(file[gesture_labels[0]])
+    for i in range(numGestures):
+        # get first repetition only for the gesture
+        data = np.array(file[gesture_labels[i]])[0]
 
+        # data will be [# channel, # timestep]
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[:len(data)//12, j])
-            maxes[j][i] = np.max(data[:len(data)//12, j])
+            mins[j][i] = np.min(data[j])
+            maxes[j][i] = np.max(data[j])
     return mins, maxes
 
 def getGestures(n):
@@ -369,9 +376,7 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         del data_chunks
 
     # Parameters that don't change can be set once
-    resize_length_factor = 6
-    if turn_on_magnitude:
-        resize_length_factor = 3
+    resize_length_factor = 1
     native_resnet_size = 224
     
     args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]

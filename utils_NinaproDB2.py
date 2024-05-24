@@ -307,8 +307,6 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
 
     # Parameters that don't change can be set once
     resize_length_factor = 1
-    if turn_on_magnitude:
-        resize_length_factor = 1
     native_resnet_size = 224
     
     args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size, i) for i in range(len(emg))]
