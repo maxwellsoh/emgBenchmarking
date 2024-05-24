@@ -1481,9 +1481,10 @@ if args.pretrain_and_finetune:
     utils.plot_first_fifteen_images(X_train_finetuning, np.argmax(Y_train_finetuning.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train_finetuning')
 
 if args.turn_on_unlabeled_domain_adaptation:
+    print("Pretraining the model...")
     semilearn_algorithm.loader_dict = {}
     semilearn_algorithm.loader_dict['train_lb'] = train_labeled_loader
-    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
+    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_jehan:
         semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
     semilearn_algorithm.loader_dict['eval'] = validation_loader
     semilearn_algorithm.scheduler = None
@@ -1491,6 +1492,7 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.train()
     
     if args.pretrain_and_finetune:
+        print("Finetuning the model...")
         run = wandb.init(name=wandb_runname+"_unlab_finetune", project=project_name, entity='jehanyang')
         wandb.config.lr = args.learning_rate
         
@@ -1512,7 +1514,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         
         if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
             semilearn_algorithm.loader_dict['train_ulb'] = train_finetuning_unlabeled_loader
-        elif proportion_unlabeled_of_training_subjects>0:
+        elif proportion_unlabeled_of_training_subjects>0 or args.load_unlabeled_data_jehan:
             semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
 
         semilearn_algorithm.loader_dict['eval'] = validation_loader
