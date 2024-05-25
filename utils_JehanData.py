@@ -18,6 +18,7 @@ from scipy.signal import spectrogram, stft
 import pywt
 from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
 import glob
+from tqdm import tqdm
 
 numGestures = 10
 fs = 4000 #Hz
@@ -258,9 +259,10 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = 64
+    spectrogram_window_size = 16
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
-    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window
+    
+    frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window
     Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-6) # small constant added to avoid log(0)
     emg_sample = torch.from_numpy(Sxx_dB)
     emg_sample -= torch.min(emg_sample)
@@ -353,9 +355,9 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
               turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
     
     if standardScaler is not None:
-        emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+        emg = standardScaler.transform(np.array(emg.view(len(emg), length * width)))
     else:
-        emg = np.array(emg.reshape(len(emg), length*width))
+        emg = np.array(emg.reshape(len(emg), length * width))
 
     # Use RMS preprocessing
     if turn_on_rms:
@@ -366,11 +368,13 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         num_splits = multiprocessing.cpu_count()
         data_chunks = np.array_split(emg, num_splits)
         
-        emg_rms = process_map(process_chunk, data_chunks, chunksize=1, max_workers=num_splits, desc="Calculating RMS")
+        with multiprocessing.Pool(num_splits) as pool:
+            emg_rms = list(tqdm(pool.imap(process_chunk, data_chunks), total=len(data_chunks), desc="Calculating RMS"))
+        
         # Apply RMS calculation along the last axis (axis=-1)
         emg = np.concatenate(emg_rms)  # Resulting shape will be (SAMPLES, 16, 5)
         width = rms_windows
-        emg = emg.reshape(len(emg), length*width)
+        emg = emg.reshape(len(emg), length * width)
         
         del emg_rms
         del data_chunks
@@ -380,12 +384,16 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
     native_resnet_size = 224
     
     args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-    # Using process_map instead of multiprocessing.Pool directly
-    images = process_map(process_optimized_makeOneImage, args, chunksize=1, max_workers=4)
+    
+    with multiprocessing.Pool(4) as pool:
+        images = list(tqdm(pool.imap(process_optimized_makeOneImage, args), total=len(args), desc="Creating Images"))
 
     if turn_on_magnitude:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
-        images_magnitude = process_map(process_optimized_makeOneMagnitudeImage, args, chunksize=1, max_workers=32)
+        
+        with multiprocessing.Pool(32) as pool:
+            images_magnitude = list(tqdm(pool.imap(process_optimized_makeOneMagnitudeImage, args), total=len(args), desc="Creating Magnitude Images"))
+        
         images = np.concatenate((images, images_magnitude), axis=2)
     
     if turn_on_cwt:
