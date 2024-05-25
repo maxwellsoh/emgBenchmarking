@@ -1866,9 +1866,10 @@ else:
         torch.cuda.empty_cache()  # Clear cache if needed
 
         model.eval()
+        train_loader_unshuffled = DataLoader(train_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
         with torch.no_grad():
             train_predictions = []
-            for X_batch, Y_batch in tqdm(train_loader, desc="Training Batch Loading"):
+            for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading"):
                 X_batch = X_batch.to(device).to(torch.float32)
                 outputs = model(X_batch)
                 if isinstance(outputs, dict):
