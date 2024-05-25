@@ -23,7 +23,7 @@ numGestures = 6 # 7 total, but not all subjects have 7
 fs = 200 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 50 #50 ms
+stepLen = 250 #250 ms (increased by 50ms due to high number of subjects)
 stepLen = int(stepLen / 1000 * fs)
 numElectrodes = 8
 num_subjects = 36
@@ -228,7 +228,7 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = 64
+    spectrogram_window_size = 16
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
     frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window
     Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-6) # small constant added to avoid log(0)
