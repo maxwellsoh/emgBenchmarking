@@ -31,6 +31,9 @@ from sklearn.ensemble import RandomForestClassifier
 from joblib import dump
 from sklearn.metrics import accuracy_score, log_loss
 import torch.nn.functional as F
+from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
+from semilearn.core.utils import send_model_cuda
+import VisualTransformer
 
 
 # Define a custom argument type for a list of integers
@@ -1426,7 +1429,7 @@ def unfreezeAllLayers(model):
 
 project_name += args.project_name_suffix
 
-run = wandb.init(name=wandb_runname, project=project_name, entity='msoh')
+run = wandb.init(name=wandb_runname, project=project_name)
 wandb.config.lr = args.learning_rate
 
 if args.leave_n_subjects_out_randomly != 0:
@@ -1492,7 +1495,7 @@ if args.turn_on_unlabeled_domain_adaptation:
     
     if args.pretrain_and_finetune:
         print("Finetuning the model...")
-        run = wandb.init(name=wandb_runname+"_unlab_finetune", project=project_name, entity='jehanyang')
+        run = wandb.init(name=wandb_runname+"_unlab_finetune", project=project_name)
         wandb.config.lr = args.learning_rate
         
         semilearn_config_dict['num_train_iter'] = semilearn_config.num_train_iter + iters_for_loader
