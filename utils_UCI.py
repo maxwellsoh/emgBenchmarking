@@ -183,37 +183,41 @@ def getLabels_separateSessions(args):
 
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
     emg_sample = data
+    data = data.reshape(length, width)
     # Convert EMG sample to numpy array for CWT computation
-    emg_sample_np = emg_sample.astype(np.float16).flatten()
-    highest_cwt_scale = 51
+    emg_sample_np = data.astype(np.float16)
+    highest_cwt_scale = 50
     downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
     scales = np.arange(1, highest_cwt_scale)
-    wavelet = 'mexh'
+    # wavelet = 'morl'
     # Perform Continuous Wavelet Transform (CWT)
     # Note: PyWavelets returns scales and coeffs (coefficients)
-    coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
-    # frequencies, coefficients = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
-    coefficients_dB = 10 * np.log10(np.abs(coefficients)+1e-6) # Adding a small constant to avoid log(0)
+    # for i in range(numElectrodes):
+    for i in range(length):
+        # coefficients, frequencies = pywt.cwt(emg_sample_np[i, ::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
+        frequencies, coefficients = fcwt.cwt(emg_sample_np[i, ::downsample_factor_for_cwt_preprocessing], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
+        coefficients_dB = 10 * np.log10(np.abs(coefficients)+1e-12) # Adding a small constant to avoid log(0)
+        if i == 0:
+            time_frequency_emg = np.zeros((length * coefficients_dB.shape[0], coefficients_dB.shape[1]))
+        time_frequency_emg[i*coefficients_dB.shape[0]:(i+1)*coefficients_dB.shape[0], :] = coefficients_dB
     # Convert back to PyTorch tensor and reshape
-    emg_sample = torch.tensor(coefficients_dB).float().reshape(-1, coefficients_dB.shape[-1])
+    emg_sample = torch.tensor(time_frequency_emg).float().reshape(-1, time_frequency_emg.shape[-1])
     # Normalization
     emg_sample -= torch.min(emg_sample)
     emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
-    blocks = emg_sample.reshape(highest_cwt_scale-1, numElectrodes, -1)
-    emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale-1), -1)
+    blocks = emg_sample.reshape(highest_cwt_scale, numElectrodes, -1)
+    emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale), -1)
         
-    # Update 'window_size' if necessary
-    window_size = emg_sample.shape[1]
-
-    emg_sample -= torch.min(emg_sample)
-    emg_sample /= torch.max(emg_sample)
     data = emg_sample
 
     data_converted = cmap(data)
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
+
+    resize_length_factor = len(frequencies)
+    width_to_transform_to = min(native_resnet_size, time_frequency_emg.shape[-1])
     
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+    resize = transforms.Resize([length * resize_length_factor, width_to_transform_to],
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
@@ -225,7 +229,7 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     image_normalized = normalize(image_clamped)
 
     # Since no split occurs, we don't need to concatenate halves back together
-    final_image = image_normalized.numpy().astype(np.float32)
+    final_image = image_normalized.numpy().astype(np.float16)
 
     return final_image
 
@@ -233,7 +237,7 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     spectrogram_window_size = 4
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
     frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window
-    Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-6) # small constant added to avoid log(0)
+    Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-12) # small constant added to avoid log(0)
     emg_sample = torch.from_numpy(Sxx_dB)
     emg_sample -= torch.min(emg_sample)
     emg_sample /= torch.max(emg_sample)
