@@ -20,10 +20,11 @@ from scipy.signal import spectrogram, stft
 import pywt
 
 numGestures = 6 # 7 total, but not all subjects have 7
-fs = 1000 #Hz
+fs = 200 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 50 #50 ms
+stepLen = int(stepLen / 1000 * fs)
 numElectrodes = 8
 num_subjects = 36
 cmap = mpl.colormaps['viridis']
