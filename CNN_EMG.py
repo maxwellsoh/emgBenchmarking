@@ -1752,6 +1752,8 @@ else:
         wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
         if args.pretrain_and_finetune:
+            run.finish()
+            run = wandb.init(name=wandb_runname+"_finetune", project=project_name)
             num_epochs = args.finetuning_epochs
             # train more on fine tuning dataset
             finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
