@@ -408,13 +408,6 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         images = np.concatenate((images, images_magnitude), axis=2)
 
     elif turn_on_spectrogram:
-        with multiprocessing.Pool(processes=16) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
-            images_spectrogram = images_async.get()
-        images = images_spectrogram
-
-    elif turn_on_spectrogram:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
         images_spectrogram = []
         for i in tqdm(range(len(emg)), desc="Creating Spectrogram Images"):
