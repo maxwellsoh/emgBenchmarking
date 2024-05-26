@@ -204,10 +204,12 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = wLenTimesteps
+    spectrogram_window_size = wLenTimesteps // 16
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
+
+    number_of_frequencies = wLenTimesteps
     
-    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window
+    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, nfft=number_of_frequencies) # defaults to hann window
     Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-12) # small constant added to avoid log(0)
     emg_sample = torch.from_numpy(Sxx_dB)
     emg_sample -= torch.min(emg_sample)
