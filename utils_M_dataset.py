@@ -16,12 +16,16 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import h5py
 import os
+from scipy.signal import spectrogram, stft
+import pywt
+import fcwt
 
 numGestures = 7
 fs = 200.0 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 10 #50 ms
+stepLen = 50 #50 ms
+stepLen = int(stepLen / 1000 * fs)
 numElectrodes = 8
 num_subjects = 18
 cmap = mpl.colormaps['viridis']
@@ -146,6 +150,98 @@ def getLabels (n):
     labels = contract(torch.cat(labels, dim=0))
     return labels
 
+def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
+    emg_sample = data
+    data = data.reshape(length, width)
+    # Convert EMG sample to numpy array for CWT computation
+    emg_sample_np = data.astype(np.float16)
+    highest_cwt_scale = wLenTimesteps
+    downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
+    scales = np.arange(1, highest_cwt_scale)
+    # wavelet = 'morl'
+    # Perform Continuous Wavelet Transform (CWT)
+    # Note: PyWavelets returns scales and coeffs (coefficients)
+    # for i in range(numElectrodes):
+    for i in range(length):
+        # coefficients, frequencies = pywt.cwt(emg_sample_np[i, ::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
+        frequencies, coefficients = fcwt.cwt(emg_sample_np[i, ::downsample_factor_for_cwt_preprocessing], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
+        # note fcwt.cwt returns frequencies and coefficients with frequencies from most to least
+        coefficients_dB = 10 * np.log10(np.abs(coefficients)+1e-12) # Adding a small constant to avoid log(0)
+        if i == 0:
+            time_frequency_emg = np.zeros((length * coefficients_dB.shape[0], coefficients_dB.shape[1]))
+        time_frequency_emg[i*coefficients_dB.shape[0]:(i+1)*coefficients_dB.shape[0], :] = coefficients_dB # flip for low frequency to be at bottom
+    # Convert back to PyTorch tensor and reshape
+    emg_sample = torch.tensor(time_frequency_emg).float().reshape(-1, time_frequency_emg.shape[-1])
+    # Normalization
+    emg_sample -= torch.min(emg_sample)
+    emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
+    blocks = emg_sample.reshape(highest_cwt_scale, numElectrodes, -1)
+    emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale), -1)
+        
+    data = emg_sample
+
+    data_converted = cmap(data)
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+
+    resize_length_factor = len(frequencies)
+    width_to_transform_to = min(native_resnet_size, time_frequency_emg.shape[-1])
+    
+    resize = transforms.Resize([length * resize_length_factor, width_to_transform_to],
+                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp between 0 and 1 using torch.clamp
+    image_clamped = torch.clamp(image_resized, 0, 1)
+
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    # Since no split occurs, we don't need to concatenate halves back together
+    final_image = image_normalized.numpy().astype(np.float16)
+
+    return final_image
+
+def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
+    spectrogram_window_size = wLenTimesteps
+    emg_sample_unflattened = data.reshape(numElectrodes, -1)
+    
+    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window
+    Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-12) # small constant added to avoid log(0)
+    emg_sample = torch.from_numpy(Sxx_dB)
+    emg_sample -= torch.min(emg_sample)
+    emg_sample /= torch.max(emg_sample)
+    emg_sample = emg_sample.reshape(emg_sample.shape[0]*emg_sample.shape[1], emg_sample.shape[2])
+    # flip spectrogram vertically for each electrode
+    for i in range(numElectrodes):
+        num_frequencies = len(frequencies)
+        emg_sample[i*num_frequencies:(i+1)*num_frequencies, :] = torch.flip(emg_sample[i*num_frequencies:(i+1)*num_frequencies, :], dims=[0])
+    data = emg_sample
+
+    data_converted = cmap(data)
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+
+    resize_length_factor = len(frequencies)
+    width_to_transform_to = min(native_resnet_size, image.shape[-1])
+    
+    resize = transforms.Resize([length * resize_length_factor, width_to_transform_to],
+                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp between 0 and 1 using torch.clamp
+    image_clamped = torch.clamp(image_resized, 0, 1)
+
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    final_image = image_normalized.numpy().astype(np.float32)
+
+    return final_image
+
+
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
     data = (data - global_min) / (global_max - global_min)
@@ -170,32 +266,30 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
     return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
 
 def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size):
-    # Contrast normalize and convert data
-    # NOTE: Should this be contrast normalized? Then only patterns of data will be visible, not absolute values
+     # Contrast normalize and convert data
     data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
     image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
     image = np.transpose(image_data, (2, 0, 1))
     
-    # Split image and resize
-    imageL, imageR = np.split(image, 2, axis=2)
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+    # Resize the image
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
                                interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    image = resize(torch.from_numpy(image))
     
     # Get max and min values after interpolation
-    max_val = max(imageL.max(), imageR.max())
-    min_val = min(imageL.min(), imageR.min())
+    max_val = image.max()
+    min_val = image.min()
     
     # Contrast normalize again after interpolation
-    imageL, imageR = map(lambda img: (img - min_val) / (max_val - min_val), (imageL, imageR))
+    image = (image - min_val) / (max_val - min_val)
     
     # Normalize with standard ImageNet normalization
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    imageL, imageR = map(normalize, (imageL, imageR))
+    image = normalize(image)
     
-    return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
+    return image.numpy().astype(np.float32)
 
 def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
@@ -237,6 +331,24 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
             images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
             images_magnitude = images_async.get()
         images = np.concatenate((images, images_magnitude), axis=2)
+
+    elif turn_on_spectrogram:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_spectrogram = []
+        for i in tqdm(range(len(emg)), desc="Creating Spectrogram Images"):
+            images_spectrogram.append(optimized_makeOneSpectrogramImage(*args[i]))
+        images = images_spectrogram
+    
+    elif turn_on_cwt:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_cwt_list = []
+        # with multiprocessing.Pool(processes=5) as pool:
+        for i in tqdm(range(len(emg)), desc="Creating CWT Images"):
+            images_cwt_list.append(optimized_makeOneCWTImage(*args[i]))
+        images = images_cwt_list
+        
+    elif turn_on_hht:
+        raise NotImplementedError("HHT is not implemented yet")
     
     return images
 
@@ -306,10 +418,12 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
 
     average_images = np.array(average_images)
 
+    resize_transform = transforms.Resize((224, 224))
     # Plot average image of each gesture
     fig, axs = plt.subplots(2, 9, figsize=(10, 5))
     for i in range(numGestures):
-        axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
+        current_average_image = resize_transform(torch.tensor(average_images[i])).numpy()
+        axs[i//9, i%9].imshow(current_average_image.transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])
         axs[i//9, i%9].axis('off')
     fig.suptitle('Average Image of Each Gesture')
@@ -339,11 +453,14 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
         
         # Select and denormalize only the required images
         gesture_images = denormalize(image_data[gesture_indices]).cpu().detach().numpy()
+        resize_transform = transforms.Resize((224, 224))
 
         for j in range(len(gesture_images)):  # len(gesture_images) is no more than rows_per_gesture
             ax = axs[j, i]
             # Transpose the image data to match the expected shape (H, W, C) for imshow
-            ax.imshow(gesture_images[j].transpose(1, 2, 0))
+            # Resize to 224 x 224
+            current_gesture_image = resize_transform(torch.tensor(gesture_images[j])).numpy()
+            ax.imshow(current_gesture_image.transpose(1, 2, 0))
             if j == 0:
                 ax.set_title(gesture_labels[i])
             ax.axis('off')
