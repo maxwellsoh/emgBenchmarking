@@ -175,8 +175,8 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     # Normalization
     emg_sample -= torch.min(emg_sample)
     emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
-    blocks = emg_sample.reshape(highest_cwt_scale, numElectrodes, -1)
-    emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale), -1)
+    # blocks = emg_sample.reshape(highest_cwt_scale, numElectrodes, -1)
+    # emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale), -1)
         
     data = emg_sample
 
