@@ -197,8 +197,8 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     # Pre-allocate the array for the CWT coefficients
     grid_width, grid_length = closest_factors(numElectrodes)
 
-    length_to_resize_to = min(native_resnet_size, grid_length * highest_cwt_scale)
-    width_to_transform_to = min(native_resnet_size, grid_width * width)
+    length_to_resize_to = min(native_resnet_size, grid_width * highest_cwt_scale)
+    width_to_transform_to = min(native_resnet_size, grid_length * width)
 
     time_frequency_emg = np.zeros((length * (highest_cwt_scale), width))
 
@@ -244,15 +244,15 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = wLenTimesteps // 16
+    spectrogram_window_size = wLenTimesteps // 4
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
     number_of_frequencies = wLenTimesteps 
 
     # Pre-allocate the array for the CWT coefficients
     grid_width, grid_length = closest_factors(numElectrodes)
 
-    length_to_resize_to = min(native_resnet_size, grid_length * number_of_frequencies)
-    width_to_transform_to = min(native_resnet_size, grid_width * width)
+    length_to_resize_to = min(native_resnet_size, grid_width * number_of_frequencies)
+    width_to_transform_to = min(native_resnet_size, grid_length * width)
     
     frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size - 1, noverlap=spectrogram_window_size-2, nfft=number_of_frequencies - 1) # defaults to hann window
     Sxx_abs = np.abs(Sxx) # small constant added to avoid log(0)
@@ -268,11 +268,11 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
 
     # Convert to PyTorch tensor and normalize
     emg_sample = torch.tensor(emg_sample).float()
-    emg_sample = emg_sample.view(numElectrodes, number_of_frequencies//2, -1)
+    emg_sample = emg_sample.view(numElectrodes, len(frequencies), -1)
 
     # Reshape into blocks
     
-    blocks = emg_sample.view(grid_width, grid_length, number_of_frequencies//2, -1)
+    blocks = emg_sample.view(grid_width, grid_length, len(frequencies), -1)
 
     # Combine the blocks into the final image
     rows = [torch.cat([blocks[i, j] for j in range(grid_length)], dim=1) for i in range(grid_width)]
