@@ -186,7 +186,7 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     data = data.reshape(length, width)
     # Convert EMG sample to numpy array for CWT computation
     emg_sample_np = data.astype(np.float16)
-    highest_cwt_scale = 50
+    highest_cwt_scale = wLenTimesteps
     downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
     scales = np.arange(1, highest_cwt_scale)
     # wavelet = 'morl'
@@ -235,7 +235,7 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = 50
+    spectrogram_window_size = wLenTimesteps
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
     
     frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window

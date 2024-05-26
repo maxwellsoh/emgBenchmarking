@@ -651,6 +651,8 @@ elif args.turn_on_cwt:
     base_foldername_zarr += 'cwt/'
 elif args.turn_on_hht:
     base_foldername_zarr += 'hht/'
+else:
+    base_foldername_zarr += 'raw/'
 
 if exercises:
     if args.partial_dataset_ninapro:
