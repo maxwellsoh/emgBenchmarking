@@ -212,57 +212,65 @@ def getLabels_separateSessions(args):
         curr += gesture_count[x]
     return labels
 
-def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
-    emg_sample = data
-    data = data.reshape(length, width)
-    # Convert EMG sample to numpy array for CWT computation
-    emg_sample_np = data.astype(np.float16)
-    highest_cwt_scale = wLenTimesteps
-    downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
-    scales = np.arange(1, highest_cwt_scale)
-    # wavelet = 'morl'
-    # Perform Continuous Wavelet Transform (CWT)
-    # Note: PyWavelets returns scales and coeffs (coefficients)
-    # for i in range(numElectrodes):
-    for i in range(length):
-        # coefficients, frequencies = pywt.cwt(emg_sample_np[i, ::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
-        frequencies, coefficients = fcwt.cwt(emg_sample_np[i, ::downsample_factor_for_cwt_preprocessing], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
-        # note fcwt.cwt returns frequencies and coefficients with frequencies from most to least
-        coefficients_dB = 10 * np.log10(np.abs(coefficients)+1e-12) # Adding a small constant to avoid log(0)
-        if i == 0:
-            time_frequency_emg = np.zeros((length * coefficients_dB.shape[0], coefficients_dB.shape[1]))
-        time_frequency_emg[i*coefficients_dB.shape[0]:(i+1)*coefficients_dB.shape[0], :] = coefficients_dB # flip for low frequency to be at bottom
-    # Convert back to PyTorch tensor and reshape
-    emg_sample = torch.tensor(time_frequency_emg).float().reshape(-1, time_frequency_emg.shape[-1])
-    # Normalization
-    emg_sample -= torch.min(emg_sample)
-    emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
-    # blocks = emg_sample.reshape(highest_cwt_scale, numElectrodes, -1)
-    # emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale), -1)
-        
-    data = emg_sample
+def closest_factors(num):
+    # Find factors of the number
+    factors = [(i, num // i) for i in range(1, int(np.sqrt(num)) + 1) if num % i == 0]
+    # Sort factors by their difference, so the closest pair is first
+    factors.sort(key=lambda x: abs(x[0] - x[1]))
+    return factors[0]
 
-    data_converted = cmap(data)
+def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
+    # Reshape and preprocess EMG data
+    data = data.reshape(length, width).astype(np.float16)
+    highest_cwt_scale = wLenTimesteps
+    scales = np.arange(1, highest_cwt_scale)
+
+    # Pre-allocate the array for the CWT coefficients
+    grid_width, grid_length = closest_factors(numElectrodes)
+
+    length_to_resize_to = min(native_resnet_size, length * highest_cwt_scale)
+    width_to_transform_to = min(native_resnet_size, width)
+
+    time_frequency_emg = np.zeros((length * (highest_cwt_scale), width))
+
+    # Perform Continuous Wavelet Transform (CWT)
+    for i in range(length):
+        frequencies, coefficients = fcwt.cwt(data[i, :], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
+        coefficients_dB = np.abs(coefficients) + 1e-12  # Avoid log(0)
+        time_frequency_emg[i * (highest_cwt_scale):(i + 1) * (highest_cwt_scale), :] = coefficients_dB
+
+    # Convert to PyTorch tensor and normalize
+    emg_sample = torch.tensor(time_frequency_emg).float()
+    emg_sample = emg_sample.view(numElectrodes, wLenTimesteps, -1)
+
+    # Reshape into blocks
+    
+    blocks = emg_sample.view(grid_width, grid_length, wLenTimesteps, -1)
+
+    # Combine the blocks into the final image
+    rows = [torch.cat([blocks[i, j] for j in range(grid_length)], dim=1) for i in range(grid_width)]
+    combined_image = torch.cat(rows, dim=0)
+
+    # Normalize combined image
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
+
+    # Convert to RGB and resize
+    data_converted = cmap(combined_image)
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
 
-    resize_length_factor = len(frequencies)
-    width_to_transform_to = min(native_resnet_size, time_frequency_emg.shape[-1])
-    
-    resize = transforms.Resize([min(224, length * resize_length_factor), width_to_transform_to],
-                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    resize = transforms.Resize([length_to_resize_to, width_to_transform_to],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
-    # Clamp between 0 and 1 using torch.clamp
+    # Clamp and normalize
     image_clamped = torch.clamp(image_resized, 0, 1)
-
-    # Normalize with standard ImageNet normalization
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     image_normalized = normalize(image_clamped)
 
-    # Since no split occurs, we don't need to concatenate halves back together
+    # Return final image as a NumPy array
     final_image = image_normalized.numpy().astype(np.float16)
-
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
