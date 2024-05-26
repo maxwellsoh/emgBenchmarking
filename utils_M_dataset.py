@@ -203,15 +203,83 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
 
     return final_image
 
-def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = wLenTimesteps // 16
-    emg_sample_unflattened = data.reshape(numElectrodes, -1)
+def closest_factors(num):
+    # Find factors of the number
+    factors = [(i, num // i) for i in range(1, int(np.sqrt(num)) + 1) if num % i == 0]
+    # Sort factors by their difference, so the closest pair is first
+    factors.sort(key=lambda x: abs(x[0] - x[1]))
+    return factors[0]
 
-    number_of_frequencies = wLenTimesteps
+def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
+    # Reshape and preprocess EMG data
+    data = data.reshape(length, width).astype(np.float16)
+    highest_cwt_scale = wLenTimesteps
+    scales = np.arange(1, highest_cwt_scale)
+
+    # Pre-allocate the array for the CWT coefficients
+    grid_width, grid_length = closest_factors(numElectrodes)
+
+    length_to_resize_to = min(native_resnet_size, grid_width * highest_cwt_scale)
+    width_to_transform_to = min(native_resnet_size, grid_length * width)
+
+    time_frequency_emg = np.zeros((length * (highest_cwt_scale), width))
+
+    # Perform Continuous Wavelet Transform (CWT)
+    for i in range(length):
+        frequencies, coefficients = fcwt.cwt(data[i, :], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
+        coefficients_abs = np.abs(coefficients) 
+        # coefficients_dB = 10 * np.log10(coefficients_abs + 1e-12)  # Avoid log(0)
+        time_frequency_emg[i * (highest_cwt_scale):(i + 1) * (highest_cwt_scale), :] = coefficients_abs
+
+    # Convert to PyTorch tensor and normalize
+    emg_sample = torch.tensor(time_frequency_emg).float()
+    emg_sample = emg_sample.view(numElectrodes, wLenTimesteps, -1)
+
+    # Reshape into blocks
     
-    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, nfft=number_of_frequencies) # defaults to hann window
-    Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-12) # small constant added to avoid log(0)
-    emg_sample = torch.from_numpy(Sxx_dB)
+    blocks = emg_sample.view(grid_width, grid_length, wLenTimesteps, -1)
+
+    # Combine the blocks into the final image
+    rows = [torch.cat([blocks[i, j] for j in range(grid_length)], dim=1) for i in range(grid_width)]
+    combined_image = torch.cat(rows, dim=0)
+
+    # Normalize combined image
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
+
+    # Convert to RGB and resize
+    data_converted = cmap(combined_image)
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+
+    resize = transforms.Resize([length_to_resize_to, width_to_transform_to],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp and normalize
+    image_clamped = torch.clamp(image_resized, 0, 1)
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    # Return final image as a NumPy array
+    final_image = image_normalized.numpy().astype(np.float16)
+    return final_image
+
+def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
+    spectrogram_window_size = wLenTimesteps // 4
+    emg_sample_unflattened = data.reshape(numElectrodes, -1)
+    number_of_frequencies = wLenTimesteps 
+
+    # Pre-allocate the array for the CWT coefficients
+    grid_width, grid_length = closest_factors(numElectrodes)
+
+    length_to_resize_to = min(native_resnet_size, grid_width * number_of_frequencies)
+    width_to_transform_to = min(native_resnet_size, grid_length * width)
+    
+    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size - 1, noverlap=spectrogram_window_size-2, nfft=number_of_frequencies - 1) # defaults to hann window
+    Sxx_abs = np.abs(Sxx) # small constant added to avoid log(0)
+    # Sxx_dB = 10 * np.log10(np.abs(Sxx_abs) + 1e-12)
+    emg_sample = torch.from_numpy(Sxx_abs)
     emg_sample -= torch.min(emg_sample)
     emg_sample /= torch.max(emg_sample)
     emg_sample = emg_sample.reshape(emg_sample.shape[0]*emg_sample.shape[1], emg_sample.shape[2])
@@ -219,16 +287,32 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     for i in range(numElectrodes):
         num_frequencies = len(frequencies)
         emg_sample[i*num_frequencies:(i+1)*num_frequencies, :] = torch.flip(emg_sample[i*num_frequencies:(i+1)*num_frequencies, :], dims=[0])
-    data = emg_sample
+
+    # Convert to PyTorch tensor and normalize
+    emg_sample = torch.tensor(emg_sample).float()
+    emg_sample = emg_sample.view(numElectrodes, len(frequencies), -1)
+
+    # Reshape into blocks
+    
+    blocks = emg_sample.view(grid_width, grid_length, len(frequencies), -1)
+
+    # Combine the blocks into the final image
+    rows = [torch.cat([blocks[i, j] for j in range(grid_length)], dim=1) for i in range(grid_width)]
+    combined_image = torch.cat(rows, dim=0)
+
+    # Normalize combined image
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
+
+    data = combined_image.numpy()
 
     data_converted = cmap(data)
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
 
-    resize_length_factor = len(frequencies)
     width_to_transform_to = min(native_resnet_size, image.shape[-1])
     
-    resize = transforms.Resize([length * resize_length_factor, width_to_transform_to],
+    resize = transforms.Resize([length_to_resize_to, width_to_transform_to],
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
@@ -242,30 +326,6 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     final_image = image_normalized.numpy().astype(np.float32)
 
     return final_image
-
-
-def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
-    # Normalize with global min and max
-    data = (data - global_min) / (global_max - global_min)
-    data_converted = cmap(data)
-    rgb_data = data_converted[:, :3]
-    image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
-    image = np.transpose(image_data, (2, 0, 1))
-    
-    # Split image and resize
-    imageL, imageR = np.split(image, 2, axis=2)
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
-    
-    # Clamp between 0 and 1 using torch.clamp
-    imageL, imageR = map(lambda img: torch.clamp(img, 0, 1), (imageL, imageR))
-    
-    # Normalize with standard ImageNet normalization
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    imageL, imageR = map(normalize, (imageL, imageR))
-    
-    return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
 
 def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size):
      # Contrast normalize and convert data
