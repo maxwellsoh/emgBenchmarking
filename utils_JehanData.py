@@ -228,8 +228,8 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     # Pre-allocate the array for the CWT coefficients
     grid_width, grid_length = closest_factors(numElectrodes)
 
-    length_to_resize_to = min(native_resnet_size, length * highest_cwt_scale)
-    width_to_transform_to = min(native_resnet_size, width)
+    length_to_resize_to = min(native_resnet_size, grid_length * highest_cwt_scale)
+    width_to_transform_to = min(native_resnet_size, grid_width * width)
 
     time_frequency_emg = np.zeros((length * (highest_cwt_scale), width))
 
@@ -282,8 +282,8 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     # Pre-allocate the array for the CWT coefficients
     grid_width, grid_length = closest_factors(numElectrodes)
 
-    length_to_resize_to = min(native_resnet_size, length * number_of_frequencies)
-    width_to_transform_to = min(native_resnet_size, width)
+    length_to_resize_to = min(native_resnet_size, grid_length * number_of_frequencies)
+    width_to_transform_to = min(native_resnet_size, grid_width * width)
     
     frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size - 1, noverlap=spectrogram_window_size-2, nfft=number_of_frequencies - 1) # defaults to hann window
     Sxx_abs = np.abs(Sxx) # small constant added to avoid log(0)
