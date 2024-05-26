@@ -220,22 +220,29 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
     normalize_for_colormap_benchmark_cwt = mpl.colors.Normalize(vmin=-50, vmax=5)
     emg_sample = data
+    data = data.reshape(length, width)
     # Convert EMG sample to numpy array for CWT computation
-    emg_sample_np = emg_sample.astype(np.float16).flatten()
-    highest_cwt_scale = 1024
+    emg_sample_np = data.astype(np.float16)
+    highest_cwt_scale = wLenTimesteps
     downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
     scales = np.arange(1, highest_cwt_scale)
-    wavelet = 'morl'
+    # wavelet = 'morl'
     # Perform Continuous Wavelet Transform (CWT)
     # Note: PyWavelets returns scales and coeffs (coefficients)
-    # coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
-    frequencies, coefficients = fcwt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
-    coefficients_dB = 10 * np.log10(np.abs(coefficients)+1e-12) # Adding a small constant to avoid log(0)
+    # for i in range(numElectrodes):
+    for i in range(length):
+        # coefficients, frequencies = pywt.cwt(emg_sample_np[i, ::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
+        frequencies, coefficients = fcwt.cwt(emg_sample_np[i, ::downsample_factor_for_cwt_preprocessing], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
+        # note fcwt.cwt returns frequencies and coefficients with frequencies from most to least
+        coefficients_dB = 10 * np.log10(np.abs(coefficients)+1e-12) # Adding a small constant to avoid log(0)
+        if i == 0:
+            time_frequency_emg = np.zeros((length * coefficients_dB.shape[0], coefficients_dB.shape[1]))
+        time_frequency_emg[i*coefficients_dB.shape[0]:(i+1)*coefficients_dB.shape[0], :] = coefficients_dB # flip for low frequency to be at bottom
     # Convert back to PyTorch tensor and reshape
-    emg_sample = torch.tensor(coefficients_dB).float().reshape(-1, coefficients_dB.shape[-1])
-    blocks = emg_sample.reshape(highest_cwt_scale, numElectrodes, -1)
+    emg_sample = torch.tensor(time_frequency_emg).float().reshape(-1, time_frequency_emg.shape[-1])
+    blocks = emg_sample.reshape(numElectrodes, wLenTimesteps, wLenTimesteps)
 
-    e1, e2, e3, e4 = blocks.transpose(1,0)
+    e1, e2, e3, e4 = blocks
 
     # emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale-1), -1)
         
