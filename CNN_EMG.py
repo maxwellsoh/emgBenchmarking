@@ -154,6 +154,7 @@ if (args.dataset.lower() == "uciemg" or args.dataset.lower() == "uci"):
     import utils_UCI as utils
     print(f"The dataset being tested is uciEMG")
     project_name = 'emg_benchmarking_uci'
+    args.dataset = "uciemg"
 
 elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_db2"):
     import utils_NinaproDB2 as utils
@@ -162,6 +163,7 @@ elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_
     exercises = True
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
+    args.dataset = 'ninapro-db2'
 
 elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_db5"):
     import utils_NinaproDB5 as utils
@@ -170,6 +172,7 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
     exercises = True
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
+    args.dataset = 'ninapro-db5'
 
 elif (args.dataset.lower() == "m-dataset" or args.dataset.lower() == "m_dataset"):
     import utils_M_dataset as utils
@@ -177,11 +180,13 @@ elif (args.dataset.lower() == "m-dataset" or args.dataset.lower() == "m_dataset"
     project_name = 'emg_benchmarking_M_dataset'
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for M_dataset; only one session exists")
+    args.dataset = 'm-dataset'
 
 elif (args.dataset.lower() == "hyser"):
     import utils_Hyser as utils
     print(f"The dataset being tested is hyser")
     project_name = 'emg_benchmarking_hyser'
+    args.dataset = 'hyser'
 
 elif (args.dataset.lower() == "capgmyo"):
     import utils_CapgMyo as utils
@@ -189,6 +194,7 @@ elif (args.dataset.lower() == "capgmyo"):
     project_name = 'emg_benchmarking_capgmyo'
     if args.leave_one_session_out:
         utils.num_subjects = 10
+    args.dataset = 'capgmyo'
 
 elif (args.dataset.lower() == "jehan"):
     import utils_JehanData as utils
@@ -196,13 +202,16 @@ elif (args.dataset.lower() == "jehan"):
     project_name = 'emg_benchmarking_jehandataset'
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for JehanDataset; only one session exists")
+    args.dataset = 'jehan'
 
 elif (args.dataset.lower() == "sci"):
     import utils_SCI as utils
     print(f"The dataset being tested is SCI")
     project_name = 'emg_benchmarking_sci'
+    args.dataset = 'sci'
+    
 
-else:
+elif (args.dataset.lower() == "ozdemiremg" or args.dataset.lower() == "ozdemir_emg"):
     print(f"The dataset being tested is OzdemirEMG")
     project_name = 'emg_benchmarking_ozdemir'
     if args.full_dataset_ozdemir:
@@ -215,6 +224,11 @@ else:
         utils.numGestures = len(utils.gesture_labels)
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for OzdemirEMG; only one session exists")
+    args.dataset = 'ozdemiremg'
+    
+else: 
+    raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'm-dataset', 'hyser'," +
+                    "'capgmyo', 'jehan', 'sci', or 'ozdemiremg'")
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
@@ -651,6 +665,8 @@ elif args.turn_on_cwt:
     base_foldername_zarr += 'cwt/'
 elif args.turn_on_hht:
     base_foldername_zarr += 'hht/'
+else:
+    base_foldername_zarr += 'raw/'
 
 if exercises:
     if args.partial_dataset_ninapro:
@@ -1736,6 +1752,8 @@ else:
         wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
         if args.pretrain_and_finetune:
+            run.finish()
+            run = wandb.init(name=wandb_runname+"_finetune", project=project_name)
             num_epochs = args.finetuning_epochs
             # train more on fine tuning dataset
             finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
