@@ -174,6 +174,15 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
         ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
     args.dataset = 'ninapro-db5'
 
+elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
+    import utils_NinaproDB3 as utils
+    assert args.exercises == [1], "Exercises C and D are not implemented due to missing data."
+    print(f"The dataset being tested is ninapro-db3")
+    project_name = 'emg_benchmarking_ninapro-db3'
+    exercises = True
+    if args.leave_one_session_out:
+        ValueError("leave-one-session-out not implemented for ninapro-db3; only one session exists")
+
 elif (args.dataset.lower() == "m-dataset" or args.dataset.lower() == "m_dataset"):
     import utils_M_dataset as utils
     print(f"The dataset being tested is M_dataset")
@@ -322,6 +331,8 @@ if exercises:
             args.exercises = [1]
         elif args.dataset == "ninapro-db5":
             args.exercises = [2]
+        elif args.dataset == "ninapro-db3":
+            args.exercises = [1]
 
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
@@ -1510,7 +1521,10 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.train()
     
     if args.pretrain_and_finetune:
+<<<<<<< add_NinaproDB3
+=======
         print("Finetuning the model...")
+>>>>>>> main
         run = wandb.init(name=wandb_runname+"_unlab_finetune", project=project_name)
         wandb.config.lr = args.learning_rate
         
