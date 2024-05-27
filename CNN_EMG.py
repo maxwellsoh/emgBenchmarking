@@ -31,6 +31,9 @@ from sklearn.ensemble import RandomForestClassifier
 from joblib import dump
 from sklearn.metrics import accuracy_score, log_loss
 import torch.nn.functional as F
+from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
+from semilearn.core.utils import send_model_cuda
+import VisualTransformer
 
 
 # Define a custom argument type for a list of integers
@@ -151,6 +154,7 @@ if (args.dataset.lower() == "uciemg" or args.dataset.lower() == "uci"):
     import utils_UCI as utils
     print(f"The dataset being tested is uciEMG")
     project_name = 'emg_benchmarking_uci'
+    args.dataset = "uciemg"
 
 elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_db2"):
     import utils_NinaproDB2 as utils
@@ -159,6 +163,7 @@ elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_
     exercises = True
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
+    args.dataset = 'ninapro-db2'
 
 elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_db5"):
     import utils_NinaproDB5 as utils
@@ -167,6 +172,7 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
     exercises = True
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
+    args.dataset = 'ninapro-db5'
 
 elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
     import utils_NinaproDB3 as utils
@@ -183,11 +189,13 @@ elif (args.dataset.lower() == "m-dataset" or args.dataset.lower() == "m_dataset"
     project_name = 'emg_benchmarking_M_dataset'
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for M_dataset; only one session exists")
+    args.dataset = 'm-dataset'
 
 elif (args.dataset.lower() == "hyser"):
     import utils_Hyser as utils
     print(f"The dataset being tested is hyser")
     project_name = 'emg_benchmarking_hyser'
+    args.dataset = 'hyser'
 
 elif (args.dataset.lower() == "capgmyo"):
     import utils_CapgMyo as utils
@@ -195,6 +203,7 @@ elif (args.dataset.lower() == "capgmyo"):
     project_name = 'emg_benchmarking_capgmyo'
     if args.leave_one_session_out:
         utils.num_subjects = 10
+    args.dataset = 'capgmyo'
 
 elif (args.dataset.lower() == "jehan"):
     import utils_JehanData as utils
@@ -202,13 +211,16 @@ elif (args.dataset.lower() == "jehan"):
     project_name = 'emg_benchmarking_jehandataset'
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for JehanDataset; only one session exists")
+    args.dataset = 'jehan'
 
 elif (args.dataset.lower() == "sci"):
     import utils_SCI as utils
     print(f"The dataset being tested is SCI")
     project_name = 'emg_benchmarking_sci'
+    args.dataset = 'sci'
+    
 
-else:
+elif (args.dataset.lower() == "ozdemiremg" or args.dataset.lower() == "ozdemir_emg"):
     print(f"The dataset being tested is OzdemirEMG")
     project_name = 'emg_benchmarking_ozdemir'
     if args.full_dataset_ozdemir:
@@ -221,6 +233,11 @@ else:
         utils.numGestures = len(utils.gesture_labels)
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for OzdemirEMG; only one session exists")
+    args.dataset = 'ozdemiremg'
+    
+else: 
+    raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'm-dataset', 'hyser'," +
+                    "'capgmyo', 'jehan', 'sci', or 'ozdemiremg'")
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
@@ -659,6 +676,8 @@ elif args.turn_on_cwt:
     base_foldername_zarr += 'cwt/'
 elif args.turn_on_hht:
     base_foldername_zarr += 'hht/'
+else:
+    base_foldername_zarr += 'raw/'
 
 if exercises:
     if args.partial_dataset_ninapro:
@@ -1491,9 +1510,10 @@ if args.pretrain_and_finetune:
     utils.plot_first_fifteen_images(X_train_finetuning, np.argmax(Y_train_finetuning.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train_finetuning')
 
 if args.turn_on_unlabeled_domain_adaptation:
+    print("Pretraining the model...")
     semilearn_algorithm.loader_dict = {}
     semilearn_algorithm.loader_dict['train_lb'] = train_labeled_loader
-    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
+    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_jehan:
         semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
     semilearn_algorithm.loader_dict['eval'] = validation_loader
     semilearn_algorithm.scheduler = None
@@ -1501,6 +1521,10 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.train()
     
     if args.pretrain_and_finetune:
+<<<<<<< add_NinaproDB3
+=======
+        print("Finetuning the model...")
+>>>>>>> main
         run = wandb.init(name=wandb_runname+"_unlab_finetune", project=project_name)
         wandb.config.lr = args.learning_rate
         
@@ -1522,7 +1546,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         
         if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
             semilearn_algorithm.loader_dict['train_ulb'] = train_finetuning_unlabeled_loader
-        elif proportion_unlabeled_of_training_subjects>0:
+        elif proportion_unlabeled_of_training_subjects>0 or args.load_unlabeled_data_jehan:
             semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
 
         semilearn_algorithm.loader_dict['eval'] = validation_loader
@@ -1742,6 +1766,8 @@ else:
         wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
         if args.pretrain_and_finetune:
+            run.finish()
+            run = wandb.init(name=wandb_runname+"_finetune", project=project_name)
             num_epochs = args.finetuning_epochs
             # train more on fine tuning dataset
             finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
@@ -1872,9 +1898,10 @@ else:
         torch.cuda.empty_cache()  # Clear cache if needed
 
         model.eval()
+        train_loader_unshuffled = DataLoader(train_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
         with torch.no_grad():
             train_predictions = []
-            for X_batch, Y_batch in tqdm(train_loader, desc="Training Batch Loading"):
+            for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading"):
                 X_batch = X_batch.to(device).to(torch.float32)
                 outputs = model(X_batch)
                 if isinstance(outputs, dict):
