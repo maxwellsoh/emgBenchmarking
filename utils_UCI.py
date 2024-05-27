@@ -291,6 +291,7 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     width_to_transform_to = min(native_resnet_size, image.shape[-1])
     
     resize = transforms.Resize([length_to_resize_to, width_to_transform_to],
+
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
