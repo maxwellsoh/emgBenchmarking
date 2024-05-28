@@ -793,6 +793,7 @@ else:
         print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
+    
     elif args.leave_one_session_out:
         total_number_of_sessions = 2 # all datasets used in our benchmark have at most 2 sessions but this can be changed using a variable from dataset-specific utils instead
         left_out_subject_last_session_index = (total_number_of_sessions - 1) * utils.num_subjects + leaveOut-1
@@ -844,12 +845,17 @@ else:
             X_finetune_unlabeled_list.append(unlabeled_data)
             Y_finetune_unlabeled_list.append(np.zeros(unlabeled_data.shape[0]))
 
-        X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
-        Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
+        if utils.num_subjects == 1:
+            assert not args.pretrain_and_finetune, "Cannot pretrain and finetune with only one subject"
+
+        if utils.num_subjects > 1:
+            X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
+            Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
         X_finetune = np.concatenate(X_finetune, axis=0, dtype=np.float16)
         Y_finetune = np.concatenate(Y_finetune, axis=0, dtype=np.float16)
         X_validation = np.array(data[left_out_subject_last_session_index])
         Y_validation = np.array(labels[left_out_subject_last_session_index])
+
         if args.proportion_unlabeled_data_from_training_subjects>0:
             X_pretrain_unlabeled = np.concatenate(X_pretrain_unlabeled_list, axis=0, dtype=np.float16)
             Y_pretrain_unlabeled = np.concatenate(Y_pretrain_unlabeled_list, axis=0, dtype=np.float16)
@@ -857,8 +863,9 @@ else:
             X_finetune_unlabeled = np.concatenate(X_finetune_unlabeled_list, axis=0, dtype=np.float16)
             Y_finetune_unlabeled = np.concatenate(Y_finetune_unlabeled_list, axis=0, dtype=np.float16)
         
-        X_train = torch.from_numpy(X_pretrain).to(torch.float16)
-        Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
+        if utils.num_subjects > 1:
+            X_train = torch.from_numpy(X_pretrain).to(torch.float16)
+            Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
         X_train_finetuning = torch.from_numpy(X_finetune).to(torch.float16)
         Y_train_finetuning = torch.from_numpy(Y_finetune).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
@@ -919,7 +926,10 @@ else:
                 Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
                 
         else: 
-            if not args.pretrain_and_finetune:
+            if utils.num_subjects == 1:
+                X_train = X_train_finetuning
+                Y_train = Y_train_finetuning
+            elif not args.pretrain_and_finetune:
                 X_train = torch.concat((X_train, X_train_finetuning), axis=0)
                 Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
             
@@ -1089,8 +1099,26 @@ else:
             print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
             print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
             
+    elif args.transfer_learning and utils.num_subjects == 1:
+        X_train = data[0]
+        Y_train = labels[0]
+        if args.cross_validation_for_time_series:
+            X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=False)
+        else:
+            X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=True)
+        X_train = torch.tensor(X_train).to(torch.float16)
+        Y_train = torch.tensor(Y_train).to(torch.float16)
+        X_validation = torch.tensor(X_validation).to(torch.float16)
+        Y_validation = torch.tensor(Y_validation).to(torch.float16)
+
+        print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_train:     ", Y_train.shape)
+        print("Size of X_validation:", X_validation.shape)
+        print("Size of Y_validation:", Y_validation.shape)
+
+    
     else: 
-        ValueError("Please specify the type of test you want to run")
+        raise ValueError("Please specify the type of test you want to run")
 
 model_name = args.model
 
@@ -1974,20 +2002,20 @@ else:
 
                 wandb.log({
                     "train/Loss": train_loss,
-                    "train/Accuracy": train_acc,
-                    "train/Precision": train_precision,
-                    "train/Recall": train_recall,
-                    "train/F1 Score": train_f1_score,
-                    "train/Top-5 Accuracy": train_top5_acc,
+                    "train/Accuracy": finetune_train_acc,
+                    "train/Precision": finetune_train_precision,
+                    "train/Recall": finetune_train_recall,
+                    "train/F1 Score": finetune_train_f1_score,
+                    "train/Top-5 Accuracy": finetune_train_top5_acc,
                     "train/Learning Rate": optimizer.param_groups[0]['lr'],
                     "train/Epoch": epoch,
 
                     "validation/Loss": val_loss,
-                    "validation/Accuracy": val_acc,
-                    "validation/Precision": val_precision,
-                    "validation/Recall": val_recall,
-                    "validation/F1 Score": val_f1_score,
-                    "validation/Top-5 Accuracy": val_top5_acc,
+                    "validation/Accuracy": finetune_val_acc,
+                    "validation/Precision": finetune_val_precision,
+                    "validation/Recall": finetune_val_recall,
+                    "validation/F1 Score": finetune_val_f1_score,
+                    "validation/Top-5 Accuracy": finetune_val_top5_acc,
 
                     # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
                     **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
