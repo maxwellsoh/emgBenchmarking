@@ -18,12 +18,14 @@ import h5py
 import os
 from scipy.signal import spectrogram, stft
 import pywt
+import fcwt
 
 numGestures = 6 # 7 total, but not all subjects have 7
-fs = 1000 #Hz
+fs = 200 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 50 #50 ms
+stepLen = 50 # 125 ms (increased from 50ms due to high number of subjects)
+stepLen = int(stepLen / 1000 * fs)
 numElectrodes = 8
 num_subjects = 36
 cmap = mpl.colormaps['viridis']
@@ -227,69 +229,117 @@ def getLabels_separateSessions(args):
     subject_number, session_number = args
     return contract(getRestim_separateSessions((subject_number, session_number)))
 
+def closest_factors(num):
+    # Find factors of the number
+    factors = [(i, num // i) for i in range(1, int(np.sqrt(num)) + 1) if num % i == 0]
+    # Sort factors by their difference, so the closest pair is first
+    factors.sort(key=lambda x: abs(x[0] - x[1]))
+    return factors[0]
+
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
-    emg_sample = data
-    # Convert EMG sample to numpy array for CWT computation
-    emg_sample_np = emg_sample.astype(np.float16).flatten()
-    highest_cwt_scale = 31
-    downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
-    scales = np.arange(1, highest_cwt_scale)  
-    wavelet = 'cmor1.5-1.0'  # Complex Morlet wavelet; adjust as needed
+    # Reshape and preprocess EMG data
+    data = data.reshape(length, width).astype(np.float16)
+    highest_cwt_scale = wLenTimesteps
+    scales = np.arange(1, highest_cwt_scale)
+
+    # Pre-allocate the array for the CWT coefficients
+    grid_width, grid_length = closest_factors(numElectrodes)
+
+    length_to_resize_to = min(native_resnet_size, grid_width * highest_cwt_scale)
+    width_to_transform_to = min(native_resnet_size, grid_length * width)
+
+    time_frequency_emg = np.zeros((length * (highest_cwt_scale), width))
+
     # Perform Continuous Wavelet Transform (CWT)
-    # Note: PyWavelets returns scales and coeffs (coefficients)
-    coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
-    coefficients_dB = 10 * np.log10(np.abs(coefficients) + 1e-6)  # Adding a small constant to avoid log(0)
-    # Convert back to PyTorch tensor and reshape
-    emg_sample = torch.tensor(coefficients_dB).float().reshape(-1, coefficients_dB.shape[-1])
-    # Normalization
-    emg_sample -= torch.min(emg_sample)
-    emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
-    blocks = emg_sample.reshape(highest_cwt_scale-1, numElectrodes, -1)
-    emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale-1), -1)
-        
-    # Update 'window_size' if necessary
-    window_size = emg_sample.shape[1]
+    for i in range(length):
+        frequencies, coefficients = fcwt.cwt(data[i, :], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
+        coefficients_abs = np.abs(coefficients) 
+        # coefficients_dB = 10 * np.log10(coefficients_abs + 1e-12)  # Avoid log(0)
+        time_frequency_emg[i * (highest_cwt_scale):(i + 1) * (highest_cwt_scale), :] = coefficients_abs
 
-    emg_sample -= torch.min(emg_sample)
-    emg_sample /= torch.max(emg_sample)
-    data = emg_sample
+    # Convert to PyTorch tensor and normalize
+    emg_sample = torch.tensor(time_frequency_emg).float()
+    emg_sample = emg_sample.view(numElectrodes, wLenTimesteps, -1)
 
-    data_converted = cmap(data)
+    # Reshape into blocks
+    
+    blocks = emg_sample.view(grid_width, grid_length, wLenTimesteps, -1)
+
+    # Combine the blocks into the final image
+    rows = [torch.cat([blocks[i, j] for j in range(grid_length)], dim=1) for i in range(grid_width)]
+    combined_image = torch.cat(rows, dim=0)
+
+    # Normalize combined image
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
+
+    # Convert to RGB and resize
+    data_converted = cmap(combined_image)
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
-    
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
-                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+
+    resize = transforms.Resize([length_to_resize_to, width_to_transform_to],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
-    # Clamp between 0 and 1 using torch.clamp
+    # Clamp and normalize
     image_clamped = torch.clamp(image_resized, 0, 1)
-
-    # Normalize with standard ImageNet normalization
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     image_normalized = normalize(image_clamped)
 
-    # Since no split occurs, we don't need to concatenate halves back together
-    final_image = image_normalized.numpy().astype(np.float32)
-
+    # Return final image as a NumPy array
+    final_image = image_normalized.numpy().astype(np.float16)
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = 64
+    spectrogram_window_size = wLenTimesteps // 4
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
-    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window
-    Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-6) # small constant added to avoid log(0)
-    emg_sample = torch.from_numpy(Sxx_dB)
+    number_of_frequencies = wLenTimesteps 
+
+    # Pre-allocate the array for the CWT coefficients
+    grid_width, grid_length = closest_factors(numElectrodes)
+
+    length_to_resize_to = min(native_resnet_size, grid_width * number_of_frequencies)
+    width_to_transform_to = min(native_resnet_size, grid_length * width)
+    
+    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size - 1, noverlap=spectrogram_window_size-2, nfft=number_of_frequencies - 1) # defaults to hann window
+    Sxx_abs = np.abs(Sxx) # small constant added to avoid log(0)
+    # Sxx_dB = 10 * np.log10(np.abs(Sxx_abs) + 1e-12)
+    emg_sample = torch.from_numpy(Sxx_abs)
     emg_sample -= torch.min(emg_sample)
     emg_sample /= torch.max(emg_sample)
     emg_sample = emg_sample.reshape(emg_sample.shape[0]*emg_sample.shape[1], emg_sample.shape[2])
-    data = emg_sample
+    # flip spectrogram vertically for each electrode
+    for i in range(numElectrodes):
+        num_frequencies = len(frequencies)
+        emg_sample[i*num_frequencies:(i+1)*num_frequencies, :] = torch.flip(emg_sample[i*num_frequencies:(i+1)*num_frequencies, :], dims=[0])
+
+    # Convert to PyTorch tensor and normalize
+    emg_sample = torch.tensor(emg_sample).float()
+    emg_sample = emg_sample.view(numElectrodes, len(frequencies), -1)
+
+    # Reshape into blocks
+    
+    blocks = emg_sample.view(grid_width, grid_length, len(frequencies), -1)
+
+    # Combine the blocks into the final image
+    rows = [torch.cat([blocks[i, j] for j in range(grid_length)], dim=1) for i in range(grid_width)]
+    combined_image = torch.cat(rows, dim=0)
+
+    # Normalize combined image
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
+
+    data = combined_image.numpy()
 
     data_converted = cmap(data)
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
+
+    width_to_transform_to = min(native_resnet_size, image.shape[-1])
     
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+    resize = transforms.Resize([length_to_resize_to, width_to_transform_to],
+
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
@@ -360,11 +410,11 @@ def calculate_rms(array_2d):
 
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, 
               global_min=None, global_max=None, turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
-
+    
     if standardScaler is not None:
-        emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+        emg = standardScaler.transform(np.array(emg.view(len(emg), length * width)))
     else:
-        emg = np.array(emg.view(len(emg), length*width))
+        emg = np.array(emg.view(len(emg), length * width))
         
     # Use RMS preprocessing
     if turn_on_rms:
@@ -376,40 +426,40 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         emg_rms = np.apply_along_axis(calculate_rms, -1, emg)
         emg = emg_rms  # Resulting shape will be (SAMPLES, 16, 5)
         width = rms_windows
-        emg = emg.reshape(len(emg), length*width)
+        emg = emg.reshape(len(emg), length * width)
 
     # Parameters that don't change can be set once
     resize_length_factor = 1
     native_resnet_size = 224
 
+    args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+
     with multiprocessing.Pool(processes=5) as pool:
-        args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-        images_async = pool.starmap_async(optimized_makeOneImage, args)
-        images = images_async.get()
+        images = list(tqdm(pool.starmap(optimized_makeOneImage, args), total=len(args), desc="Creating Images"))
 
     if turn_on_magnitude:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
         with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
-            images_magnitude = images_async.get()
+            images_magnitude = list(tqdm(pool.starmap(optimized_makeOneMagnitudeImage, args), total=len(args), desc="Creating Magnitude Images"))
         images = np.concatenate((images, images_magnitude), axis=2)
 
     elif turn_on_spectrogram:
-        with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
-            images_spectrogram = images_async.get()
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_spectrogram = []
+        for i in tqdm(range(len(emg)), desc="Creating Spectrogram Images"):
+            images_spectrogram.append(optimized_makeOneSpectrogramImage(*args[i]))
         images = images_spectrogram
     
     elif turn_on_cwt:
-        with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
-            images_cwt = images_async.get()
-        images = images_cwt
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_cwt_list = []
+        # with multiprocessing.Pool(processes=5) as pool:
+        for i in tqdm(range(len(emg)), desc="Creating CWT Images"):
+            images_cwt_list.append(optimized_makeOneCWTImage(*args[i]))
+        images = images_cwt_list
         
     elif turn_on_hht:
-        NotImplementedError("HHT is not implemented yet")
+        raise NotImplementedError("HHT is not implemented yet")
     
     return images
 
