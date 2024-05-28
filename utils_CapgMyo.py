@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import spectrogram, stft
 import pywt
 from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
+from tqdm import tqdm
 
 numGestures = 8
 fs = 1000 #Hz
@@ -97,6 +98,7 @@ def getData (subject, gesture, trial, session=None):
     if trial == 10:
         name = '0' + sub + '-00' + str(gesture) + '-010'
     mat_data = io.loadmat('./CapgMyo_B/dbb-preprocessed-0' + sub + '/' + name + '.mat')
+    # [# timesteps, # channels]
     mat_array = mat_data['data']
 
     if (not isinstance(subject, int) and leftout != subject[0]):
@@ -119,7 +121,7 @@ def getEMG_separateSessions(args):
     data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
     return getData(data_index, 1, 1)
 
-def getExtrema (n):
+def getExtrema (n, p):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
     
@@ -128,13 +130,21 @@ def getExtrema (n):
         sub = '0' + sub
 
     for i in range(numGestures):
-        name = '0' + sub + '-00' + str(i+1) + '-001'
-        mat_data = io.loadmat('./CapgMyo_B/dbb-preprocessed-0' + sub + '/' + name + '.mat')
-        data = mat_data['data']
+        data = []
+
+        for trial in range(10):
+            name = '0' + sub + '-00' + str(i+1) + '-00' +str(trial+1)
+            if trial == 9:
+                name = '0' + sub + '-00' + str(i+1) + '-010'
+            mat_data = io.loadmat('./CapgMyo_B/dbb-preprocessed-0' + sub + '/' + name + '.mat')
+            data.append(mat_data['data'].transpose())
+
+        data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
+        data = data[:, :int(len(data[0])*p)]
 
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[:, j])
-            maxes[j][i] = np.max(data[:, j])
+            mins[j][i] = np.min(data[j])
+            maxes[j][i] = np.max(data[j])
     return mins, maxes
 
 def getLabels (n):
@@ -267,21 +277,22 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     image = np.transpose(image_data, (2, 0, 1))
     
     # Resize the whole image instead of splitting it
-    imageL, imageR = np.split(image, 2, axis=1)
-    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image = resize(torch.from_numpy(image))
     
     # Get max and min values after interpolation
-    max_val = max(imageL.max(), imageR.max())
-    min_val = min(imageL.min(), imageR.min())
+    max_val = image.max()
+    min_val = image.min()
     
     # Contrast normalize again after interpolation
-    imageL, imageR = map(lambda img: (img - min_val) / (max_val - min_val), (imageL, imageR))
+    image = (image - min_val) / (max_val - min_val)
     
     # Normalize with standard ImageNet normalization
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    imageL, imageR = map(normalize, (imageL, imageR))
+    image = normalize(image)
     
-    return torch.cat([imageL, imageR], dim=1).numpy().astype(np.float32)
+    return image.numpy().astype(np.float32)
 
 def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
@@ -329,7 +340,13 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
     
     args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
     # Using process_map instead of multiprocessing.Pool directly
-    images = process_map(process_optimized_makeOneImage, args, chunksize=1, max_workers=4)
+    #images = process_map(process_optimized_makeOneImage, args, chunksize=1, max_workers=4)
+    if not turn_on_magnitude and not turn_on_spectrogram and not turn_on_cwt and not turn_on_hht:
+        args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_list = []
+        for i in tqdm(range(len(emg)), desc="Creating Images"):
+            images_list.append(optimized_makeOneImage(*args[i]))
+        images = images_list
 
     if turn_on_magnitude:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]

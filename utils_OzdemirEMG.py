@@ -127,7 +127,7 @@ def getEMG (args):
     return torch.cat(emg, dim=0)
 
 # assumes first of the 4 repetitions accessed
-def getExtrema (n):
+def getExtrema (n, p):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
@@ -135,7 +135,9 @@ def getExtrema (n):
     file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     for i, gesture in enumerate(gesture_labels):
         # get the first repetition for each gesture
-        data = np.array(file["Gesture" + gesture])[0]
+        data = np.array(file["Gesture" + gesture])
+        data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
+        data = data[:, :int(len(data[0])*p)]
 
         for j in range(numElectrodes):
             mins[j][i] = np.min(data[j])

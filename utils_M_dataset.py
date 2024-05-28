@@ -121,18 +121,26 @@ def getEMG (args):
     emg = filter(torch.cat(emg, dim=0))
     return emg
 
-def getExtrema (n):
+def getExtrema (n, p):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
+
     for i in range(numGestures):
-        if (n < 3):
-            data = np.fromfile(f'M_dataset/Female{n-1}/Test1/classe_{i}.dat', dtype=np.int16)
-        else:
-            data = np.fromfile(f'M_dataset/Male{n-3}/Test1/classe_{i}.dat', dtype=np.int16)
-        data = format_emg(np.array(data, dtype=np.float32))
+        data = []
+
+        for j in range(4):
+            if (n < 3):
+                emg = np.fromfile(f'M_dataset/Female{n-1}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
+            else:
+                emg = np.fromfile(f'M_dataset/Male{n-3}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
+            data.append(format_emg(np.array(emg, dtype=np.float32)).transpose())
+
+        data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
+        data = data[:, :int(len(data[0])*p)]
+
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[:, j])
-            maxes[j][i] = np.max(data[:, j])
+            mins[j][i] = np.min(data[j])
+            maxes[j][i] = np.max(data[j])
     return mins, maxes
 
 def getLabels (n):

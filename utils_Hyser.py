@@ -15,6 +15,7 @@ import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
 import os
+from tqdm import tqdm
 
 numGestures = 10
 fs = 2048.0 # Hz (actually 2048 Hz but was "decimated" to 512? unclear)
@@ -62,13 +63,6 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def contract(R):
-    labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(R), numGestures))
-    for x in range(len(R)):
-        labels[x][gesture_nums[R[x]]] = 1.0
-    return labels
-
 def filter(emg):
     # sixth-order Butterworth bandpass filter
     b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=fs)
@@ -91,8 +85,8 @@ def format_emg (data):
 # data is [# samples, # channels]
 # target min/max is [# channels, # gestures]
 def target_normalize (data, target_min, target_max, gesture):
-    source_min = np.zeros(len(data[0]), dtype=np.float32)
-    source_max = np.zeros(len(data[0]), dtype=np.float32)
+    source_min = np.zeros(len(data[0]), dtype=np.float16)
+    source_max = np.zeros(len(data[0]), dtype=np.float16)
     for i in range(len(data[0])):
         source_min[i] = np.min(data[:, i])
         source_max[i] = np.max(data[:, i])
@@ -102,7 +96,7 @@ def target_normalize (data, target_min, target_max, gesture):
         - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
     return data
 
-def getEMG_help (sub, session, target_max=None, target_min=None, leftout=None):
+def getEMG_help (sub, session, target_max=None, target_min=None, leftout=None, unfold=True):
     emg = []
 
     currFile = 1
@@ -142,7 +136,11 @@ def getEMG_help (sub, session, target_max=None, target_min=None, leftout=None):
         if (leftout != None and sub != leftout):
             data = target_normalize(data, target_min, target_max, curr_gestures.pop(0))
 
-        emg.append(torch.from_numpy(data).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
+        if (unfold):
+            emg.append(torch.from_numpy(data).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
+        else:
+            emg.append(torch.from_numpy(data))
+
         currFile += 1
         
     return emg
@@ -165,8 +163,7 @@ def getEMG (args):
         sub = f'{n}'
 
     emg = getEMG_help(sub, "1", target_max, target_min, leftout) + getEMG_help(sub, "2", target_max, target_min, leftout)
-    emg = filter(torch.cat(emg, dim=0))
-    return emg
+    return filter(torch.cat(emg, dim=0))
 
 def getEMG_separateSessions(args):
     if (len(args) == 2):
@@ -193,52 +190,38 @@ def getEMG_separateSessions(args):
     return emg
         
     
-def getExtrema (n):
+def getExtrema (n, p):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
-    currFile = 1
-    select_gestures = set([])
-    gesture_loc = []
-    gesture_order = []
-    with open(f'hyser/subject{n}_session1/label_dynamic.txt', 'r') as file:
-        vals = file.readline().strip().split(',')
-        for i, v in enumerate(vals):
-            if (v in gesture_nums and v not in select_gestures):
-                select_gestures.add(currFile)
-                gesture_loc.append(i+1)
-                gesture_order.append(gesture_nums[v])
-            currFile += 1
+    if (n < 10):
+        sub = f'0{n}'
+    else:
+        sub = f'{n}'
 
-    currFile = 1
-    while (os.path.isfile(f'hyser/subject{n}_session1/dynamic_raw_sample{currFile}.dat')):
-        if (currFile not in gesture_loc):
-            currFile += 1
-            continue
+    emg = getEMG_help(sub, "1", unfold=False) + getEMG_help(sub, "2", unfold=False)
+    labels = getLabels(n, unfold=False)
 
-        data = np.fromfile(f'hyser/subject{n}_session1/dynamic_raw_sample{currFile}.dat', dtype=np.int16).reshape((256, -1)).astype(np.float32)
+    for i in range(numGestures):
+        subEMG = [emg[j] for j in range(len(emg)) if labels[j, i] == 1.0]
+        subEMG = torch.cat(subEMG, dim=0)
+        subEMG = np.array(subEMG[:int(len(subEMG)*p)])
 
-        adjustment = []
-        with open(f'hyser/subject{n}_session1/dynamic_raw_sample{currFile}.hea', 'r') as file:
-            ignoreFirst = True
-            for line in file:
-                if (ignoreFirst):
-                    ignoreFirst = False
-                else:
-                    values = line.split(" ")[2].split("(")
-                    adjustment.append((float(values[0]), float(values[1].split(")")[0])))
-
-        for col in range(len(data)):
-            data[col] = (data[col] - adjustment[col][1]) / (adjustment[col][0])
-
-        data = data.transpose((1, 0))
-
+        # subEMG will be [# timesteps, # electrodes]
         for j in range(numElectrodes):
-            mins[j][gesture_order[gesture_loc.index(currFile)]] = np.min(data[:, j])
-            maxes[j][gesture_order[gesture_loc.index(currFile)]] = np.max(data[:, j])
+            mins[j][i] = np.min(subEMG[:, j])
+            maxes[j][i] = np.max(subEMG[:, j])
     return mins, maxes
 
-def getLabels (n):
+def contract(R):
+    labels = torch.tensor(())
+    labels = labels.new_zeros(size=(len(R), numGestures))
+    for x in range(len(R)):
+        labels[x][gesture_nums[R[x]]] = 1.0
+    return labels
+
+# returns [# samples, # gestures]
+def getLabels (n, unfold=True):
     labels = []
 
     if (n < 10):
@@ -251,7 +234,10 @@ def getLabels (n):
         vals = file.readline().strip().split(',')
         for v in vals:
             if (v in gesture_nums):
-                for i in range(7):
+                if (unfold):
+                    for i in range(7):
+                        labels.append(v)
+                else:
                     labels.append(v)
         file.close()
 
@@ -375,7 +361,13 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
     
     args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
     # Using process_map instead of multiprocessing.Pool directly
-    images = process_map(process_optimized_makeOneImage, args, chunksize=1, max_workers=4)
+    #images = process_map(process_optimized_makeOneImage, args, chunksize=1, max_workers=4)
+    if not turn_on_magnitude and not turn_on_spectrogram and not turn_on_cwt and not turn_on_hht:
+        args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_list = []
+        for i in tqdm(range(len(emg)), desc="Creating Images"):
+            images_list.append(optimized_makeOneImage(*args[i]))
+        images = images_list
 
     if turn_on_magnitude:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]

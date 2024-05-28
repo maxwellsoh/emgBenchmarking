@@ -101,7 +101,7 @@ parser.add_argument('--reduced_training_data_size', type=int, help='size of redu
 # Add argument to leve n subjects out randomly
 parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
 # use target domain for normalization
-parser.add_argument('--target_normalize', type=utils.str2bool, help='use a leftout window for normalization. Set to False by default.', default=False)
+parser.add_argument('--target_normalize', type=float, help='use a poportion of leftout data for normalization. Set to 0 by default.', default=0)
 # Test with transfer learning by using some data from the validation dataset
 parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
 # Add argument for cross validation for time series
@@ -374,17 +374,18 @@ if exercises:
     labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
 
 else: # Not exercises
-    if (args.target_normalize):
-        mins, maxes = utils.getExtrema(args.leftout_subject + 1)
+    if (args.target_normalize > 0):
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out:
                 NotImplementedError("leave-one-session-out not implemented with target_normalize yet")
+
+            mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize)
+            
             emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
             emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
             
             labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
             labels = labels_async.get()
-
     else: # Not target_normalize
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out: # based on 2 sessions for each subject
@@ -446,7 +447,7 @@ else:
     
 leaveOutIndices = []
 # Generate scaler for normalization
-if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not args.target_normalize): # will have to run and test this again, or just remove
+if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # will have to run and test this again, or just remove
     leaveOut = args.leave_n_subjects_out_randomly
     print(f"Leaving out {leaveOut} subjects randomly")
     # subject indices to leave out randomly
@@ -564,7 +565,7 @@ else: # Not leave n subjects out randomly
             del emg_in_by_electrode
             del emg_reshaped
 
-    elif (not args.turn_off_scaler_normalization and not args.target_normalize): # Running LOSO standardization
+    elif (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # Running LOSO standardization
         emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
         # s = preprocessing.StandardScaler().fit(emg_in)
         global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
@@ -682,7 +683,7 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
     else:
         print(f"Could not find dataset for subject {x} at {foldername_zarr}")
         # Get images and create the dataset
-        if (args.target_normalize):
+        if (args.target_normalize > 0):
             scaler = None
         images = utils.getImages(emg[x], scaler, length, width, 
                                  turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
@@ -1364,7 +1365,7 @@ if args.leave_n_subjects_out_randomly != 0:
     wandb_runname += '_leave_n_subjects_out-'+str(args.leave_n_subjects_out_randomly)
 if args.turn_off_scaler_normalization:
     wandb_runname += '_no-scal-norm'
-if args.target_normalize:
+if args.target_normalize > 0:
     wandb_runname += '_targ-norm'
 if args.load_few_images:
     wandb_runname += '_load-few'
