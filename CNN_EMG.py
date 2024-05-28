@@ -33,6 +33,8 @@ from sklearn.metrics import accuracy_score, log_loss
 import torch.nn.functional as F
 from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 from semilearn.core.utils import send_model_cuda
+import torchmetrics
+import ml_metrics_utils as ml_utils
 
 
 # Define a custom argument type for a list of integers
@@ -1594,9 +1596,17 @@ else:
             
         if args.model == 'MLP':
             # PyTorch training loop for MLP
+
             for epoch in tqdm(range(num_epochs), desc="Epoch"):
                 model.train()
-                train_acc = 0.0
+
+                # Metrics
+                train_acc = torchmetrics.Accuracy().to(device)
+                precision = torchmetrics.Precision().to(device)
+                recall = torchmetrics.Recall().to(device)
+                f1 = torchmetrics.F1().to(device)
+                top5_acc = torchmetrics.Accuracy(top_k=5).to(device)
+
                 train_loss = 0.0
                 with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
                     for X_batch, Y_batch in t:
@@ -1610,19 +1620,27 @@ else:
                         optimizer.step()
 
                         train_loss += loss.item()
-                        preds = torch.argmax(output, dim=1)
-                        train_acc += torch.mean((preds == Y_batch).type(torch.float)).item()
+                        train_acc(output, Y_batch)
+                        precision(output, Y_batch)
+                        recall(output, Y_batch)
+                        f1(output, Y_batch)
+                        top5_acc(output, Y_batch)
 
                         if t.n % 10 == 0:
-                            t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": train_acc / (t.n + 1)})
+                            t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": train_acc.compute().item()})
 
-                        del X_batch, Y_batch, output, preds
+                        del X_batch, Y_batch, output
                         torch.cuda.empty_cache()
 
                 # Validation
                 model.eval()
+                val_acc = torchmetrics.Accuracy().to(device)
+                val_precision = torchmetrics.Precision().to(device)
+                val_recall = torchmetrics.Recall().to(device)
+                val_f1 = torchmetrics.F1().to(device)
+                val_top5_acc = torchmetrics.Accuracy(top_k=5).to(device)
+                
                 val_loss = 0.0
-                val_acc = 0.0
                 with torch.no_grad():
                     for X_batch, Y_batch in val_loader:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
@@ -1630,27 +1648,50 @@ else:
 
                         output = model(X_batch)
                         val_loss += criterion(output, Y_batch).item()
-                        preds = torch.argmax(output, dim=1)
-                        val_acc += torch.mean((preds == Y_batch).type(torch.float)).item()
+                        val_acc(output, Y_batch)
+                        val_precision(output, Y_batch)
+                        val_recall(output, Y_batch)
+                        val_f1(output, Y_batch)
+                        val_top5_acc(output, Y_batch)
 
                         del X_batch, Y_batch
                         torch.cuda.empty_cache()
 
+                # Average the losses and print the metrics
                 train_loss /= len(train_loader)
-                train_acc /= len(train_loader)
                 val_loss /= len(val_loader)
-                val_acc /= len(val_loader)
+
+                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                confidence_levels = ml_utils.evaluate_confidence_thresholding(model, val_loader, device, numGestures)
 
                 print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
-                print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+                print(f"Train Metrics: Acc: {train_acc.compute().item():.4f}, Precision: {precision.compute().item():.4f}, Recall: {recall.compute().item():.4f}, F1: {f1.compute().item():.4f}, Top-5 Acc: {top5_acc.compute().item():.4f}")
+                print(f"Val Metrics: Acc: {val_acc.compute().item():.4f}, Precision: {val_precision.compute().item():.4f}, Recall: {val_recall.compute().item():.4f}, F1: {val_f1.compute().item():.4f}, Top-5 Acc: {val_top5_acc.compute().item():.4f}")
+                for fpr, tprs in tpr_results.items():
+                    print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+                for confidence_level, accuracy in confidence_levels.items():
+                    print(f"Accuracy at confidence level >{confidence_level}: {accuracy:.4f}")
+
+                # Log metrics to wandb or any other tracking tool
                 wandb.log({
                     "Epoch": epoch,
                     "Train Loss": train_loss,
-                    "Train Acc": train_acc,
+                    "Train Acc": train_acc.compute().item(),
+                    "Train Precision": precision.compute().item(),
+                    "Train Recall": recall.compute().item(),
+                    "Train F1": f1.compute().item(),
+                    "Train Top-5 Acc": top5_acc.compute().item(),
                     "Valid Loss": val_loss,
-                    "Valid Acc": val_acc,
-                    "Learning Rate": optimizer.param_groups[0]['lr']
+                    "Valid Acc": val_acc.compute().item(),
+                    "Valid Precision": val_precision.compute().item(),
+                    "Valid Recall": val_recall.compute().item(),
+                    "Valid F1": val_f1.compute().item(),
+                    "Valid Top-5 Acc": val_top5_acc.compute().item(),
+                    "Learning Rate": optimizer.param_groups[0]['lr'],
+                    **{f"TPR at {fpr}": tprs for fpr, tprs in tpr_results.items()}, 
+                    **{f"Accuracy at confidence level >{confidence_level}": accuracy for confidence_level, accuracy in confidence_levels.items()}
                 })
+
 
             torch.save(model.state_dict(), model_filename)
             wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
@@ -1689,75 +1730,126 @@ else:
                 # "Test Loss": test_loss,
                 # "Test Acc": test_acc
             })
+
     else: # CNN training
+        # Metrics for training
+        train_acc_metric = torchmetrics.Accuracy().to(device)
+        train_precision_metric = torchmetrics.Precision().to(device)
+        train_recall_metric = torchmetrics.Recall().to(device)
+        train_f1_score_metric = torchmetrics.F1().to(device)
+        train_top5_acc_metric = torchmetrics.Accuracy(top_k=5).to(device)
+
+        # Metrics for validation
+        val_acc_metric = torchmetrics.Accuracy().to(device)
+        val_precision_metric = torchmetrics.Precision().to(device)
+        val_recall_metric = torchmetrics.Recall().to(device)
+        val_f1_score_metric = torchmetrics.F1().to(device)
+        val_top5_acc_metric = torchmetrics.Accuracy(top_k=5).to(device)
+
         for epoch in tqdm(range(num_epochs), desc="Epoch"):
             model.train()
-            train_acc = 0.0
             train_loss = 0.0
-            with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
-                for X_batch, Y_batch in t:
-                    X_batch = X_batch.to(device).to(torch.float32)
-                    Y_batch = Y_batch.to(device).to(torch.float32)
 
-                    optimizer.zero_grad()
-                    output = model(X_batch)
-                    if isinstance(output, dict):
-                        output = output['logits']
-                    loss = criterion(output, Y_batch)
-                    loss.backward()
-                    optimizer.step()
+            # Reset training metrics at the start of each epoch
+            train_acc_metric.reset()
+            train_precision_metric.reset()
+            train_recall_metric.reset()
+            train_f1_score_metric.reset()
+            train_top5_acc_metric.reset()
 
-                    train_loss += loss.item()
-                    preds = torch.argmax(output, dim=1)
-                    Y_batch_long = torch.argmax(Y_batch, dim=1)
-                    train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+            for X_batch, Y_batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False):
+                X_batch = X_batch.to(device).to(torch.float32)
+                Y_batch = Y_batch.to(device).to(torch.float32)
+                Y_batch_long = torch.argmax(Y_batch, dim=1)
 
-                    # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
-                    # Update the inner tqdm loop with metrics
-                    # Only set_postfix every 10 batches to avoid slowing down the loop
-                    if t.n % 10 == 0:
-                        t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
+                optimizer.zero_grad()
+                output = model(X_batch)
+                if isinstance(output, dict):
+                    output = output['logits']
+                loss = criterion(output, Y_batch)
+                loss.backward()
+                optimizer.step()
 
-                    del X_batch, Y_batch, output, preds
-                    torch.cuda.empty_cache()
+                train_loss += loss.item()
+                train_acc_metric(output, Y_batch_long)
+                train_precision_metric(output, Y_batch_long)
+                train_recall_metric(output, Y_batch_long)
+                train_f1_score_metric(output, Y_batch_long)
+                train_top5_acc_metric(output, Y_batch_long)
 
-            # Validation
+                if t.n % 10 == 0:
+                    t.set_postfix({
+                        "Batch Loss": loss.item(), 
+                        "Batch Acc": train_acc_metric.compute().item()
+                    })
+
+            # Validation phase
             model.eval()
             val_loss = 0.0
-            val_acc = 0.0
+            val_acc_metric.reset()
+            val_precision_metric.reset()
+            val_recall_metric.reset()
+            val_f1_score_metric.reset()
+            val_top5_acc_metric.reset()
             with torch.no_grad():
                 for X_batch, Y_batch in val_loader:
                     X_batch = X_batch.to(device).to(torch.float32)
                     Y_batch = Y_batch.to(device).to(torch.float32)
+                    Y_batch_long = torch.argmax(Y_batch, dim=1)
 
-                    #output = model(X_batch).logits
                     output = model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
                     val_loss += criterion(output, Y_batch).item()
-                    preds = torch.argmax(output, dim=1)
-                    Y_batch_long = torch.argmax(Y_batch, dim=1)
+                    val_acc_metric(output, Y_batch_long)
+                    val_precision_metric(output, Y_batch_long)
+                    val_recall_metric(output, Y_batch_long)
+                    val_f1_score_metric(output, Y_batch_long)
+                    val_top5_acc_metric(output, Y_batch_long)
 
-                    val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
-
-                    del X_batch, Y_batch
-                    torch.cuda.empty_cache()
-
+            # Calculate average loss and metrics
             train_loss /= len(train_loader)
-            train_acc /= len(train_loader)
             val_loss /= len(val_loader)
-            val_acc /= len(val_loader)
+            train_acc = train_acc_metric.compute()
+            train_precision = train_precision_metric.compute()
+            train_recall = train_recall_metric.compute()
+            train_f1_score = train_f1_score_metric.compute()
+            train_top5_acc = train_top5_acc_metric.compute()
+            val_acc = val_acc_metric.compute()
+            val_precision = val_precision_metric.compute()
+            val_recall = val_recall_metric.compute()
+            val_f1_score = val_f1_score_metric.compute()
+            val_top5_acc = val_top5_acc_metric.compute()
+
+            tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+            confidence_levels = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
 
             print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
-            print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+            print(f"Train Accuracy: {train_acc:.4f} | Train Precision: {train_precision:.4f} | Train Recall: {train_recall:.4f} | Train F1: {train_f1_score:.4f} | Train Top-5 Acc: {train_top5_acc:.4f}")
+            print(f"Val Accuracy: {val_acc:.4f} | Val Precision: {val_precision:.4f} | Val Recall: {val_recall:.4f} | Val F1: {val_f1_score:.4f} | Val Top-5 Acc: {val_top5_acc:.4f}")
+            for fpr, tprs in tpr_results.items():
+                print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+            for confidence_level, acc in confidence_levels.items():
+                print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
 
             wandb.log({
                 "Epoch": epoch,
                 "Train Loss": train_loss,
                 "Train Acc": train_acc,
-                "Valid Loss": val_loss,
-                "Valid Acc": val_acc, 
-                "Learning Rate": optimizer.param_groups[0]['lr']})
+                "Train Precision": train_precision,
+                "Train Recall": train_recall,
+                "Train F1": train_f1_score,
+                "Train Top-5 Acc": train_top5_acc,
+                "Val Loss": val_loss,
+                "Val Acc": val_acc,
+                "Val Precision": val_precision,
+                "Val Recall": val_recall,
+                "Val F1": val_f1_score,
+                "Val Top-5 Acc": val_top5_acc,
+                "Learning Rate": optimizer.param_groups[0]['lr'], 
+                **{f"TPR at {fpr}": tprs for fpr, tprs in tpr_results.items()}, 
+                **{f"Accuracy at {confidence_level} confidence level": acc for confidence_level, acc in confidence_levels.items()}
+            })
 
         torch.save(model.state_dict(), model_filename)
         wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
@@ -1769,107 +1861,194 @@ else:
             # train more on fine tuning dataset
             finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
             finetune_loader = DataLoader(finetune_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
+            # Initialize metrics for finetuning training
+            finetune_train_acc_metric = torchmetrics.Accuracy().to(device)
+            finetune_precision_metric = torchmetrics.Precision().to(device)
+            finetune_recall_metric = torchmetrics.Recall().to(device)
+            finetune_f1_score_metric = torchmetrics.F1().to(device)
+            finetune_top5_acc_metric = torchmetrics.Accuracy(top_k=5).to(device)
+
+            # Initialize metrics for finetuning validation
+            finetune_val_acc_metric = torchmetrics.Accuracy().to(device)
+            finetune_val_precision_metric = torchmetrics.Precision().to(device)
+            finetune_val_recall_metric = torchmetrics.Recall().to(device)
+            finetune_val_f1_score_metric = torchmetrics.F1().to(device)
+            finetune_val_top5_acc_metric = torchmetrics.Accuracy(top_k=5).to(device)
+
             for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
                 model.train()
-                train_acc = 0.0
                 train_loss = 0.0
-                with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False) as t:
-                    for X_batch, Y_batch in t:
-                        X_batch = X_batch.to(device).to(torch.float32)
-                        Y_batch = Y_batch.to(device).to(torch.float32)
 
-                        optimizer.zero_grad()
-                        output = model(X_batch)
-                        if isinstance(output, dict):
-                            output = output['logits']
-                        loss = criterion(output, Y_batch)
-                        loss.backward()
-                        optimizer.step()
+                # Reset finetuning training metrics at the start of each epoch
+                finetune_train_acc_metric.reset()
+                finetune_precision_metric.reset()
+                finetune_recall_metric.reset()
+                finetune_f1_score_metric.reset()
+                finetune_top5_acc_metric.reset()
 
-                        train_loss += loss.item()
-                        preds = torch.argmax(output, dim=1)
-                        Y_batch_long = torch.argmax(Y_batch, dim=1)
-                        train_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
+                for X_batch, Y_batch in tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False):
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    Y_batch = Y_batch.to(device).to(torch.float32)
+                    Y_batch_long = torch.argmax(Y_batch, dim=1)
 
-                        # Optional: You can use tqdm's set_postfix method to display loss and accuracy for each batch
-                        # Update the inner tqdm loop with metrics
-                        # Only set_postfix every 10 batches to avoid slowing down the loop
-                        if t.n % 10 == 0:
-                            t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": torch.mean((preds == Y_batch_long).type(torch.float)).item()})
+                    optimizer.zero_grad()
+                    output = model(X_batch)
+                    if isinstance(output, dict):
+                        output = output['logits']
+                    loss = criterion(output, Y_batch)
+                    loss.backward()
+                    optimizer.step()
 
-                        del X_batch, Y_batch, output, preds
-                        torch.cuda.empty_cache()
+                    train_loss += loss.item()
+                    finetune_train_acc_metric(output, Y_batch_long)
+                    finetune_precision_metric(output, Y_batch_long)
+                    finetune_recall_metric(output, Y_batch_long)
+                    finetune_f1_score_metric(output, Y_batch_long)
+                    finetune_top5_acc_metric(output, Y_batch_long)
 
-                # Validation
+                    if t.n % 10 == 0:
+                        t.set_postfix({
+                            "Batch Loss": loss.item(), 
+                            "Batch Acc": finetune_train_acc_metric.compute().item()
+                        })
+
+                # Finetuning Validation
                 model.eval()
                 val_loss = 0.0
-                val_acc = 0.0
+                finetune_val_acc_metric.reset()
+                finetune_val_precision_metric.reset()
+                finetune_val_recall_metric.reset()
+                finetune_val_f1_score_metric.reset()
+                finetune_val_top5_acc_metric.reset()
+
                 with torch.no_grad():
                     for X_batch, Y_batch in val_loader:
                         X_batch = X_batch.to(device).to(torch.float32)
                         Y_batch = Y_batch.to(device).to(torch.float32)
+                        Y_batch_long = torch.argmax(Y_batch, dim=1)
 
-                        #output = model(X_batch).logits
                         output = model(X_batch)
                         if isinstance(output, dict):
                             output = output['logits']
                         val_loss += criterion(output, Y_batch).item()
-                        preds = torch.argmax(output, dim=1)
-                        Y_batch_long = torch.argmax(Y_batch, dim=1)
+                        finetune_val_acc_metric(output, Y_batch_long)
+                        finetune_val_precision_metric(output, Y_batch_long)
+                        finetune_val_recall_metric(output, Y_batch_long)
+                        finetune_val_f1_score_metric(output, Y_batch_long)
+                        finetune_val_top5_acc_metric(output, Y_batch_long)
 
-                        val_acc += torch.mean((preds == Y_batch_long).type(torch.float)).item()
-
-                        del X_batch, Y_batch
-                        torch.cuda.empty_cache()
-
+                # Calculate average metrics
                 train_loss /= len(finetune_loader)
-                train_acc /= len(finetune_loader)
+                finetune_train_acc = finetune_train_acc_metric.compute()
+                finetune_train_precision = finetune_precision_metric.compute()
+                finetune_train_recall = finetune_recall_metric.compute()
+                finetune_train_f1_score = finetune_f1_score_metric.compute()
+                finetune_train_top5_acc = finetune_top5_acc_metric.compute()
                 val_loss /= len(val_loader)
-                val_acc /= len(val_loader)
+                finetune_val_acc = finetune_val_acc_metric.compute()
+                finetune_val_precision = finetune_val_precision_metric.compute()
+                finetune_val_recall = finetune_val_recall_metric.compute()
+                finetune_val_f1_score = finetune_val_f1_score_metric.compute()
+                finetune_val_top5_acc = finetune_val_top5_acc_metric.compute()
+
+                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                confidence_levels = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
 
                 print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
-                print(f"Train Accuracy: {train_acc:.4f} | Val Accuracy: {val_acc:.4f}")
+                print(f"Train Accuracy: {finetune_train_acc:.4f} | Train Precision: {finetune_train_precision:.4f} | Train Recall: {finetune_train_recall:.4f} | Train F1: {finetune_train_f1_score:.4f} | Train Top-5 Acc: {finetune_train_top5_acc:.4f}")
+                print(f"Val Accuracy: {finetune_val_acc:.4f} | Val Precision: {finetune_val_precision:.4f} | Val Recall: {finetune_val_recall:.4f} | Val F1: {finetune_val_f1_score:.4f} | Val Top-5 Acc: {finetune_val_top5_acc:.4f}")
+                for fpr, tprs in tpr_results.items():
+                    print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+                for confidence_level, acc in confidence_levels.items():
+                    print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
+
                 wandb.log({
                     "Finetuning Epoch": epoch,
                     "Train Loss": train_loss,
-                    "Train Acc": train_acc,
+                    "Train Acc": finetune_train_acc,
+                    "Train Precision": finetune_train_precision,
+                    "Train Recall": finetune_train_recall,
+                    "Train F1": finetune_train_f1_score,
+                    "Train Top-5 Acc": finetune_train_top5_acc,
                     "Valid Loss": val_loss,
-                    "Valid Acc": val_acc, 
-                    "Learning Rate": optimizer.param_groups[0]['lr']})
+                    "Valid Acc": finetune_val_acc,
+                    "Valid Precision": finetune_val_precision,
+                    "Valid Recall": finetune_val_recall,
+                    "Valid F1": finetune_val_f1_score,
+                    "Valid Top-5 Acc": finetune_val_top5_acc,
+                    "Learning Rate": optimizer.param_groups[0]['lr'], 
+                    **{f"TPR at {fpr}": tprs for fpr, tprs in tpr_results.items()}, 
+                    **{f"Accuracy at {confidence_level} confidence level": acc for confidence_level, acc in confidence_levels.items()}
+                })
                 
         # Testing
-        if (args.held_out_test):
+        # Initialize metrics for testing
+        test_acc_metric = torchmetrics.Accuracy().to(device)
+        test_precision_metric = torchmetrics.Precision().to(device)
+        test_recall_metric = torchmetrics.Recall().to(device)
+        test_f1_score_metric = torchmetrics.F1().to(device)
+        test_top5_acc_metric = torchmetrics.Accuracy(top_k=5).to(device)
+
+        # Assuming model, criterion, device, and test_loader are defined
+        if args.held_out_test:
+            model.eval()
+            test_loss = 0.0
+
+            # Reset test metrics
+            test_acc_metric.reset()
+            test_precision_metric.reset()
+            test_recall_metric.reset()
+            test_f1_score_metric.reset()
+            test_top5_acc_metric.reset()
+
             pred = []
             true = []
 
-            model.eval()
-            test_loss = 0.0
-            test_acc = 0.0
             with torch.no_grad():
                 for X_batch, Y_batch in test_loader:
                     X_batch = X_batch.to(device).to(torch.float32)
                     Y_batch = Y_batch.to(device).to(torch.float32)
+                    Y_batch_long = torch.argmax(Y_batch, dim=1)
 
                     output = model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
+                    pred.extend(torch.argmax(output, dim=1).cpu().detach().numpy())
+                    true.extend(Y_batch_long.cpu().detach().numpy())
+
                     test_loss += criterion(output, Y_batch).item()
+                    test_acc_metric(output, Y_batch_long)
+                    test_precision_metric(output, Y_batch_long)
+                    test_recall_metric(output, Y_batch_long)
+                    test_f1_score_metric(output, Y_batch_long)
+                    test_top5_acc_metric(output, Y_batch_long)
 
-                    test_acc += np.mean(np.argmax(output.cpu().detach().numpy(), axis=1) == np.argmax(Y_batch.cpu().detach().numpy(), axis=1))
-
-                    output = np.argmax(output.cpu().detach().numpy(), axis=1)
-                    pred.extend(output)
-                    labels = np.argmax(Y_batch.cpu().detach().numpy(), axis=1)
-                    true.extend(labels)
-
+            # Calculate average loss and metrics
             test_loss /= len(test_loader)
-            test_acc /= len(test_loader)
-            print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f}")
-            
+            test_acc = test_acc_metric.compute()
+            test_precision = test_precision_metric.compute()
+            test_recall = test_recall_metric.compute()
+            test_f1_score = test_f1_score_metric.compute()
+            test_top5_acc = test_top5_acc_metric.compute()
+            tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, test_loader, device, numGestures)
+            confidence_levels = ml_utils.evaluate_confidence_thresholding(model, test_loader, device)
+
+            print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f} | Test Precision: {test_precision:.4f} | Test Recall: {test_recall:.4f} | Test F1 Score: {test_f1_score:.4f} | Test Top-5 Accuracy: {test_top5_acc:.4f}")
+            for fpr, tprs in tpr_results.items():
+                print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+            for confidence_level, acc in confidence_levels.items():
+                print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
+
             wandb.log({
                 "Test Loss": test_loss,
-                "Test Acc": test_acc}) 
-            
+                "Test Acc": test_acc,
+                "Test Precision": test_precision,
+                "Test Recall": test_recall,
+                "Test F1": test_f1_score,
+                "Test Top-5 Acc": test_top5_acc, 
+                **{f"TPR at {fpr}": tprs for fpr, tprs in tpr_results.items()}, 
+                **{f"Accuracy at {confidence_level} confidence level": acc for confidence_level, acc in confidence_levels.items()}
+            })
             
             # %% Confusion Matrix
             # Plot and log confusion matrix in wandb
