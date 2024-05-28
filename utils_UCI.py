@@ -21,7 +21,7 @@ import pywt
 import fcwt
 
 numGestures = 6 # 7 total, but not all subjects have 7
-fs = 200 #Hz
+fs = 1000 #Hz (device sampling frequency is 200Hz but raw data is collected at 1000Hz)
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 50 # 125 ms (increased from 50ms due to high number of subjects)
