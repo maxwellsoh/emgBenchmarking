@@ -183,6 +183,18 @@ def getRestim (n: int, exercise: int = 2):
     restim = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['restimulus'])
     return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
+def getForceData(n: int, exercise: int = 3):
+    """
+    Returns force data from exercise 3 for a given subject n unfolded. 
+
+    Args:
+        n (int): Subject number
+        exercise (int, optional): Exercise number. Must be 3.
+    """
+    assert exercise == 3, "Only exercise 3 has force data"
+    force = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['force'])
+    return force.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+
 def normalize (data, target_min, target_max, gesture):
     source_min = np.zeros(len(data[0]), dtype=np.float32)
     source_max = np.zeros(len(data[0]), dtype=np.float32)
@@ -208,6 +220,13 @@ def getLabels (args):
     restim = getRestim(n, exercise)
     return contract(restim[balance(restim)])
 
+def getForces(args):
+    n, exercise = args
+    force = getForceData(n, exercise)
+    # needed to balance data
+    restim = getRestim(n,exercise)
+    return force[balance(restim)]
+    
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
     data = (data - global_min) / (global_max - global_min)
