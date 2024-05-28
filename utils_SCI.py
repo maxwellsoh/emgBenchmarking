@@ -18,8 +18,8 @@ import os
 from poly5_reader import Poly5Reader
 import mne
 
-numGestures = 14
-fs = 2000.0 # Hz (actually 2048 Hz but was "decimated" to 512? unclear)
+numGestures = 12
+fs = 2000.0 # Hz 
 wLen = 250.0 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = int(50.0 / 1000 * fs) # 50 ms
@@ -32,8 +32,14 @@ gesture_labels_02 = ["Pinky Extension", "Wrist Extension", "Wrist Flexion", "Mid
                     "Ring Flexion", "Thumb Extension", "Ring Extension", "Thumb Flexion"]
 # all gestures here (for april data)
 gesture_labels = ["Wrist Flexion", "Ring Extension", "Wrist Extension", "Pinky Extension", 
-                    "Thumb Flexion", "Middle Flexion", "Middle Extension", "Ulnar Deviation", 
-                    "Index Extension", "Radial Deviation", "Index Flexion", "Thumb Extension",
+                    "Thumb Flexion", "Middle Flexion", "Middle Extension", #"Ulnar Deviation", 
+                    "Index Extension", #"Radial Deviation", 
+                    "Index Flexion", "Thumb Extension",
+                    "Ring Flexion", "Pinky Flexion"]
+
+gestures_in_common = ["Wrist Flexion", "Ring Extension", "Wrist Extension", "Pinky Extension",
+                    "Thumb Flexion", "Middle Flexion", "Middle Extension",
+                    "Index Extension", "Index Flexion", "Thumb Extension",
                     "Ring Flexion", "Pinky Flexion"]
 
 # 4 kHz sampling rate for april 1 and 2; 2 kHz sampling rate for all other groups
@@ -44,9 +50,9 @@ april_1 = ["A_FLX/MCP01_2024_04_12_A_FLX_2.poly5",
 "A_FLX/MCP01_2024_04_12_A_FLX_6.poly5",
 "A_FLX/MCP01_2024_04_12_A_FLX_7.poly5",
 "A_FLX/MCP01_2024_04_12_A_FLX_8.poly5",
-"A_FLX/MCP01_2024_04_12_A_FLX_9.poly5",
+# "A_FLX/MCP01_2024_04_12_A_FLX_9.poly5",
 "A_FLX/MCP01_2024_04_12_A_FLX_10.poly5",
-"A_FLX/MCP01_2024_04_12_A_FLX_11.poly5",
+# "A_FLX/MCP01_2024_04_12_A_FLX_11.poly5",
 "A_FLX/MCP01_2024_04_12_A_FLX_12.poly5",
 "A_FLX/MCP01_2024_04_12_A_FLX_13.poly5",
 "A_FLX/MCP01_2024_04_12_A_FLX_14.poly5",
@@ -59,9 +65,9 @@ april_2 = ["B_EXT/MCP01_2024_04_12_B_EXT_2.poly5",
 "B_EXT/MCP01_2024_04_12_B_EXT_6.poly5",
 "B_EXT/MCP01_2024_04_12_B_EXT_7.poly5",
 "B_EXT/MCP01_2024_04_12_B_EXT_8.poly5",
-"B_EXT/MCP01_2024_04_12_B_EXT_9.poly5",
+# "B_EXT/MCP01_2024_04_12_B_EXT_9.poly5",
 "B_EXT/MCP01_2024_04_12_B_EXT_10.poly5",
-"B_EXT/MCP01_2024_04_12_B_EXT_11.poly5",
+# "B_EXT/MCP01_2024_04_12_B_EXT_11.poly5",
 "B_EXT/MCP01_2024_04_12_B_EXT_12.poly5",
 "B_EXT/MCP01_2024_04_12_B_EXT_13.poly5",
 "B_EXT/MCP01_2024_04_12_B_EXT_14.poly5",
@@ -74,9 +80,9 @@ april_3 = ["Gestures GUI/Wrist Flexion/1712945596.6765876_dev1_-20240412_141316.
 "Gestures GUI/Thumb Flexion/1712946162.160045_dev1_-20240412_142242.poly5",
 "Gestures GUI/Middle Flexion/1712946292.6193693_dev1_-20240412_142452.poly5",
 "Gestures GUI/Middle Extension/1712946480.0932148_dev1_-20240412_142800.poly5",
-"Gestures GUI/Ulnar Deviation/1712946600.397335_dev1_-20240412_143000.poly5",
+# "Gestures GUI/Ulnar Deviation/1712946600.397335_dev1_-20240412_143000.poly5",
 "Gestures GUI/Index Extension/1712946730.8848639_dev1_-20240412_143210.poly5",
-"Gestures GUI/Radial Deviation/1712946856.289373_dev1_-20240412_143416.poly5",
+# "Gestures GUI/Radial Deviation/1712946856.289373_dev1_-20240412_143416.poly5",
 "Gestures GUI/Index Flexion/1712946974.4568_dev1_-20240412_143614.poly5",
 "Gestures GUI/Thumb Extension/1712947125.3284779_dev1_-20240412_143845.poly5",
 "Gestures GUI/Ring Flexion/1712947246.0819142_dev1_-20240412_144046.poly5",
@@ -89,9 +95,9 @@ april_4 = ["Gestures GUI/Wrist Flexion/1712945596.6765876_dev2_-20240412_141316.
 "Gestures GUI/Thumb Flexion/1712946162.160045_dev2_-20240412_142242.poly5",
 "Gestures GUI/Middle Flexion/1712946292.6193693_dev2_-20240412_142452.poly5",
 "Gestures GUI/Middle Extension/1712946480.0932148_dev2_-20240412_142800.poly5",
-"Gestures GUI/Ulnar Deviation/1712946600.397335_dev2_-20240412_143000.poly5",
+# "Gestures GUI/Ulnar Deviation/1712946600.397335_dev2_-20240412_143000.poly5",
 "Gestures GUI/Index Extension/1712946730.8848639_dev2_-20240412_143210.poly5",
-"Gestures GUI/Radial Deviation/1712946856.289373_dev2_-20240412_143416.poly5",
+# "Gestures GUI/Radial Deviation/1712946856.289373_dev2_-20240412_143416.poly5",
 "Gestures GUI/Index Flexion/1712946974.4568_dev2_-20240412_143614.poly5",
 "Gestures GUI/Thumb Extension/1712947125.3284779_dev2_-20240412_143845.poly5",
 "Gestures GUI/Ring Flexion/1712947246.0819142_dev2_-20240412_144046.poly5",
@@ -202,7 +208,7 @@ def getEMG_separateSessions(args):
         path_start = "SCI/02-20/"
         fileGroups = [feb_1, feb_2, feb_3, feb_4]
     else:
-        numFiles = 14
+        numFiles = 12
         path_start = "SCI/04-12/"
         fileGroups = [april_1, april_2, april_3, april_4]
 
@@ -210,6 +216,7 @@ def getEMG_separateSessions(args):
     for i in range(numFiles):
         data = [Poly5Reader(path_start + file[i]) for file in fileGroups]
         emg = []
+        # print("Subject number, session number:", args)
         for d in data:
             info = mne.create_info(d.num_channels, sfreq=d.sample_rate)
             mne_raw = mne.io.RawArray(d.samples, info)
@@ -257,10 +264,13 @@ def getEMG_separateSessions(args):
             # april has 1-64 as electrodes
             else:
                 combined = np.concatenate([emg[n][1:65, rep_inits[n][j]:rep_inits[n][j]+rep_durations[j]] for n in range(len(emg))], axis=0)
-            
+
             combined = filter(torch.from_numpy(combined)).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
+            print("Combined shape:", combined.shape)
+
             cummulative_emg.append(combined.permute((1, 0, 2)))
 
+    print("Cummulative EMG shape:", torch.cat(cummulative_emg, dim=0).shape)
     return torch.cat(cummulative_emg, dim=0)
 
 def getLabels (n):
@@ -273,7 +283,7 @@ def getLabels_separateSessions(args):
         path_start = "SCI/02-20/"
         fileGroups = [feb_1, feb_2, feb_3, feb_4]
     else:
-        numFiles = 14
+        numFiles = 12
         path_start = "SCI/04-12/"
         fileGroups = [april_1, april_2, april_3, april_4]
 
@@ -286,9 +296,10 @@ def getLabels_separateSessions(args):
             mne_raw = mne.io.RawArray(d.samples, info)
             emg.append(np.array(mne_raw.get_data()))
         
-        # subsample APRIL 1
+        # subsample APRIL 1 and APRIL 2
         if (session == 2):
             emg[0] = emg[0][:, ::2]
+            emg[1] = emg[1][:, ::2]
 
         rep_durations = []
         subseq = emg[0][len(emg[0]) - 3]
@@ -311,18 +322,21 @@ def getLabels_separateSessions(args):
         for j in range(len(rep_durations)):
             gesture_reps[i] += (rep_durations[j] - wLenTimesteps) // stepLen + 1
 
+        print("Gesture reps:", gesture_reps)
+
     curr = 0
     labels = torch.tensor(())
-    labels = labels.new_zeros(size=(sum(gesture_reps), numGestures))
+    labels = labels.new_zeros(size=(sum(gesture_reps), len(gestures_in_common)))
 
     if (session == 1):
         for i, ges in enumerate(gesture_labels_02):
-            pos = gesture_labels.index(ges)
+            pos = gestures_in_common.index(ges)
             labels[curr:curr+gesture_reps[i], pos] = 1
             curr += gesture_reps[i]
     else:
-        for i in range(14):
-            labels[curr:curr+gesture_reps[i], i] = 1
+        for i, ges in enumerate(gesture_labels):
+            pos = gestures_in_common.index(ges)
+            labels[curr:curr+gesture_reps[i], pos] = 1
             curr += gesture_reps[i]
     
     return labels

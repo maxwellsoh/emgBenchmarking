@@ -844,12 +844,17 @@ else:
             X_finetune_unlabeled_list.append(unlabeled_data)
             Y_finetune_unlabeled_list.append(np.zeros(unlabeled_data.shape[0]))
 
-        X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
-        Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
+        if utils.num_subjects == 1:
+            assert not args.pretrain_and_finetune, "Cannot pretrain and finetune with only one subject"
+
+        if utils.num_subjects > 1:
+            X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
+            Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
         X_finetune = np.concatenate(X_finetune, axis=0, dtype=np.float16)
         Y_finetune = np.concatenate(Y_finetune, axis=0, dtype=np.float16)
         X_validation = np.array(data[left_out_subject_last_session_index])
         Y_validation = np.array(labels[left_out_subject_last_session_index])
+
         if args.proportion_unlabeled_data_from_training_subjects>0:
             X_pretrain_unlabeled = np.concatenate(X_pretrain_unlabeled_list, axis=0, dtype=np.float16)
             Y_pretrain_unlabeled = np.concatenate(Y_pretrain_unlabeled_list, axis=0, dtype=np.float16)
@@ -857,8 +862,9 @@ else:
             X_finetune_unlabeled = np.concatenate(X_finetune_unlabeled_list, axis=0, dtype=np.float16)
             Y_finetune_unlabeled = np.concatenate(Y_finetune_unlabeled_list, axis=0, dtype=np.float16)
         
-        X_train = torch.from_numpy(X_pretrain).to(torch.float16)
-        Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
+        if utils.num_subjects > 1:
+            X_train = torch.from_numpy(X_pretrain).to(torch.float16)
+            Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
         X_train_finetuning = torch.from_numpy(X_finetune).to(torch.float16)
         Y_train_finetuning = torch.from_numpy(Y_finetune).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
@@ -919,7 +925,10 @@ else:
                 Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
                 
         else: 
-            if not args.pretrain_and_finetune:
+            if utils.num_subjects == 1:
+                X_train = X_train_finetuning
+                Y_train = Y_train_finetuning
+            elif not args.pretrain_and_finetune:
                 X_train = torch.concat((X_train, X_train_finetuning), axis=0)
                 Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
             
