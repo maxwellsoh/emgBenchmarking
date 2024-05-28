@@ -1601,11 +1601,11 @@ else:
                 model.train()
 
                 # Metrics
-                train_acc = torchmetrics.Accuracy().to(device)
-                precision = torchmetrics.Precision().to(device)
-                recall = torchmetrics.Recall().to(device)
-                f1 = torchmetrics.F1().to(device)
-                top5_acc = torchmetrics.Accuracy(top_k=5).to(device)
+                train_acc = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
+                precision = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
+                recall = torchmetrics.Recall(task="multiclass", num_classes=numGestures).to(device)
+                f1 = torchmetrics.F1Score(task="multiclass", num_classes=numGestures).to(device)
+                top5_acc = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures).to(device)
 
                 train_loss = 0.0
                 with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
@@ -1634,11 +1634,11 @@ else:
 
                 # Validation
                 model.eval()
-                val_acc = torchmetrics.Accuracy().to(device)
-                val_precision = torchmetrics.Precision().to(device)
-                val_recall = torchmetrics.Recall().to(device)
-                val_f1 = torchmetrics.F1().to(device)
-                val_top5_acc = torchmetrics.Accuracy(top_k=5).to(device)
+                val_acc = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
+                val_precision = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
+                val_recall = torchmetrics.Recall(task="multiclass", num_classes=numGestures).to(device)
+                val_f1 = torchmetrics.F1Score(task="multiclass", num_classes=numGestures).to(device)
+                val_top5_acc = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures).to(device)
                 
                 val_loss = 0.0
                 with torch.no_grad():
@@ -1662,36 +1662,39 @@ else:
                 val_loss /= len(val_loader)
 
                 tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
-                confidence_levels = ml_utils.evaluate_confidence_thresholding(model, val_loader, device, numGestures)
+                confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device, numGestures)
 
                 print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
                 print(f"Train Metrics: Acc: {train_acc.compute().item():.4f}, Precision: {precision.compute().item():.4f}, Recall: {recall.compute().item():.4f}, F1: {f1.compute().item():.4f}, Top-5 Acc: {top5_acc.compute().item():.4f}")
                 print(f"Val Metrics: Acc: {val_acc.compute().item():.4f}, Precision: {val_precision.compute().item():.4f}, Recall: {val_recall.compute().item():.4f}, F1: {val_f1.compute().item():.4f}, Top-5 Acc: {val_top5_acc.compute().item():.4f}")
                 for fpr, tprs in tpr_results.items():
-                    print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+                    print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
                 for confidence_level, accuracy in confidence_levels.items():
-                    print(f"Accuracy at confidence level >{confidence_level}: {accuracy:.4f}")
+                    print(f"Val Accuracy at confidence level >{confidence_level}: {accuracy:.4f}")
 
                 # Log metrics to wandb or any other tracking tool
                 wandb.log({
-                    "Epoch": epoch,
-                    "Train Loss": train_loss,
-                    "Train Acc": train_acc.compute().item(),
-                    "Train Precision": precision.compute().item(),
-                    "Train Recall": recall.compute().item(),
-                    "Train F1": f1.compute().item(),
-                    "Train Top-5 Acc": top5_acc.compute().item(),
-                    "Valid Loss": val_loss,
-                    "Valid Acc": val_acc.compute().item(),
-                    "Valid Precision": val_precision.compute().item(),
-                    "Valid Recall": val_recall.compute().item(),
-                    "Valid F1": val_f1.compute().item(),
-                    "Valid Top-5 Acc": val_top5_acc.compute().item(),
-                    "Learning Rate": optimizer.param_groups[0]['lr'],
-                    **{f"TPR at {fpr}": tprs for fpr, tprs in tpr_results.items()}, 
-                    **{f"Accuracy at confidence level >{confidence_level}": accuracy for confidence_level, accuracy in confidence_levels.items()}
-                })
+                    "train/Loss": train_loss,
+                    "train/Accuracy": train_acc,
+                    "train/Precision": train_precision,
+                    "train/Recall": train_recall,
+                    "train/F1 Score": train_f1_score,
+                    "train/Top-5 Accuracy": train_top5_acc,
+                    "train/Learning Rate": optimizer.param_groups[0]['lr'],
+                    "train/Epoch": epoch,
 
+                    "validation/Loss": val_loss,
+                    "validation/Accuracy": val_acc,
+                    "validation/Precision": val_precision,
+                    "validation/Recall": val_recall,
+                    "validation/F1 Score": val_f1_score,
+                    "validation/Top-5 Accuracy": val_top5_acc,
+
+                    # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
+                    **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
+                    **{f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()}, 
+                    **{f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
+                })
 
             torch.save(model.state_dict(), model_filename)
             wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
@@ -1725,26 +1728,26 @@ else:
             wandb.log({
                 "Train Loss": train_loss,
                 "Train Acc": train_acc,
-                "Valid Loss": val_loss,
-                "Valid Acc": val_acc,
+                "Val Loss": val_loss,
+                "Val Acc": val_acc,
                 # "Test Loss": test_loss,
                 # "Test Acc": test_acc
             })
 
     else: # CNN training
         # Metrics for training
-        train_acc_metric = torchmetrics.Accuracy().to(device)
-        train_precision_metric = torchmetrics.Precision().to(device)
-        train_recall_metric = torchmetrics.Recall().to(device)
-        train_f1_score_metric = torchmetrics.F1().to(device)
-        train_top5_acc_metric = torchmetrics.Accuracy(top_k=5).to(device)
+        train_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
+        train_precision_metric = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
+        train_recall_metric = torchmetrics.Recall(task="multiclass", num_classes=numGestures).to(device)
+        train_f1_score_metric = torchmetrics.F1Score(task="multiclass", num_classes=numGestures).to(device)
+        train_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures).to(device)
 
         # Metrics for validation
-        val_acc_metric = torchmetrics.Accuracy().to(device)
-        val_precision_metric = torchmetrics.Precision().to(device)
-        val_recall_metric = torchmetrics.Recall().to(device)
-        val_f1_score_metric = torchmetrics.F1().to(device)
-        val_top5_acc_metric = torchmetrics.Accuracy(top_k=5).to(device)
+        val_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
+        val_precision_metric = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
+        val_recall_metric = torchmetrics.Recall(task="multiclass", num_classes=numGestures).to(device)
+        val_f1_score_metric = torchmetrics.F1Score(task="multiclass", num_classes=numGestures).to(device)
+        val_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures).to(device)
 
         for epoch in tqdm(range(num_epochs), desc="Epoch"):
             model.train()
@@ -1757,31 +1760,32 @@ else:
             train_f1_score_metric.reset()
             train_top5_acc_metric.reset()
 
-            for X_batch, Y_batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False):
-                X_batch = X_batch.to(device).to(torch.float32)
-                Y_batch = Y_batch.to(device).to(torch.float32)
-                Y_batch_long = torch.argmax(Y_batch, dim=1)
+            with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+                for X_batch, Y_batch in t:
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    Y_batch = Y_batch.to(device).to(torch.float32)
+                    Y_batch_long = torch.argmax(Y_batch, dim=1)
 
-                optimizer.zero_grad()
-                output = model(X_batch)
-                if isinstance(output, dict):
-                    output = output['logits']
-                loss = criterion(output, Y_batch)
-                loss.backward()
-                optimizer.step()
+                    optimizer.zero_grad()
+                    output = model(X_batch)
+                    if isinstance(output, dict):
+                        output = output['logits']
+                    loss = criterion(output, Y_batch)
+                    loss.backward()
+                    optimizer.step()
 
-                train_loss += loss.item()
-                train_acc_metric(output, Y_batch_long)
-                train_precision_metric(output, Y_batch_long)
-                train_recall_metric(output, Y_batch_long)
-                train_f1_score_metric(output, Y_batch_long)
-                train_top5_acc_metric(output, Y_batch_long)
+                    train_loss += loss.item()
+                    train_acc_metric(output, Y_batch_long)
+                    train_precision_metric(output, Y_batch_long)
+                    train_recall_metric(output, Y_batch_long)
+                    train_f1_score_metric(output, Y_batch_long)
+                    train_top5_acc_metric(output, Y_batch_long)
 
-                if t.n % 10 == 0:
-                    t.set_postfix({
-                        "Batch Loss": loss.item(), 
-                        "Batch Acc": train_acc_metric.compute().item()
-                    })
+                    if t.n % 10 == 0:
+                        t.set_postfix({
+                            "Batch Loss": loss.item(), 
+                            "Batch Acc": train_acc_metric.compute().item()
+                        })
 
             # Validation phase
             model.eval()
@@ -1822,34 +1826,39 @@ else:
             val_top5_acc = val_top5_acc_metric.compute()
 
             tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
-            confidence_levels = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
+            confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
 
             print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
             print(f"Train Accuracy: {train_acc:.4f} | Train Precision: {train_precision:.4f} | Train Recall: {train_recall:.4f} | Train F1: {train_f1_score:.4f} | Train Top-5 Acc: {train_top5_acc:.4f}")
             print(f"Val Accuracy: {val_acc:.4f} | Val Precision: {val_precision:.4f} | Val Recall: {val_recall:.4f} | Val F1: {val_f1_score:.4f} | Val Top-5 Acc: {val_top5_acc:.4f}")
             for fpr, tprs in tpr_results.items():
-                print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+                print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
             for confidence_level, acc in confidence_levels.items():
-                print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
+                print(f"Val Accuracy at {confidence_level} confidence level: {acc:.4f}")
 
             wandb.log({
-                "Epoch": epoch,
-                "Train Loss": train_loss,
-                "Train Acc": train_acc,
-                "Train Precision": train_precision,
-                "Train Recall": train_recall,
-                "Train F1": train_f1_score,
-                "Train Top-5 Acc": train_top5_acc,
-                "Val Loss": val_loss,
-                "Val Acc": val_acc,
-                "Val Precision": val_precision,
-                "Val Recall": val_recall,
-                "Val F1": val_f1_score,
-                "Val Top-5 Acc": val_top5_acc,
-                "Learning Rate": optimizer.param_groups[0]['lr'], 
-                **{f"TPR at {fpr}": tprs for fpr, tprs in tpr_results.items()}, 
-                **{f"Accuracy at {confidence_level} confidence level": acc for confidence_level, acc in confidence_levels.items()}
-            })
+                    "train/Loss": train_loss,
+                    "train/Accuracy": train_acc,
+                    "train/Precision": train_precision,
+                    "train/Recall": train_recall,
+                    "train/F1 Score": train_f1_score,
+                    "train/Top-5 Accuracy": train_top5_acc,
+                    "train/Learning Rate": optimizer.param_groups[0]['lr'],
+                    "train/Epoch": epoch,
+
+                    "validation/Loss": val_loss,
+                    "validation/Accuracy": val_acc,
+                    "validation/Precision": val_precision,
+                    "validation/Recall": val_recall,
+                    "validation/F1 Score": val_f1_score,
+                    "validation/Top-5 Accuracy": val_top5_acc,
+
+                    # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
+                    **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
+                    **{f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()},
+                    **{f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
+
+                })
 
         torch.save(model.state_dict(), model_filename)
         wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
@@ -1862,18 +1871,18 @@ else:
             finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
             finetune_loader = DataLoader(finetune_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
             # Initialize metrics for finetuning training
-            finetune_train_acc_metric = torchmetrics.Accuracy().to(device)
-            finetune_precision_metric = torchmetrics.Precision().to(device)
-            finetune_recall_metric = torchmetrics.Recall().to(device)
-            finetune_f1_score_metric = torchmetrics.F1().to(device)
-            finetune_top5_acc_metric = torchmetrics.Accuracy(top_k=5).to(device)
+            finetune_train_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
+            finetune_precision_metric = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
+            finetune_recall_metric = torchmetrics.Recall(task="multiclass", num_classes=numGestures).to(device)
+            finetune_f1_score_metric = torchmetrics.F1Score(task="multiclass", num_classes=numGestures).to(device)
+            finetune_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures).to(device)
 
             # Initialize metrics for finetuning validation
-            finetune_val_acc_metric = torchmetrics.Accuracy().to(device)
-            finetune_val_precision_metric = torchmetrics.Precision().to(device)
-            finetune_val_recall_metric = torchmetrics.Recall().to(device)
-            finetune_val_f1_score_metric = torchmetrics.F1().to(device)
-            finetune_val_top5_acc_metric = torchmetrics.Accuracy(top_k=5).to(device)
+            finetune_val_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
+            finetune_val_precision_metric = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
+            finetune_val_recall_metric = torchmetrics.Recall(task="multiclass", num_classes=numGestures).to(device)
+            finetune_val_f1_score_metric = torchmetrics.F1Score(task="multiclass", num_classes=numGestures).to(device)
+            finetune_val_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures).to(device)
 
             for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
                 model.train()
@@ -1886,31 +1895,32 @@ else:
                 finetune_f1_score_metric.reset()
                 finetune_top5_acc_metric.reset()
 
-                for X_batch, Y_batch in tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False):
-                    X_batch = X_batch.to(device).to(torch.float32)
-                    Y_batch = Y_batch.to(device).to(torch.float32)
-                    Y_batch_long = torch.argmax(Y_batch, dim=1)
+                with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+                    for X_batch, Y_batch in t:
+                        X_batch = X_batch.to(device).to(torch.float32)
+                        Y_batch = Y_batch.to(device).to(torch.float32)
+                        Y_batch_long = torch.argmax(Y_batch, dim=1)
 
-                    optimizer.zero_grad()
-                    output = model(X_batch)
-                    if isinstance(output, dict):
-                        output = output['logits']
-                    loss = criterion(output, Y_batch)
-                    loss.backward()
-                    optimizer.step()
+                        optimizer.zero_grad()
+                        output = model(X_batch)
+                        if isinstance(output, dict):
+                            output = output['logits']
+                        loss = criterion(output, Y_batch)
+                        loss.backward()
+                        optimizer.step()
 
-                    train_loss += loss.item()
-                    finetune_train_acc_metric(output, Y_batch_long)
-                    finetune_precision_metric(output, Y_batch_long)
-                    finetune_recall_metric(output, Y_batch_long)
-                    finetune_f1_score_metric(output, Y_batch_long)
-                    finetune_top5_acc_metric(output, Y_batch_long)
+                        train_loss += loss.item()
+                        finetune_train_acc_metric(output, Y_batch_long)
+                        finetune_precision_metric(output, Y_batch_long)
+                        finetune_recall_metric(output, Y_batch_long)
+                        finetune_f1_score_metric(output, Y_batch_long)
+                        finetune_top5_acc_metric(output, Y_batch_long)
 
-                    if t.n % 10 == 0:
-                        t.set_postfix({
-                            "Batch Loss": loss.item(), 
-                            "Batch Acc": finetune_train_acc_metric.compute().item()
-                        })
+                        if t.n % 10 == 0:
+                            t.set_postfix({
+                                "Batch Loss": loss.item(), 
+                                "Batch Acc": finetune_train_acc_metric.compute().item()
+                            })
 
                 # Finetuning Validation
                 model.eval()
@@ -1952,42 +1962,48 @@ else:
                 finetune_val_top5_acc = finetune_val_top5_acc_metric.compute()
 
                 tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
-                confidence_levels = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
+                confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
 
                 print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
                 print(f"Train Accuracy: {finetune_train_acc:.4f} | Train Precision: {finetune_train_precision:.4f} | Train Recall: {finetune_train_recall:.4f} | Train F1: {finetune_train_f1_score:.4f} | Train Top-5 Acc: {finetune_train_top5_acc:.4f}")
                 print(f"Val Accuracy: {finetune_val_acc:.4f} | Val Precision: {finetune_val_precision:.4f} | Val Recall: {finetune_val_recall:.4f} | Val F1: {finetune_val_f1_score:.4f} | Val Top-5 Acc: {finetune_val_top5_acc:.4f}")
                 for fpr, tprs in tpr_results.items():
-                    print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+                    print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
                 for confidence_level, acc in confidence_levels.items():
-                    print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
+                    print(f"Val Accuracy at {confidence_level} confidence level: {acc:.4f}")
 
                 wandb.log({
-                    "Finetuning Epoch": epoch,
-                    "Train Loss": train_loss,
-                    "Train Acc": finetune_train_acc,
-                    "Train Precision": finetune_train_precision,
-                    "Train Recall": finetune_train_recall,
-                    "Train F1": finetune_train_f1_score,
-                    "Train Top-5 Acc": finetune_train_top5_acc,
-                    "Valid Loss": val_loss,
-                    "Valid Acc": finetune_val_acc,
-                    "Valid Precision": finetune_val_precision,
-                    "Valid Recall": finetune_val_recall,
-                    "Valid F1": finetune_val_f1_score,
-                    "Valid Top-5 Acc": finetune_val_top5_acc,
-                    "Learning Rate": optimizer.param_groups[0]['lr'], 
-                    **{f"TPR at {fpr}": tprs for fpr, tprs in tpr_results.items()}, 
-                    **{f"Accuracy at {confidence_level} confidence level": acc for confidence_level, acc in confidence_levels.items()}
+                    "train/Loss": train_loss,
+                    "train/Accuracy": train_acc,
+                    "train/Precision": train_precision,
+                    "train/Recall": train_recall,
+                    "train/F1 Score": train_f1_score,
+                    "train/Top-5 Accuracy": train_top5_acc,
+                    "train/Learning Rate": optimizer.param_groups[0]['lr'],
+                    "train/Epoch": epoch,
+
+                    "validation/Loss": val_loss,
+                    "validation/Accuracy": val_acc,
+                    "validation/Precision": val_precision,
+                    "validation/Recall": val_recall,
+                    "validation/F1 Score": val_f1_score,
+                    "validation/Top-5 Accuracy": val_top5_acc,
+
+                    # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
+                    **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
+                    **{f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()},
+                    **{f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
+
                 })
+
                 
         # Testing
         # Initialize metrics for testing
-        test_acc_metric = torchmetrics.Accuracy().to(device)
-        test_precision_metric = torchmetrics.Precision().to(device)
-        test_recall_metric = torchmetrics.Recall().to(device)
-        test_f1_score_metric = torchmetrics.F1().to(device)
-        test_top5_acc_metric = torchmetrics.Accuracy(top_k=5).to(device)
+        test_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
+        test_precision_metric = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
+        test_recall_metric = torchmetrics.Recall(task="multiclass", num_classes=numGestures).to(device)
+        test_f1_score_metric = torchmetrics.F1Score(task="multiclass", num_classes=numGestures).to(device)
+        test_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures).to(device)
 
         # Assuming model, criterion, device, and test_loader are defined
         if args.held_out_test:
@@ -2031,7 +2047,7 @@ else:
             test_f1_score = test_f1_score_metric.compute()
             test_top5_acc = test_top5_acc_metric.compute()
             tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, test_loader, device, numGestures)
-            confidence_levels = ml_utils.evaluate_confidence_thresholding(model, test_loader, device)
+            confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, test_loader, device)
 
             print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f} | Test Precision: {test_precision:.4f} | Test Recall: {test_recall:.4f} | Test F1 Score: {test_f1_score:.4f} | Test Top-5 Accuracy: {test_top5_acc:.4f}")
             for fpr, tprs in tpr_results.items():
@@ -2040,16 +2056,20 @@ else:
                 print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
 
             wandb.log({
-                "Test Loss": test_loss,
-                "Test Acc": test_acc,
-                "Test Precision": test_precision,
-                "Test Recall": test_recall,
-                "Test F1": test_f1_score,
-                "Test Top-5 Acc": test_top5_acc, 
-                **{f"TPR at {fpr}": tprs for fpr, tprs in tpr_results.items()}, 
-                **{f"Accuracy at {confidence_level} confidence level": acc for confidence_level, acc in confidence_levels.items()}
+                "test/Test Loss": test_loss,
+                "test/Test Acc": test_acc,  
+                "test/Test Precision": test_precision,
+                "test/Test Recall": test_recall,
+                "test/Test F1": test_f1_score,
+                "test/Test Top-5 Acc": test_top5_acc,
+
+                # **{f"tpr_at_fixed_fpr/Test TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
+                **{f"tpr_at_fixed_fpr/Average Test TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
+                **{f"confidence_level_accuracies/Test Accuracy at {confidence_level} confidence level": acc for confidence_level, acc in confidence_levels.items()},
+                **{f"proportion_above_confidence_threshold/Test Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
+
             })
-            
+
             # %% Confusion Matrix
             # Plot and log confusion matrix in wandb
             utils.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
