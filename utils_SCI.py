@@ -225,11 +225,9 @@ def getEMG_separateSessions(args):
 
         for group in range(4):
             subseq = emg[group][len(emg[group]) - 3]
-            global_min = np.min(subseq)
             total_elapsed = 0
             skipped = False
 
-            #while (np.max(subseq) != global_min):
             while(len(rep_inits[group]) < 10):
                 start = np.argmax(subseq)
                 subseq = subseq[start:]

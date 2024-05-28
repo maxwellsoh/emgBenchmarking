@@ -17,7 +17,6 @@ from tqdm import tqdm
 from scipy import io
 from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
 from scipy.signal import spectrogram, stft
-import pywt
 import fcwt
 
 fs = 2000 #Hz

@@ -69,10 +69,8 @@ def seed_worker(worker_id):
 def balance (restimulus):
     indices = []
     for x in range (len(restimulus)):
-        L = torch.chunk(restimulus[x], 2, dim=0)
-        if torch.equal(L[0], L[1]):
-            if (L[0][0] > 0 and L[0][0] < 7):
-                indices.append(x)
+        if len(torch.unique(restimulus[x])) == 1 and restimulus[x][0] > 0 and restimulus[x][0] < 7:
+            indices.append(x)
     return indices
 
 def contract(R, unfold=True):

@@ -33,7 +33,6 @@ from sklearn.metrics import accuracy_score, log_loss
 import torch.nn.functional as F
 from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 from semilearn.core.utils import send_model_cuda
-import VisualTransformer
 
 
 # Define a custom argument type for a list of integers
@@ -1522,10 +1521,7 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.train()
     
     if args.pretrain_and_finetune:
-<<<<<<< add_NinaproDB3
-=======
         print("Finetuning the model...")
->>>>>>> main
         run = wandb.init(name=wandb_runname+"_unlab_finetune", project=project_name)
         wandb.config.lr = args.learning_rate
         
