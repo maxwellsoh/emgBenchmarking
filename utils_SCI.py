@@ -17,6 +17,9 @@ from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.con
 import os
 from poly5_reader import Poly5Reader
 import mne
+import fcwt
+from scipy.signal import stft
+from tqdm import tqdm
 
 numGestures = 12
 fs = 2000.0 # Hz 
@@ -544,24 +547,24 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
     native_resnet_size = 224
 
     images = []
-    for i in range(len(emg)):
+    for i in tqdm(range(len(emg))):
         images.append(optimized_makeOneImage(emg[i], cmap, length, width, resize_length_factor, native_resnet_size))
 
     if turn_on_magnitude:
         images_magnitude = []
-        for i in range(len(emg)):
+        for i in tqdm(range(len(emg))):
             images_magnitude.append(optimized_makeOneMagnitudeImage(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max))
         images = np.concatenate((images, images_magnitude), axis=2)
 
     elif turn_on_spectrogram:
         images_spectrogram = []
-        for i in range(len(emg)):
+        for i in tqdm(range(len(emg))):
             images_spectrogram.append(optimized_makeOneSpectrogramImage(emg[i], length, width, resize_length_factor, native_resnet_size))
         images = images_spectrogram
     
     elif turn_on_cwt:
         images_cwt = []
-        for i in range(len(emg)):
+        for i in tqdm(range(len(emg))):
             images_cwt.append(optimized_makeOneCWTImage(emg[i], length, width, resize_length_factor, native_resnet_size))
         images = images_cwt
         
