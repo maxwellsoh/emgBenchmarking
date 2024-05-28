@@ -382,16 +382,12 @@ if exercises:
             subject_trials.append(emg[exercise_set][subject])
             subject_labels.append(labels[exercise_set][subject])
             if args.force_regression:
-                subject_forces.append(forces[exercise_set][subject])
-
-        # here, subject_trials/labels/forces[0] all have the same first dimension of 1147
+                subject_forces.append(forces[exercise_set][subject][:,:,0]) # take the first of the 500
 
         concatenated_trials = np.concatenate(subject_trials, axis=0)  # Concatenate trials across exercise sets
         if args.force_regression:
             # assuming here that no further conversion needed for forces 
             concatenated_forces = np.concatenate(subject_forces, axis=0)  # Concatenate forces across exercise sets
-
-        # here, concatenated_trials and concatenated_forces have the same first dimension of 1147
         
         total_number_labels = 0
         for i in range(len(subject_labels)):
@@ -414,7 +410,6 @@ if exercises:
         concatenated_labels = np.concatenate(labels_set, axis=0) # (TRIAL)
 
         if args.partial_dataset_ninapro:
-            print(f"concatenated_trials.shape: {concatenated_trials.shape}")
             indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
             concatenated_labels = concatenated_labels[indices_for_partial_dataset]
             concatenated_trials = concatenated_trials[indices_for_partial_dataset]
