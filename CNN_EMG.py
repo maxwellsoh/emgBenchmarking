@@ -793,6 +793,7 @@ else:
         print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
+    
     elif args.leave_one_session_out:
         total_number_of_sessions = 2 # all datasets used in our benchmark have at most 2 sessions but this can be changed using a variable from dataset-specific utils instead
         left_out_subject_last_session_index = (total_number_of_sessions - 1) * utils.num_subjects + leaveOut-1
@@ -1098,8 +1099,26 @@ else:
             print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
             print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
             
+    elif args.transfer_learning and utils.num_subjects == 1:
+        X_train = data[0]
+        Y_train = labels[0]
+        if args.cross_validation_for_time_series:
+            X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=args.proportion_transfer_learning_from_leftout_subject, shuffle=False)
+        else:
+            X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=args.proportion_transfer_learning_from_leftout_subject, shuffle=True)
+        X_train = torch.tensor(X_train).to(torch.float16)
+        Y_train = torch.tensor(Y_train).to(torch.float16)
+        X_validation = torch.tensor(X_validation).to(torch.float16)
+        Y_validation = torch.tensor(Y_validation).to(torch.float16)
+
+        print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_train:     ", Y_train.shape)
+        print("Size of X_validation:", X_validation.shape)
+        print("Size of Y_validation:", Y_validation.shape)
+
+    
     else: 
-        ValueError("Please specify the type of test you want to run")
+        raise ValueError("Please specify the type of test you want to run")
 
 model_name = args.model
 
