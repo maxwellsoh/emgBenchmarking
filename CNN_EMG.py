@@ -1099,12 +1099,15 @@ else:
             print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
             
     elif args.transfer_learning and utils.num_subjects == 1:
+
+        assert not args.pretrain_and_finetune, "Cannot pretrain and finetune with only one subject"
+
         X_train = data[0]
         Y_train = labels[0]
         if args.cross_validation_for_time_series:
-            X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=False)
+            X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=Y_train, shuffle=False)
         else:
-            X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=True)
+            X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=Y_train, shuffle=True)
         X_train = torch.tensor(X_train).to(torch.float16)
         Y_train = torch.tensor(Y_train).to(torch.float16)
         X_validation = torch.tensor(X_validation).to(torch.float16)
