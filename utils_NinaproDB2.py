@@ -167,7 +167,8 @@ def balance(restimulus):
     return indices
 
 def contract(R):
-    numGestures = R.max() + 1
+    numGestures = R.max() + 1 # account for rest
+    assert numGestures == 50 # recognizes that it's just B, C, and D 
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
     for x in range(len(R)):
@@ -215,10 +216,37 @@ def getEMG (args):
     emg = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['emg']).to(torch.float16)
     return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
 
-def getLabels (args):
-    n, exercise = args
+def make_gestures_sequential(balanced_restim, args):
+
+    possible_gestures = []
+    for x in range(len(balanced_restim)): 
+               
+        assert balanced_restim[x][0][0] == 0 or 40 <= balanced_restim[x][0][0] <= 50, "Not just exercise C"
+
+        value = balanced_restim[x][0][0]
+
+        if value != 0:
+            balanced_restim[x][0][0] = value - 40 
+        possible_gestures.append(value)
+
+    # print(f"Unique gestures: {np.unique(possible_gestures)}")
+    return balanced_restim
+    
+
+
+def getLabels (input):
+    n, exercise, args = input
     restim = getRestim(n, exercise)
-    return contract(restim[balance(restim)])
+    balanced_restim = restim[balance(restim)]
+    relabeled_restim = make_gestures_sequential(balanced_restim, args)
+
+    # so we should pass in args... its better to do here before we call contract because i think it would be annoying to go from one hot encoding back to the number then back to a new one hot encoding 
+
+    # balanced_restim[sample_number][0][0] would be the the gesture 
+    
+
+
+    return contract(relabeled_restim)
 
 def getForces(args):
     n, exercise = args

@@ -348,7 +348,7 @@ if exercises:
             emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
             emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
             
-            labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
+            labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
             labels.append(labels_async.get())
 
             if args.force_regression:
@@ -421,6 +421,9 @@ if exercises:
         # Convert to one hot encoding
         concatenated_labels = np.eye(np.max(concatenated_labels) + 1)[concatenated_labels] # (TRIAL, GESTURE)
 
+        # labels are assigned corrctly depending on which exercise set 
+        # scale down depending on which exercise set you're on
+
         # Append the concatenated trials to the new_emg list
         new_emg.append(concatenated_trials)
         new_labels.append(concatenated_labels)
@@ -431,6 +434,9 @@ if exercises:
     labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
     if args.force_regression:
         forces = [torch.from_numpy(forces_np) for forces_np in new_forces]
+
+
+    # 
 
 else: # Not exercises
     assert False, "entered Not exercises"
@@ -1066,7 +1072,7 @@ else:
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
                 if args.cross_validation_for_time_series:
                     X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
-                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=Y_validation, random_state=args.seed, shuffle=False, Y_is_force=args.force_regression)
+                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=labels_included, random_state=args.seed, shuffle=False, Y_is_force=args.force_regression)
                 else:
                     assert False, "entering not cross_validation_for_time_series"
                     # Split the validation data into train and validation subsets
