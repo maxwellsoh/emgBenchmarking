@@ -321,7 +321,6 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
     
 if exercises:
     emg = []
@@ -1725,7 +1724,13 @@ else:
                     "validation/Macro Top-5 Accuracy": val_macro_top5_acc.compute(),
                     "validation/Micro Top-5 Accuracy": val_micro_top5_acc.compute(),
                     "train/Learning Rate": optimizer.param_groups[0]['lr'],
-                    "train/Epoch": epoch
+                    "train/Epoch": epoch,
+                    "validation/Epoch": epoch,
+                    # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
+                    **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
+                    **{f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()},
+                    **{f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
+
                 })
 
                 torch.save(model.state_dict(), model_filename)
@@ -2019,6 +2024,8 @@ else:
                 # Calculate average metrics
                 train_loss /= len(finetune_loader)
                 val_loss /= len(val_loader)
+                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
 
                 print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
                 print(f"Train Metrics: Macro Acc: {finetune_train_macro_acc_metric.compute().item():.4f} |",
@@ -2054,7 +2061,11 @@ else:
                     "validation/Macro Top-5 Accuracy": finetune_val_macro_top5_acc_metric.compute(),
                     "validation/Micro Top-5 Accuracy": finetune_val_micro_top5_acc_metric.compute(),
                     "train/Epoch": epoch,
-                    "train/Learning Rate": optimizer.param_groups[0]['lr']
+                    "train/Learning Rate": optimizer.param_groups[0]['lr'],
+                    # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
+                    **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
+                    **{f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()},
+                    **{f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
                 })
 
             torch.save(model.state_dict(), model_filename)
