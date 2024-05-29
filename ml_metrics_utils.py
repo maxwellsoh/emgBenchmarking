@@ -24,6 +24,8 @@ def evaluate_model_tpr_at_fpr(model, loader, device, num_classes, fpr_targets=[0
         for X_batch, Y_batch in loader:
             X_batch = X_batch.to(device)
             outputs = model(X_batch)
+            if isinstance(outputs, dict):
+                outputs = outputs['logits']
             probs = softmax(outputs).cpu().numpy()  # Get class probabilities
             predictions.append(probs)
             true_labels.append(Y_batch.cpu().numpy())
@@ -58,6 +60,8 @@ def evaluate_confidence_thresholding(model, loader, device, thresholds=[0.5, 0.9
             X_batch = X_batch.to(device)
             Y_batch = Y_batch.to(device)
             outputs = model(X_batch)
+            if isinstance(outputs, dict):
+                outputs = outputs['logits']
             probs = softmax(outputs)
             max_probs, preds = torch.max(probs, dim=1)
 
@@ -157,6 +161,5 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
 
     # Confusion Matrix
     # Plot and log confusion matrix in wandb
-    # utils.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
 

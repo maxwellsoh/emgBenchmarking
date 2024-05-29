@@ -995,10 +995,10 @@ else:
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
 
+        proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
         if args.transfer_learning: # while in leave one subject out
             proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
             proportion_unlabeled_of_proportion_to_keep_of_leftout = args.proportion_unlabeled_data_from_leftout_subject
-            proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
             
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
                 if args.train_test_split_for_time_series:
@@ -1561,7 +1561,18 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.scheduler = None
     
     semilearn_algorithm.train()
-    
+
+    if args.model == 'vit_tiny_patch2_32':
+        resize_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
+    else:
+        resize_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+    test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
+    criterion = nn.CrossEntropyLoss()
+    wandb.init(name=wandb_runname+"_unlab_test", project=project_name)
+    ml_utils.evaluate_model_on_test_set(semilearn_algorithm.model, test_loader, device, numGestures, criterion, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    wandb.finish()
+
     if args.pretrain_and_finetune:
         print("Finetuning the model...")
         run = wandb.init(name=wandb_runname+"_unlab_finetune", project=project_name)
@@ -1590,6 +1601,10 @@ if args.turn_on_unlabeled_domain_adaptation:
 
         semilearn_algorithm.loader_dict['eval'] = validation_loader
         semilearn_algorithm.train()
+
+        wandb.init(name=wandb_runname+"_unlab_finetune_test", project=project_name)
+        ml_utils.evaluate_model_on_test_set(semilearn_algorithm.model, test_loader, device, numGestures, criterion, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+        wandb.finish()
 
 else: 
     if args.model in ['MLP', 'SVC', 'RF']:
