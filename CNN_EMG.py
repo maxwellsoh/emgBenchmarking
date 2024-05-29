@@ -109,7 +109,7 @@ parser.add_argument('--target_normalize', type=float, help='use a poportion of l
 # Test with transfer learning by using some data from the validation dataset
 parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
 # Add argument for cross validation for time series
-parser.add_argument('--cross_validation_for_time_series', type=utils.str2bool, help='whether or not to use cross validation for time series. Set to False by default.', default=False)
+parser.add_argument('--train_test_split_for_time_series', type=utils.str2bool, help='whether or not to use data split for time series. Set to False by default.', default=False)
 # Add argument for proportion of left-out-subject data to use for transfer learning
 parser.add_argument('--proportion_transfer_learning_from_leftout_subject', type=float, help='proportion of left-out-subject data to use for transfer learning. Set to 0.25 by default.', default=0.25)
 # Add argument for amount for reducing number of data to generate for transfer learning
@@ -219,6 +219,8 @@ elif (args.dataset.lower() == "sci"):
     print(f"The dataset being tested is SCI")
     project_name = 'emg_benchmarking_sci'
     args.dataset = 'sci'
+    assert not args.transfer_learning, "Transfer learning not implemented for SCI dataset"
+    assert not args.leave_one_subject_out, "Leave one subject out not implemented for SCI dataset"
     
 
 elif (args.dataset.lower() == "ozdemiremg" or args.dataset.lower() == "ozdemir_emg"):
@@ -281,7 +283,7 @@ print(f"The value of --reduced_training_data_size is {args.reduced_training_data
 print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_out_randomly}")
 print(f"The value of --target_normalize is {args.target_normalize}")
 print(f"The value of --transfer_learning is {args.transfer_learning}")
-print(f"The value of --cross_validation_for_time_series is {args.cross_validation_for_time_series}")
+print(f"The value of --train_test_split_for_time_series is {args.train_test_split_for_time_series}")
 print(f"The value of --proportion_transfer_learning_from_leftout_subject is {args.proportion_transfer_learning_from_leftout_subject}")
 print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
 print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
@@ -509,7 +511,7 @@ if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normali
     del emg_reshaped
 
 else: # Not leave n subjects out randomly
-    if (args.held_out_test): # should be deprecated and deleted
+    if (args.held_out_test): # can probably be deprecated and deleted
         if args.turn_on_kfold:
             skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
             
@@ -819,10 +821,10 @@ else:
             if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices:
                 if args.proportion_data_from_training_subjects<1.0:
                     X_train_temp, _, Y_train_temp, _ = tts.train_test_split(
-                        X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=Y_train_temp, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+                        X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=Y_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                 if args.proportion_unlabeled_data_from_training_subjects>0:
                     X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled = tts.train_test_split(
-                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                     X_pretrain.append(np.array(X_pretrain_labeled))
                     Y_pretrain.append(np.array(Y_pretrain_labeled))
                     X_pretrain_unlabeled_list.append(np.array(X_pretrain_unlabeled))
@@ -833,7 +835,7 @@ else:
             elif i in left_out_subject_first_n_sessions_indices:
                 if args.proportion_unlabeled_data_from_leftout_subject>0:
                     X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled = tts.train_test_split(
-                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                     X_finetune.append(np.array(X_finetune_labeled))
                     Y_finetune.append(np.array(Y_finetune_labeled))
                     X_finetune_unlabeled_list.append(np.array(X_finetune_unlabeled))
@@ -967,15 +969,15 @@ else:
                 proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
                 current_data, _, current_labels, _ = model_selection.train_test_split(current_data, current_labels, 
                                                                                         train_size=proportion_to_keep, stratify=current_labels, 
-                                                                                        random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+                                                                                        random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                 
             if args.proportion_data_from_training_subjects<1.0:
                 current_data, _, current_labels, _ = tts.train_test_split(
-                    current_data, current_labels, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+                    current_data, current_labels, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                 
             if args.proportion_unlabeled_data_from_training_subjects>0:
                 X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
-                    current_data, current_labels, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+                    current_data, current_labels, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                 current_data = X_train_labeled
                 current_labels = Y_train_labeled
 
@@ -999,7 +1001,7 @@ else:
             proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
             
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
-                if args.cross_validation_for_time_series:
+                if args.train_test_split_for_time_series:
                     X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
                         X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=Y_validation, random_state=args.seed, shuffle=False)
                 else:
@@ -1013,7 +1015,7 @@ else:
                 Y_train_partial_leftout_subject = torch.tensor([])
                 
             if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
-                if args.cross_validation_for_time_series:
+                if args.train_test_split_for_time_series:
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
                         X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=False)
@@ -1095,13 +1097,13 @@ else:
             print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
             print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
             
-    elif args.transfer_learning and utils.num_subjects == 1:
+    elif utils.num_subjects == 1:
 
         assert not args.pretrain_and_finetune, "Cannot pretrain and finetune with only one subject"
 
         X_train = data[0]
         Y_train = labels[0]
-        if args.cross_validation_for_time_series:
+        if args.train_test_split_for_time_series:
             X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=Y_train, shuffle=False)
         else:
             X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=Y_train, shuffle=True)
@@ -1117,7 +1119,11 @@ else:
         raise ValueError("Please specify the type of test you want to run")
 
 # get X_test and Y_test from splitting validation 50-50 with stratify
-X_test, X_validation, Y_test, Y_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation, random_state=args.seed, shuffle=False)
+if args.train_test_split_for_time_series:
+    X_test, X_validation, Y_test, Y_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation, random_state=args.seed, shuffle=False)
+else:
+    X_test, X_validation, Y_test, Y_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation, random_state=args.seed, shuffle=True)
+
 X_test = torch.from_numpy(X_test).to(torch.float16)
 Y_test = torch.from_numpy(Y_test).to(torch.float16)
 X_validation = torch.from_numpy(X_validation).to(torch.float16)
@@ -1139,9 +1145,9 @@ else:
 def ceildiv(a, b):
         return -(a // -b)
     
-if args.turn_on_unlabeled_domain_adaptation:
+if args.turn_on_unlabeled_domain_adaptation: # set up datasets and config for unlabeled domain adaptation
     current_date_and_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    assert (args.transfer_learning and args.cross_validation_for_time_series) or args.leave_one_session_out, \
+    assert (args.transfer_learning and args.train_test_split_for_time_series) or args.leave_one_session_out, \
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
     
     semilearn_config_dict = {
@@ -1282,13 +1288,15 @@ else:
         num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
         model.fc = nn.Linear(num_ftrs, numGestures)  # Replace with a new linear layer
     elif args.model == 'convnext_tiny_custom':
-        # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
         class LayerNorm2d(nn.LayerNorm):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 x = x.permute(0, 2, 3, 1)
                 x = torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
                 x = x.permute(0, 3, 1, 2)
                 return x
+            
+        # Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
+
 
         n_inputs = 768
         hidden_size = 128 # default is 2048
@@ -1345,7 +1353,7 @@ class CustomDataset(Dataset):
             x = self.transform(x)
         return x, y
 
-if not args.turn_on_unlabeled_domain_adaptation:
+if not args.turn_on_unlabeled_domain_adaptation: # set up datasets, loaders, schedulers, and optimizer
     if args.model not in ['MLP', 'SVC', 'RF']:
         num = 0
         for name, param in model.named_parameters():
@@ -1368,9 +1376,8 @@ if not args.turn_on_unlabeled_domain_adaptation:
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
     val_dataset = CustomDataset(X_validation, Y_validation, transform=resize_transform)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
-    if (args.held_out_test):
-        test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
+    test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -1438,7 +1445,7 @@ if args.load_few_images:
 if args.transfer_learning:
     wandb_runname += '_tran-learn'
     wandb_runname += '-prop-' + str(args.proportion_transfer_learning_from_leftout_subject)
-if args.cross_validation_for_time_series:   
+if args.train_test_split_for_time_series:   
     wandb_runname += '_cv-for-ts'
 if args.reduce_data_for_transfer_learning != 1:
     wandb_runname += '_red-data-for-tran-learn-' + str(args.reduce_data_for_transfer_learning)
@@ -1527,14 +1534,12 @@ X_train = torch.from_numpy(X_train).to(torch.float16) if isinstance(X_train, np.
 Y_train = torch.from_numpy(Y_train).to(torch.float16) if isinstance(Y_train, np.ndarray) else Y_train
 X_validation = torch.from_numpy(X_validation).to(torch.float16) if isinstance(X_validation, np.ndarray) else X_validation
 Y_validation = torch.from_numpy(Y_validation).to(torch.float16) if isinstance(Y_validation, np.ndarray) else Y_validation
-if args.held_out_test:
-    X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
-    Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
+X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
+Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
 
-if args.held_out_test:
-    # Plot and log images
-    utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-    utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+# Plot and log images
+utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
 utils.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
 utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
@@ -1744,8 +1749,7 @@ else:
                 torch.save(model.state_dict(), model_filename)
                 wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
-
-        else:
+        else: # SVC or RF
             X_train, Y_train = get_data_from_loader(train_loader)
             X_val, Y_val = get_data_from_loader(val_loader)
             # X_test, Y_test = get_data_from_loader(test_loader)
@@ -1914,13 +1918,14 @@ else:
                     "train/Epoch": epoch,
 
                     "validation/Loss": val_loss,
-                    "validation/Accuracy": val_macro_acc,
-                    "validation/Precision": val_macro_precision,
-                    "validation/Recall": val_macro_recall,
-                    "validation/F1 Score": val_macro_f1_score,
-                    "validation/Top-5 Accuracy": val_macro_top5_acc,
+                    "validation/Macro Accuracy": val_macro_acc,
+                    "validation/Macro Precision": val_macro_precision,
+                    "validation/Macro Recall": val_macro_recall,
+                    "validation/Macro F1 Score": val_macro_f1_score,
+                    "validation/Macro Top-5 Accuracy": val_macro_top5_acc,
                     "validation/Micro Accuracy": val_micro_acc,
                     "validation/Micro Top-5 Accuracy": val_micro_top5_acc,
+                    "validation/Epoch": epoch,
 
                     # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
                     **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
@@ -1933,8 +1938,57 @@ else:
         wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
         if args.pretrain_and_finetune:
+            ### Finish the current run and start a new run for finetuning
+            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime)
+
+            model.eval()
+            with torch.no_grad():
+                test_predictions = []
+                for X_batch, Y_batch in tqdm(test_loader, desc="Test Batch Loading for Confusion Matrix"):
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    outputs = model(X_batch)
+                    if isinstance(outputs, dict):
+                        outputs = outputs['logits']
+                    preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+                    test_predictions.extend(preds)
+
+            utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
+
+            torch.cuda.empty_cache()  # Clear cache if needed
+
+            model.eval()
+            with torch.no_grad():
+                validation_predictions = []
+                for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading for Confusion Matrix"):
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    outputs = model(X_batch)
+                    if isinstance(outputs, dict):
+                        outputs = outputs['logits']
+                    preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+                    validation_predictions.extend(preds)
+
+            utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+
+            # Load training in smaller batches for memory purposes
+            torch.cuda.empty_cache()  # Clear cache if needed
+
+            model.eval()
+            train_loader_unshuffled = DataLoader(train_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
+            with torch.no_grad():
+                train_predictions = []
+                for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading for Confusion Matrix"):
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    outputs = model(X_batch)
+                    if isinstance(outputs, dict):
+                            outputs = outputs['logits']
+                    preds = torch.argmax(outputs, dim=1)
+                    train_predictions.extend(preds.cpu().detach().numpy())
+
+            utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
             run.finish()
-            run = wandb.init(name=wandb_runname+"_finetune", project=project_name)
+
+            ### Initiate new logging of finetuning phase
+            run = wandb.init(name=wandb_runname+"_finetune", project=project_name) 
             num_epochs = args.finetuning_epochs
             # train more on fine tuning dataset
             finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
@@ -1970,6 +2024,8 @@ else:
                 finetune_train_macro_top5_acc_metric.reset()
                 finetune_train_micro_acc_metric.reset()
                 finetune_train_micro_top5_acc_metric.reset()
+
+                print()
 
                 with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False) as t:
                     for X_batch, Y_batch in t:
@@ -2038,16 +2094,16 @@ else:
                 print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
                 print(f"Train Metrics: Macro Acc: {finetune_train_macro_acc_metric.compute().item():.4f} |",
                     f"Micro Acc: {finetune_train_micro_acc_metric.compute().item():.4f} |",
-                    f"Precision: {finetune_train_macro_precision_metric.compute().item():.4f} |",
-                    f"Recall: {finetune_train_macro_recall_metric.compute().item():.4f} |",
-                    f"F1: {finetune_train_macro_f1_score_metric.compute().item():.4f} |",
+                    f"Macro Precision: {finetune_train_macro_precision_metric.compute().item():.4f} |",
+                    f"Macro Recall: {finetune_train_macro_recall_metric.compute().item():.4f} |",
+                    f"Macro F1: {finetune_train_macro_f1_score_metric.compute().item():.4f} |",
                     f"Macro Top-5 Acc: {finetune_train_macro_top5_acc_metric.compute().item():.4f} |",
                     f"Micro Top-5 Acc: {finetune_train_micro_top5_acc_metric.compute().item():.4f}")
                 print(f"Val Metrics: Macro Acc: {finetune_val_macro_acc_metric.compute().item():.4f} |",
                       f"Micro Acc: {finetune_val_micro_acc_metric.compute().item():.4f} |", 
-                      f"Precision: {finetune_val_macro_precision_metric.compute().item():.4f} |",
-                      f"Recall: {finetune_val_macro_recall_metric.compute().item():.4f} |",
-                      f"F1: {finetune_val_macro_f1_score_metric.compute().item():.4f} |",
+                      f"Macro Precision: {finetune_val_macro_precision_metric.compute().item():.4f} |",
+                      f"Macro Recall: {finetune_val_macro_recall_metric.compute().item():.4f} |",
+                      f"Macro F1: {finetune_val_macro_f1_score_metric.compute().item():.4f} |",
                       f"Macro Top-5 Acc: {finetune_val_macro_top5_acc_metric.compute().item():.4f} |"
                       f"Micro Top-5 Acc: {finetune_val_micro_top5_acc_metric.compute().item():.4f}")
 
@@ -2079,101 +2135,30 @@ else:
             torch.save(model.state_dict(), model_filename)
             wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
-                
-        # Testing
-        # Initialize metrics for testing with macro and micro averaging
-        test_macro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="macro").to(device)
-        test_macro_precision_metric = torchmetrics.Precision(task="multiclass", num_classes=numGestures, average="macro").to(device)
-        test_macro_recall_metric = torchmetrics.Recall(task="multiclass", num_classes=numGestures, average="macro").to(device)
-        test_macro_f1_score_metric = torchmetrics.F1Score(task="multiclass", num_classes=numGestures, average="macro").to(device)
-        test_macro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device)
-        test_micro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device)
-        test_micro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device)
+            # Evaluate the model on the test set
+            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime)
 
-        # Assuming model, criterion, device, and test_loader are defined
-        if args.held_out_test:
-            model.eval()
-            test_loss = 0.0
+        torch.cuda.empty_cache()  # Clear cache if needed
 
-            # Reset test metrics
-            test_macro_acc_metric.reset()
-            test_macro_precision_metric.reset()
-            test_macro_recall_metric.reset()
-            test_macro_f1_score_metric.reset()
-            test_macro_top5_acc_metric.reset()
-            test_micro_acc_metric.reset()
-            test_micro_top5_acc_metric.reset()
+        model.eval()
+        with torch.no_grad():
+            test_predictions = []
+            for X_batch, Y_batch in tqdm(test_loader, desc="Test Batch Loading for Confusion Matrix"):
+                X_batch = X_batch.to(device).to(torch.float32)
+                outputs = model(X_batch)
+                if isinstance(outputs, dict):
+                    outputs = outputs['logits']
+                preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+                test_predictions.extend(preds)
 
-            pred = []
-            true = []
+        utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
 
-            with torch.no_grad():
-                for X_batch, Y_batch in test_loader:
-                    X_batch = X_batch.to(device).to(torch.float32)
-                    Y_batch = Y_batch.to(device).to(torch.float32)
-                    Y_batch_long = torch.argmax(Y_batch, dim=1)
-
-                    output = model(X_batch)
-                    if isinstance(output, dict):
-                        output = output['logits']
-                    pred.extend(torch.argmax(output, dim=1).cpu().detach().numpy())
-                    true.extend(Y_batch_long.cpu().detach().numpy())
-
-                    test_loss += criterion(output, Y_batch).item()
-                    test_macro_acc_metric(output, Y_batch_long)
-                    test_macro_precision_metric(output, Y_batch_long)
-                    test_macro_recall_metric(output, Y_batch_long)
-                    test_macro_f1_score_metric(output, Y_batch_long)
-                    test_macro_top5_acc_metric(output, Y_batch_long)
-                    test_micro_acc_metric(output, Y_batch_long)
-                    test_micro_top5_acc_metric(output, Y_batch_long)
-
-            # Calculate average loss and metrics
-            test_loss /= len(test_loader)
-            test_macro_acc = test_macro_acc_metric.compute()
-            test_macro_precision = test_macro_precision_metric.compute()
-            test_macro_recall = test_macro_recall_metric.compute()
-            test_macro_f1_score = test_macro_f1_score_metric.compute()
-            test_macro_top5_acc = test_macro_top5_acc_metric.compute()
-            test_micro_acc = test_micro_acc_metric.compute()
-            test_micro_top5_acc = test_micro_top5_acc_metric.compute()
-            tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, test_loader, device, numGestures)
-            confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, test_loader, device)
-
-            print(f"Test Loss: {test_loss:.4f} | Test Macro Accuracy: {test_macro_acc:.4f} | Test Micro Accuracy: {test_micro_acc:.4f}")
-            print(f"Test Macro Precision: {test_macro_precision:.4f} | Test Macro Recall: {test_macro_recall:.4f} | Test Macro F1 Score: {test_macro_f1_score:.4f} | Test Macro Top-5 Accuracy: {test_macro_top5_acc:.4f}")
-            print(f"Test Micro Top-5 Accuracy: {test_micro_top5_acc:.4f}")
-            # for fpr, tprs in tpr_results.items():
-            #     print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
-            # for confidence_level, acc in confidence_levels.items():
-            #     print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
-
-            wandb.log({
-                "test/Test Loss": test_loss,
-                "test/Test Macro Accuracy": test_macro_acc,
-                "test/Test Micro Accuracy": test_micro_acc,
-                "test/Test Macro Precision": test_macro_precision,
-                "test/Test Macro Recall": test_macro_recall,
-                "test/Test Macro F1": test_macro_f1_score,
-                "test/Test Macro Top-5 Accuracy": test_macro_top5_acc,
-                "test/Test Micro Top-5 Accuracy": test_micro_top5_acc,
-                # **{f"tpr_at_fixed_fpr/Test TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
-                **{f"tpr_at_fixed_fpr/Average Test TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
-                **{f"confidence_level_accuracies/Test Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()},
-                **{f"proportion_above_confidence_threshold/Test Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
-            })
-
-            # %% Confusion Matrix
-            # Plot and log confusion matrix in wandb
-            utils.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-
-        # Load validation in smaller batches for memory purposes
         torch.cuda.empty_cache()  # Clear cache if needed
 
         model.eval()
         with torch.no_grad():
             validation_predictions = []
-            for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading"):
+            for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading for Confusion Matrix"):
                 X_batch = X_batch.to(device).to(torch.float32)
                 outputs = model(X_batch)
                 if isinstance(outputs, dict):
@@ -2190,7 +2175,7 @@ else:
         train_loader_unshuffled = DataLoader(train_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
         with torch.no_grad():
             train_predictions = []
-            for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading"):
+            for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading for Confusion Matrix"):
                 X_batch = X_batch.to(device).to(torch.float32)
                 outputs = model(X_batch)
                 if isinstance(outputs, dict):
