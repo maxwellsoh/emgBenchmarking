@@ -8,10 +8,12 @@ def train_test_split(
     random_state=None,
     shuffle=True,
     stratify=None,
+    Y_is_force=False,
 ): 
     if shuffle==False and not stratify is None:
         X_train_set = arrays[0]
         Y_train_set = arrays[1]
+        # should also test what stratify looks like here 
 
         if train_size is None and test_size is None:
             train_size = 0.75
@@ -60,8 +62,9 @@ def train_test_split(
         y_train = np.concatenate(y_train)
         y_test = np.concatenate(y_test)
         
+        # should only be done if Y_train_set is labels 
         # if Y_train_set is one-hot-encoded, turn results into one-hot-encoded
-        if Y_train_set.shape[1] != 1:
+        if not Y_is_force and Y_train_set.shape[1] != 1:
             y_train = np.eye(len(np.unique(y_train)))[y_train]
             y_test = np.eye(len(np.unique(y_test)))[y_test]
         

@@ -165,6 +165,8 @@ elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_
     exercises = True
     if args.leave_one_session_out:
         ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
+    if args.force_regression:
+        assert args.exercises == [3], "Regression only implemented for exercise 3"
     args.dataset = 'ninapro-db2'
 
 elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_db5"):
@@ -335,10 +337,7 @@ if exercises:
 
     if args.partial_dataset_ninapro:
         if args.dataset == "ninapro-db2":
-            if args.force_regression:
-                args.exercises = [3] # force data only for exercise 3 
-            else:
-                args.exercises = [1]
+            args.exercises = [1]
         elif args.dataset == "ninapro-db5":
             args.exercises = [2]
         elif args.dataset == "ninapro-db3":
@@ -357,8 +356,6 @@ if exercises:
                 forces_async = pool.map_async(utils.getForces, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
                 forces.append(forces_async.get())
                 
-                
-            
             assert len(emg[-1]) == len(labels[-1]), "Number of trials for EMG and labels do not match"
             if args.force_regression:
                 assert len(emg[-1]) == len(forces[-1]), "Number of trials for EMG and forces do not match"
@@ -424,7 +421,6 @@ if exercises:
         # Convert to one hot encoding
         concatenated_labels = np.eye(np.max(concatenated_labels) + 1)[concatenated_labels] # (TRIAL, GESTURE)
 
-        # here, disrepancy. concatenated_trials has first dimension of 115, but concatenaed_forces has first dimension still of 1147
         # Append the concatenated trials to the new_emg list
         new_emg.append(concatenated_trials)
         new_labels.append(concatenated_labels)
@@ -512,6 +508,7 @@ else:
 leaveOutIndices = []
 # Generate scaler for normalization
 if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # will have to run and test this again, or just remove
+    assert False, "entered leave n_subjects_out_randomly != 0"
     leaveOut = args.leave_n_subjects_out_randomly
     print(f"Leaving out {leaveOut} subjects randomly")
     # subject indices to leave out randomly
@@ -546,6 +543,7 @@ if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normali
 
 else: # Not leave n subjects out randomly
     if (args.held_out_test): # should be deprecated and deleted
+        assert False, "entered held_out_test"
         if args.turn_on_kfold:
             skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
             
@@ -630,6 +628,7 @@ else: # Not leave n subjects out randomly
             del emg_reshaped
 
     elif (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # Running LOSO standardization
+        assert False, "entered not turn_off_scaler_normalization"
         emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
         # s = preprocessing.StandardScaler().fit(emg_in)
         global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
@@ -769,6 +768,7 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
         data += [images]
         
 if args.load_unlabeled_data_jehan:
+    assert False, "entering load_unlabeled_data_jehan"
     unlabeled_images = utils.getImages(unlabeled_online_data, scaler, length, width,
                                                 turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize,
                                                 turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value,
@@ -779,6 +779,7 @@ if args.load_unlabeled_data_jehan:
     del unlabeled_images, unlabeled_online_data
 
 if args.leave_n_subjects_out_randomly != 0:
+    assert False, "entered leave_n_subjects_out_randomly != 0"
     
     # Instead of the below code, leave n subjects out randomly to be used as the 
     # validation set and the rest as the training set using leaveOutIndices
@@ -804,6 +805,7 @@ if args.leave_n_subjects_out_randomly != 0:
 
 else: 
     if args.held_out_test:
+        assert False, "entering held_out_test"
         combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
         combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
         X_train = combined_images[train_indices]
@@ -830,6 +832,7 @@ else:
         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
     
     elif args.leave_one_session_out:
+        assert False, "entering leave_one_session_out"
         total_number_of_sessions = 2 # all datasets used in our benchmark have at most 2 sessions but this can be changed using a variable from dataset-specific utils instead
         left_out_subject_last_session_index = (total_number_of_sessions - 1) * utils.num_subjects + leaveOut-1
         left_out_subject_first_n_sessions_indices = [i for i in range(total_number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
@@ -982,15 +985,31 @@ else:
         
     elif args.leave_one_subject_out: # Running LOSO rather than leave one session out
         if args.reduce_training_data_size:
+            assert False, "entering reduce_training_data_size"
             reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
 
-        X_validation = np.array(data[leaveOut-1])
-        Y_validation = np.array(labels[leaveOut-1])
+        # Use EMG data to predict force data
+        if args.force_regression: 
+            X_validation = np.array(data[leaveOut-1])
+            Y_validation = np.array(forces[leaveOut-1])
 
+            labels_included = np.array(labels[leaveOut-1]) # needed for stratify
+
+        # Use EMG data to classify gestures     
+        else: 
+            X_validation = np.array(data[leaveOut-1])
+            Y_validation = np.array(labels[leaveOut-1])
+
+            labels_included = Y_validation # needed for stratify
+
+        # X_validation.shape = (115, 3, 12, 224) 
+        # Y_validation.shape = (115, 56)
+            
         X_train_list = []
         Y_train_list = []
 
         if args.proportion_unlabeled_data_from_training_subjects>0:
+            assert False, "entering proportion_unlabeled_data_from_training_subjects>0"
             X_train_unlabeled_list = []
             Y_train_unlabeled_list = []
         
@@ -1001,16 +1020,20 @@ else:
             current_labels = np.array(labels[i])
 
             if args.reduce_training_data_size:
+                assert False, "entering reduce_training_data_size"
                 proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
                 current_data, _, current_labels, _ = model_selection.train_test_split(current_data, current_labels, 
                                                                                         train_size=proportion_to_keep, stratify=current_labels, 
                                                                                         random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                 
             if args.proportion_data_from_training_subjects<1.0:
+                assert False, "entering proportion_data_from_training_subjects<1.0"
                 current_data, _, current_labels, _ = tts.train_test_split(
                     current_data, current_labels, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                 
             if args.proportion_unlabeled_data_from_training_subjects>0:
+                assert False, "entering proportion_unlabeled_data_from_training_subjects>0"
+                
                 X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
                     current_data, current_labels, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                 current_data = X_train_labeled
@@ -1025,10 +1048,15 @@ else:
         X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
         Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
         if args.proportion_unlabeled_data_from_training_subjects>0:
+            assert False, "entering proportion_unlabeled_data_from_training_subjects>0"
             X_train_unlabeled = torch.from_numpy(np.concatenate(X_train_unlabeled_list, axis=0)).to(torch.float16)
             Y_train_unlabeled = torch.from_numpy(np.concatenate(Y_train_unlabeled_list, axis=0)).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        labels_included = torch.from_numpy(labels_included).to(torch.float16)
+
+        # X_validation.shape = torch.Size([115, 3, 12, 224])
+        # Y_validation.shape = torch.Size([115, 6])
 
         if args.transfer_learning: # while in leave one subject out
             proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
@@ -1038,18 +1066,21 @@ else:
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
                 if args.cross_validation_for_time_series:
                     X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
-                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=Y_validation, random_state=args.seed, shuffle=False)
+                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=Y_validation, random_state=args.seed, shuffle=False, Y_is_force=args.force_regression)
                 else:
+                    assert False, "entering not cross_validation_for_time_series"
                     # Split the validation data into train and validation subsets
                     X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
                         X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=Y_validation, random_state=args.seed, shuffle=True)
             else:
+                assert False, "entering not proportion_to_keep_of_leftout_subject_for_training > 0.0"
                 X_validation_partial_leftout_subject = X_validation
                 Y_validation_partial_leftout_subject = Y_validation
                 X_train_partial_leftout_subject = torch.tensor([])
                 Y_train_partial_leftout_subject = torch.tensor([])
                 
             if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
+                assert False, "entering turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0"
                 if args.cross_validation_for_time_series:
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
@@ -1060,6 +1091,7 @@ else:
                         X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=True)
             
             if args.load_unlabeled_data_jehan:
+                assert False, "entering load_unlabeled_data_jehan"
                 if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
                     X_train_unlabeled_partial_leftout_subject = np.concatenate([X_train_unlabeled_partial_leftout_subject, unlabeled_data], axis=0)
                     Y_train_unlabeled_partial_leftout_subject = np.concatenate([Y_train_unlabeled_partial_leftout_subject, np.zeros((unlabeled_data.shape[0], utils.numGestures))], axis=0)
@@ -1081,6 +1113,7 @@ else:
                         Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
 
             else: # unlabeled domain adaptation
+                assert False, "entering args.turn_on_unlabeled_domain_adaptation"
                 if proportion_unlabeled_of_training_subjects>0:
                     X_train = torch.tensor(X_train)
                     Y_train = torch.tensor(Y_train)
