@@ -1663,6 +1663,8 @@ else:
                 train_macro_top5_acc = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device)
                 train_micro_acc = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device)
                 train_micro_top5_acc = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device)
+                train_macro_auroc = torchmetrics.AUROC(task="multiclass", num_classes=numGestures, average="macro").to(device)
+                train_macro_auprc = torchmetrics.AveragePrecision(task="multiclass", num_classes=numGestures, average="macro").to(device)
 
                 train_loss = 0.0
                 with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
@@ -1684,6 +1686,8 @@ else:
                         train_macro_top5_acc(output, Y_batch)
                         train_micro_acc(output, Y_batch)
                         train_micro_top5_acc(output, Y_batch)
+                        train_macro_auroc(output, Y_batch)
+                        train_macro_auprc(output, Y_batch)
 
                         if t.n % 10 == 0:
                             t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": train_micro_acc.compute().item()})
@@ -1700,6 +1704,11 @@ else:
                 val_macro_top5_acc = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device)
                 val_micro_acc = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device)
                 val_micro_top5_acc = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device)
+                val_macro_auroc = torchmetrics.AUROC(task="multiclass", num_classes=numGestures, average="macro").to(device)
+                val_macro_auprc = torchmetrics.AveragePrecision(task="multiclass", num_classes=numGestures, average="macro").to(device)
+
+                all_val_outputs = []
+                all_val_labels = []
 
                 val_loss = 0.0
                 with torch.no_grad():
@@ -1717,21 +1726,37 @@ else:
                         val_micro_acc(output, Y_batch)
                         val_micro_top5_acc(output, Y_batch)
 
+                        all_val_outputs.append(output)
+                        all_val_labels.append(Y_batch)
+
                         del X_batch, Y_batch
                         torch.cuda.empty_cache()
+
+                all_val_outputs = torch.cat(all_val_outputs, dim=0)
+                all_val_labels = torch.cat(all_val_labels, dim=0)
+
+                Y_validation_long = torch.argmax(Y_validation, dim=1).to(device).to(torch.int64)
+
+                val_macro_auroc(all_val_outputs, Y_validation_long)
+                val_macro_auprc(all_val_outputs, Y_validation_long)
 
                 # Average the losses and print the metrics
                 train_loss /= len(train_loader)
                 val_loss /= len(val_loader)
 
                 tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                fpr_results = ml_utils.evaluate_model_fpr_at_tpr(model, val_loader, device, numGestures)
                 confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device, numGestures)
 
                 print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
                 print(f"Train Macro Accuracy: {train_macro_acc:.4f} | Train Macro Precision: {train_macro_precision:.4f} | Train Macro Recall: {train_macro_recall:.4f} | Train Macro F1: {train_macro_f1_score:.4f} | Train Macro Top-5 Acc: {train_macro_top5_acc:.4f}")
                 print(f"Train_Micro_Accuracy: {train_micro_acc:.4f} | Train Micro Top-5 Acc: {train_micro_top5_acc:.4f}")
+                print(f"Train AUROC Macro: {train_macro_auroc:.4f}")
+                print(f"Train AUPRC Macro: {train_macro_auprc:.4f}")
                 print(f"Val Macro Accuracy: {val_macro_acc:.4f} | Val Macro Precision: {val_macro_precision:.4f} | Val Macro Recall: {val_macro_recall:.4f} | Val Macro F1: {val_macro_f1_score:.4f} | Val Macro Top-5 Acc: {val_macro_top5_acc:.4f}")
                 print(f"Val Micro Accuracy: {val_micro_acc:.4f} | Val Micro Top-5 Acc: {val_micro_top5_acc:.4f}")
+                print(f"Val AUROC Macro: {val_macro_auroc:.4f}")
+                print(f"Val AUPRC Macro: {val_macro_auprc:.4f}")
 
                 # Log metrics to wandb or any other tracking tool
                 wandb.log({
@@ -1743,6 +1768,9 @@ else:
                     "train/Macro F1 Score": train_macro_f1.compute(),
                     "train/Macro Top-5 Accuracy": train_macro_top5_acc.compute(),
                     "train/Micro Top-5 Accuracy": train_micro_top5_acc.compute(),
+                    "train/AUROC Macro": train_macro_auroc.compute(),
+                    "train/AUPRC Macro": train_macro_auprc.compute(),
+
                     "validation/Loss": val_loss,
                     "validation/Macro Accuracy": val_macro_acc.compute(),
                     "validation/Micro Accuracy": val_micro_acc.compute(),
@@ -1751,11 +1779,15 @@ else:
                     "validation/Macro F1 Score": val_macro_f1.compute(),
                     "validation/Macro Top-5 Accuracy": val_macro_top5_acc.compute(),
                     "validation/Micro Top-5 Accuracy": val_micro_top5_acc.compute(),
+                    "validation/AUROC Macro": val_macro_auroc.compute(),
+                    "validation/AUPRC Macro": val_macro_auprc.compute(),
+
                     "train/Learning Rate": optimizer.param_groups[0]['lr'],
                     "train/Epoch": epoch,
                     "validation/Epoch": epoch,
                     # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
                     **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
+                    **{f"fpr_at_fixed_tpr/Average Val FPR at {tpr} TPR": np.mean(fprs) for tpr, fprs in fpr_results.items()},
                     **{f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()},
                     **{f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
 
@@ -1808,6 +1840,8 @@ else:
         train_macro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device)
         train_micro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device)
         train_micro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device)
+        train_macro_auroc_metric = torchmetrics.AUROC(task="multiclass", num_classes=numGestures, average="macro").to(device)
+        train_macro_auprc_metric = torchmetrics.AveragePrecision(task="multiclass", num_classes=numGestures, average="macro").to(device)
 
         # Metrics for validation
         val_macro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="macro").to(device)
@@ -1817,6 +1851,8 @@ else:
         val_macro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device)
         val_micro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device)
         val_micro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device)
+        val_macro_auroc_metric = torchmetrics.AUROC(task="multiclass", num_classes=numGestures, average="macro").to(device)
+        val_macro_auprc_metric = torchmetrics.AveragePrecision(task="multiclass", num_classes=numGestures, average="macro").to(device)
 
         for epoch in tqdm(range(num_epochs), desc="Epoch"):
             model.train()
@@ -1830,6 +1866,8 @@ else:
             train_macro_top5_acc_metric.reset()
             train_micro_acc_metric.reset()
             train_micro_top5_acc_metric.reset()
+            train_macro_auroc_metric.reset()
+            train_macro_auprc_metric.reset()
 
             with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
                 for X_batch, Y_batch in t:
@@ -1853,6 +1891,8 @@ else:
                     train_macro_top5_acc_metric(output, Y_batch_long)
                     train_micro_acc_metric(output, Y_batch_long)
                     train_micro_top5_acc_metric(output, Y_batch_long)
+                    train_macro_auroc_metric(output, Y_batch_long)
+                    train_macro_auprc_metric(output, Y_batch_long)
 
                     if t.n % 10 == 0:
                         t.set_postfix({
@@ -1870,6 +1910,12 @@ else:
             val_macro_top5_acc_metric.reset()
             val_micro_acc_metric.reset()
             val_micro_top5_acc_metric.reset()
+            val_macro_auroc_metric.reset()
+            val_macro_auprc_metric.reset()
+
+            all_val_outputs = []
+            all_val_labels = []
+
             with torch.no_grad():
                 for X_batch, Y_batch in val_loader:
                     X_batch = X_batch.to(device).to(torch.float32)
@@ -1879,6 +1925,10 @@ else:
                     output = model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
+
+                    all_val_outputs.append(output)
+                    all_val_labels.append(Y_batch_long)
+
                     val_loss += criterion(output, Y_batch).item()
                     val_macro_acc_metric(output, Y_batch_long)
                     val_macro_precision_metric(output, Y_batch_long)
@@ -1887,6 +1937,14 @@ else:
                     val_macro_top5_acc_metric(output, Y_batch_long)
                     val_micro_acc_metric(output, Y_batch_long)
                     val_micro_top5_acc_metric(output, Y_batch_long)
+
+            all_val_outputs = torch.cat(all_val_outputs, dim=0)
+            all_val_labels = torch.cat(all_val_labels, dim=0)
+
+            Y_validation_long = torch.argmax(Y_validation, dim=1).to(device)
+
+            val_macro_auroc_metric(all_val_outputs, Y_validation_long)
+            val_macro_auprc_metric(all_val_outputs, Y_validation_long)
 
             # Calculate average loss and metrics
             train_loss /= len(train_loader)
@@ -1898,6 +1956,9 @@ else:
             train_macro_top5_acc = train_macro_top5_acc_metric.compute()
             train_micro_acc = train_micro_acc_metric.compute()
             train_micro_top5_acc = train_micro_top5_acc_metric.compute()
+            train_macro_auroc = train_macro_auroc_metric.compute()
+            train_macro_auprc = train_macro_auprc_metric.compute()
+
             val_macro_acc = val_macro_acc_metric.compute()
             val_macro_precision = val_macro_precision_metric.compute()
             val_macro_recall = val_macro_recall_metric.compute()
@@ -1905,15 +1966,22 @@ else:
             val_macro_top5_acc = val_macro_top5_acc_metric.compute()
             val_micro_acc = val_micro_acc_metric.compute()
             val_micro_top5_acc = val_micro_top5_acc_metric.compute()
+            val_macro_auroc = val_macro_auroc_metric.compute()
+            val_macro_auprc = val_macro_auprc_metric.compute()
 
             tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+            fpr_results = ml_utils.evaluate_model_fpr_at_tpr(model, val_loader, device, numGestures)
             confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
 
             print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
             print(f"Train Macro Accuracy: {train_macro_acc:.4f} | Train Macro Precision: {train_macro_precision:.4f} | Train Macro Recall: {train_macro_recall:.4f} | Train Macro F1: {train_macro_f1_score:.4f} | Train Macro Top-5 Acc: {train_macro_top5_acc:.4f}")
             print(f"Train_Micro_Accuracy: {train_micro_acc:.4f} | Train Micro Top-5 Acc: {train_micro_top5_acc:.4f}")
+            print(f"Val Macro AUROC: {val_macro_auroc:.4f}")
+            print(f"Val Macro AUPRC: {val_macro_auprc:.4f}")
             print(f"Val Macro Accuracy: {val_macro_acc:.4f} | Val Macro Precision: {val_macro_precision:.4f} | Val Macro Recall: {val_macro_recall:.4f} | Val Macro F1: {val_macro_f1_score:.4f} | Val Macro Top-5 Acc: {val_macro_top5_acc:.4f}")
             print(f"Val Micro Accuracy: {val_micro_acc:.4f} | Val Micro Top-5 Acc: {val_micro_top5_acc:.4f}")
+            print(f"Val AUROC Macro: {val_macro_auroc:.4f}")
+            print(f"Val AUPRC Macro: {val_macro_auprc:.4f}")
 
             # for fpr, tprs in tpr_results.items():
             #     print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
@@ -1929,6 +1997,8 @@ else:
                     "train/Macro Top-5 Accuracy": train_macro_top5_acc,
                     "train/Micro Accuracy": train_micro_acc,
                     "train/Micro Top-5 Accuracy": train_micro_top5_acc,
+                    "train/AUROC Macro": train_macro_auroc,
+                    "train/AUPRC Macro": train_macro_auprc,
                     "train/Learning Rate": optimizer.param_groups[0]['lr'],
                     "train/Epoch": epoch,
 
@@ -1940,10 +2010,13 @@ else:
                     "validation/Macro Top-5 Accuracy": val_macro_top5_acc,
                     "validation/Micro Accuracy": val_micro_acc,
                     "validation/Micro Top-5 Accuracy": val_micro_top5_acc,
+                    "validation/AUROC Macro": val_macro_auroc,
+                    "validation/AUPRC Macro": val_macro_auprc,
                     "validation/Epoch": epoch,
 
                     # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
                     **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
+                    **{f"fpr_at_fixed_tpr/Average Val FPR at {tpr} TPR": np.mean(fprs) for tpr, fprs in fpr_results.items()},
                     **{f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()},
                     **{f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
 
@@ -2017,6 +2090,8 @@ else:
             finetune_train_macro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device)
             finetune_train_micro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device)
             finetune_train_micro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device)
+            finetune_train_macro_auroc_metric = torchmetrics.AUROC(task="multiclass", num_classes=numGestures, average="macro").to(device)
+            finetune_train_macro_auprc_metric = torchmetrics.AveragePrecision(task="multiclass", num_classes=numGestures, average="macro").to(device)
 
             # Initialize metrics for finetuning validation
             finetune_val_macro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="macro").to(device)
@@ -2026,6 +2101,8 @@ else:
             finetune_val_macro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device)
             finetune_val_micro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device)
             finetune_val_micro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device)
+            finetune_val_macro_auroc_metric = torchmetrics.AUROC(task="multiclass", num_classes=numGestures, average="macro").to(device)
+            finetune_val_macro_auprc_metric = torchmetrics.AveragePrecision(task="multiclass", num_classes=numGestures, average="macro").to(device)
 
             for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
                 model.train()
@@ -2039,6 +2116,8 @@ else:
                 finetune_train_macro_top5_acc_metric.reset()
                 finetune_train_micro_acc_metric.reset()
                 finetune_train_micro_top5_acc_metric.reset()
+                finetune_train_macro_auroc_metric.reset()
+                finetune_train_macro_auprc_metric.reset()
 
                 print()
 
@@ -2064,6 +2143,8 @@ else:
                         finetune_train_macro_top5_acc_metric(output, Y_batch_long)
                         finetune_train_micro_acc_metric(output, Y_batch_long)
                         finetune_train_micro_top5_acc_metric(output, Y_batch_long)
+                        finetune_train_macro_auroc_metric(output, Y_batch_long)
+                        finetune_train_macro_auprc_metric(output, Y_batch_long)
 
                         if t.n % 10 == 0:
                             t.set_postfix({
@@ -2081,6 +2162,11 @@ else:
                 finetune_val_macro_top5_acc_metric.reset()
                 finetune_val_micro_acc_metric.reset()
                 finetune_val_micro_top5_acc_metric.reset()
+                finetune_val_macro_auroc_metric.reset()
+                finetune_val_macro_auprc_metric.reset()
+
+                all_val_outputs = []
+                all_val_labels = []
 
                 with torch.no_grad():
                     for X_batch, Y_batch in val_loader:
@@ -2100,27 +2186,46 @@ else:
                         finetune_val_micro_acc_metric(output, Y_batch_long)
                         finetune_val_micro_top5_acc_metric(output, Y_batch_long)
 
+                        all_val_outputs.append(output)
+                        all_val_labels.append(Y_batch_long)
+
+                all_val_outputs = torch.cat(all_val_outputs, dim=0)
+                all_val_labels = torch.cat(all_val_labels, dim=0)
+
+                Y_validation_long = torch.argmax(Y_validation, dim=1).to(device)
+
+                val_macro_auroc_metric(all_val_outputs, Y_validation_long)
+                val_macro_auprc_metric(all_val_outputs, Y_validation_long)
+
+
                 # Calculate average metrics
                 train_loss /= len(finetune_loader)
                 val_loss /= len(val_loader)
                 tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                fpr_results = ml_utils.evaluate_model_fpr_at_tpr(model, val_loader, device, numGestures)
                 confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
 
                 print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+
                 print(f"Train Metrics: Macro Acc: {finetune_train_macro_acc_metric.compute().item():.4f} |",
                     f"Micro Acc: {finetune_train_micro_acc_metric.compute().item():.4f} |",
                     f"Macro Precision: {finetune_train_macro_precision_metric.compute().item():.4f} |",
                     f"Macro Recall: {finetune_train_macro_recall_metric.compute().item():.4f} |",
                     f"Macro F1: {finetune_train_macro_f1_score_metric.compute().item():.4f} |",
                     f"Macro Top-5 Acc: {finetune_train_macro_top5_acc_metric.compute().item():.4f} |",
-                    f"Micro Top-5 Acc: {finetune_train_micro_top5_acc_metric.compute().item():.4f}")
+                    f"Micro Top-5 Acc: {finetune_train_micro_top5_acc_metric.compute().item():.4f} |",
+                    f"Macro AUROC: {finetune_train_macro_auroc_metric.compute().item():.4f} |",
+                    f"Macro AUPRC: {finetune_train_macro_auprc_metric.compute().item():.4f}")
+                
                 print(f"Val Metrics: Macro Acc: {finetune_val_macro_acc_metric.compute().item():.4f} |",
-                      f"Micro Acc: {finetune_val_micro_acc_metric.compute().item():.4f} |", 
-                      f"Macro Precision: {finetune_val_macro_precision_metric.compute().item():.4f} |",
-                      f"Macro Recall: {finetune_val_macro_recall_metric.compute().item():.4f} |",
-                      f"Macro F1: {finetune_val_macro_f1_score_metric.compute().item():.4f} |",
-                      f"Macro Top-5 Acc: {finetune_val_macro_top5_acc_metric.compute().item():.4f} |"
-                      f"Micro Top-5 Acc: {finetune_val_micro_top5_acc_metric.compute().item():.4f}")
+                    f"Micro Acc: {finetune_val_micro_acc_metric.compute().item():.4f} |", 
+                    f"Macro Precision: {finetune_val_macro_precision_metric.compute().item():.4f} |",
+                    f"Macro Recall: {finetune_val_macro_recall_metric.compute().item():.4f} |",
+                    f"Macro F1: {finetune_val_macro_f1_score_metric.compute().item():.4f} |",
+                    f"Macro Top-5 Acc: {finetune_val_macro_top5_acc_metric.compute().item():.4f} |",
+                    f"Micro Top-5 Acc: {finetune_val_micro_top5_acc_metric.compute().item():.4f} |",
+                    f"Macro AUROC: {finetune_val_macro_auroc_metric.compute().item():.4f} |",
+                    f"Macro AUPRC: {finetune_val_macro_auprc_metric.compute().item():.4f}")
 
                 wandb.log({
                     "train/Loss": train_loss,
@@ -2131,6 +2236,9 @@ else:
                     "train/Macro F1 Score": finetune_train_macro_f1_score_metric.compute(),
                     "train/Macro Top-5 Accuracy": finetune_train_macro_top5_acc_metric.compute(),
                     "train/Micro Top-5 Accuracy": finetune_train_micro_top5_acc_metric.compute(),
+                    "train/AUROC Macro": finetune_train_macro_auroc_metric.compute(),
+                    "train/AUPRC Macro": finetune_train_macro_auprc_metric.compute(),
+
                     "validation/Loss": val_loss,
                     "validation/Macro Accuracy": finetune_val_macro_acc_metric.compute(),
                     "validation/Micro Accuracy": finetune_val_micro_acc_metric.compute(),
@@ -2139,10 +2247,14 @@ else:
                     "validation/Macro F1 Score": finetune_val_macro_f1_score_metric.compute(),
                     "validation/Macro Top-5 Accuracy": finetune_val_macro_top5_acc_metric.compute(),
                     "validation/Micro Top-5 Accuracy": finetune_val_micro_top5_acc_metric.compute(),
+                    "validation/AUROC Macro": finetune_val_macro_auroc_metric.compute(),
+                    "validation/AUPRC Macro": finetune_val_macro_auprc_metric.compute(),
+
                     "train/Epoch": epoch,
                     "train/Learning Rate": optimizer.param_groups[0]['lr'],
                     # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
                     **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
+                    **{f"fpr_at_fixed_tpr/Average Val FPR at {tpr} TPR": np.mean(fprs) for tpr, fprs in fpr_results.items()},
                     **{f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()},
                     **{f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
                 })

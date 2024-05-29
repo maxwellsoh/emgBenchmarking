@@ -48,6 +48,49 @@ def evaluate_model_tpr_at_fpr(model, loader, device, num_classes, fpr_targets=[0
 
     return tprs_at_fixed_fprs
 
+def calculate_fpr_at_tpr(y_true, y_scores, tpr_target):
+    """Calculate the FPR at a given TPR target using ROC curve data."""
+    fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+    if tpr_target in tpr:
+        return fpr[np.where(tpr == tpr_target)[0][0]]
+    else:
+        return np.interp(tpr_target, tpr, fpr)
+    
+def evaluate_model_fpr_at_tpr(model, loader, device, num_classes, tpr_targets=[0.9, 0.95, 0.99]):
+    """Evaluate model to find FPR at given TPR targets for each class in multiclass classification."""
+    model.eval()
+    softmax = torch.nn.Softmax(dim=1)
+    predictions = []
+    true_labels = []
+
+    with torch.no_grad():
+        for X_batch, Y_batch in loader:
+            X_batch = X_batch.to(device)
+            outputs = model(X_batch)
+            if isinstance(outputs, dict):
+                outputs = outputs['logits']
+            probs = softmax(outputs).cpu().numpy()  # Get class probabilities
+            predictions.append(probs)
+            true_labels.append(Y_batch.cpu().numpy())
+
+    predictions = np.concatenate(predictions, axis=0)
+    true_labels = np.concatenate(true_labels, axis=0)
+
+    # Calculate FPR at specified TPRs for each class
+    fprs_at_fixed_tprs = {f"TPR {int(tpr*100)}%": [] for tpr in tpr_targets}
+
+    # Iterate over each class
+    for class_index in range(num_classes):
+        y_true_class = true_labels[:, class_index]
+        y_scores_class = predictions[:, class_index]
+        
+        # For each TPR target, calculate the FPR
+        for tpr_target in tpr_targets:
+            fpr = calculate_fpr_at_tpr(y_true_class, y_scores_class, tpr_target)
+            fprs_at_fixed_tprs[f"TPR {int(tpr_target*100)}%"].append(fpr)
+
+    return fprs_at_fixed_tprs
+
 def evaluate_confidence_thresholding(model, loader, device, thresholds=[0.5, 0.9, 0.95, 0.99]):
     model.eval()
     softmax = torch.nn.Softmax(dim=1)
@@ -86,6 +129,8 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
     test_macro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device)
     test_micro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device)
     test_micro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device)
+    test_macro_auroc = torchmetrics.AUROC(task="multiclass", num_classes=numGestures, average="macro").to(device)
+    test_macro_auprc = torchmetrics.AveragePrecision(task="multiclass", num_classes=numGestures, average="macro").to(device)
 
     # Assuming model, criterion, device, and test_loader are defined
     model.eval()
@@ -99,9 +144,12 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
     test_macro_top5_acc_metric.reset()
     test_micro_acc_metric.reset()
     test_micro_top5_acc_metric.reset()
+    test_macro_auroc.reset()
+    test_macro_auprc.reset()
 
     pred = []
     true = []
+    outputs_all = []
 
     with torch.no_grad():
         for X_batch, Y_batch in test_loader:
@@ -114,6 +162,7 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
                 output = output['logits']
             pred.extend(torch.argmax(output, dim=1).cpu().detach().numpy())
             true.extend(Y_batch_long.cpu().detach().numpy())
+            outputs_all.append(output)
 
             test_loss += criterion(output, Y_batch).item()
             test_macro_acc_metric(output, Y_batch_long)
@@ -123,6 +172,14 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
             test_macro_top5_acc_metric(output, Y_batch_long)
             test_micro_acc_metric(output, Y_batch_long)
             test_micro_top5_acc_metric(output, Y_batch_long)
+            # test_macro_auroc(output, Y_batch_long)
+            # test_macro_auprc(output, Y_batch_long)
+
+    outputs_all = torch.cat(outputs_all, dim=0).to(device)
+    true_torch = torch.tensor(true).to(device)
+
+    test_macro_auroc(outputs_all, true_torch)
+    test_macro_auprc(outputs_all, true_torch)
 
     # Calculate average loss and metrics
     test_loss /= len(test_loader)
@@ -133,33 +190,35 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
     test_macro_top5_acc = test_macro_top5_acc_metric.compute()
     test_micro_acc = test_micro_acc_metric.compute()
     test_micro_top5_acc = test_micro_top5_acc_metric.compute()
+    test_macro_auroc_score = test_macro_auroc.compute()
+    test_macro_auprc_score = test_macro_auprc.compute()
+
     tpr_results = evaluate_model_tpr_at_fpr(model, test_loader, device, numGestures)
+    fpr_results = evaluate_model_fpr_at_tpr(model, test_loader, device, numGestures)
     confidence_levels, proportions_above_confidence_threshold = evaluate_confidence_thresholding(model, test_loader, device)
 
     print(f"Test Loss: {test_loss:.4f} | Test Macro Accuracy: {test_macro_acc:.4f} | Test Micro Accuracy: {test_micro_acc:.4f}")
     print(f"Test Macro Precision: {test_macro_precision:.4f} | Test Macro Recall: {test_macro_recall:.4f} | Test Macro F1 Score: {test_macro_f1_score:.4f} | Test Macro Top-5 Accuracy: {test_macro_top5_acc:.4f}")
     print(f"Test Micro Top-5 Accuracy: {test_micro_top5_acc:.4f}")
-    # for fpr, tprs in tpr_results.items():
-    #     print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
-    # for confidence_level, acc in confidence_levels.items():
-    #     print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
+    print(f"Test Macro AUROC: {test_macro_auroc_score:.4f}")
+    print(f"Test Macro AUPRC: {test_macro_auprc_score:.4f}")
 
     wandb.log({
-        "test/Test Loss": test_loss,
-        "test/Test Macro Accuracy": test_macro_acc,
-        "test/Test Micro Accuracy": test_micro_acc,
-        "test/Test Macro Precision": test_macro_precision,
-        "test/Test Macro Recall": test_macro_recall,
-        "test/Test Macro F1": test_macro_f1_score,
-        "test/Test Macro Top-5 Accuracy": test_macro_top5_acc,
-        "test/Test Micro Top-5 Accuracy": test_micro_top5_acc,
+        "test/Loss": test_loss,
+        "test/Macro Accuracy": test_macro_acc,
+        "test/Micro Accuracy": test_micro_acc,
+        "test/Macro Precision": test_macro_precision,
+        "test/Macro Recall": test_macro_recall,
+        "test/Macro F1": test_macro_f1_score,
+        "test/Macro Top-5 Accuracy": test_macro_top5_acc,
+        "test/Micro Top-5 Accuracy": test_micro_top5_acc,
+        "test/Macro AUROC": test_macro_auroc_score,
+        "test/Macro AUPRC": test_macro_auprc_score,
         # **{f"tpr_at_fixed_fpr/Test TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
         **{f"tpr_at_fixed_fpr/Average Test TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
+        **{f"fpr_at_fixed_tpr/Average Test FPR at {tpr} TPR": np.mean(fprs) for tpr, fprs in fpr_results.items()},
         **{f"confidence_level_accuracies/Test Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()},
         **{f"proportion_above_confidence_threshold/Test Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
     })
-
-    # Confusion Matrix
-    # Plot and log confusion matrix in wandb
 
 
