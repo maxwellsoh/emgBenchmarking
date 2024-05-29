@@ -1914,7 +1914,7 @@ else:
                             "Batch Acc": train_micro_acc_metric.compute().item()
                         })
 
-                outputs_train_all = torch.cat(outputs_train_all, dim=0).to(device())
+                outputs_train_all = torch.cat(outputs_train_all, dim=0).to(device)
 
             train_macro_auroc_metric(outputs_train_all, torch.argmax(Y_train, dim=1).to(device))
             train_macro_auprc_metric(outputs_train_all, torch.argmax(Y_train, dim=1).to(device))
