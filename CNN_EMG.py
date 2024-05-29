@@ -35,6 +35,7 @@ from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorit
 from semilearn.core.utils import send_model_cuda
 import torchmetrics
 import ml_metrics_utils as ml_utils
+from sklearn.metrics import confusion_matrix, classification_report
 
 
 # Define a custom argument type for a list of integers
@@ -1747,6 +1748,12 @@ else:
 
                 Y_validation_long = torch.argmax(Y_validation, dim=1).to(device).to(torch.int64)
 
+                true_labels = Y_validation_long.cpu().detach().numpy()
+                test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+                conf_matrix = confusion_matrix(true_labels, test_predictions)
+                print("Confusion Matrix:")
+                print(conf_matrix)
+
                 val_macro_auroc(all_val_outputs, Y_validation_long)
                 val_macro_auprc(all_val_outputs, Y_validation_long)
 
@@ -1962,6 +1969,12 @@ else:
 
             Y_validation_long = torch.argmax(Y_validation, dim=1).to(device)
 
+            true_labels = Y_validation_long.cpu().detach().numpy()
+            test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+            conf_matrix = confusion_matrix(true_labels, test_predictions)
+            print("Confusion Matrix:")
+            print(conf_matrix)
+
             val_macro_auroc_metric(all_val_outputs, Y_validation_long)
             val_macro_auprc_metric(all_val_outputs, Y_validation_long)
 
@@ -2059,6 +2072,19 @@ else:
                     preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
                     test_predictions.extend(preds)
 
+            # Print confusion matrix before plotting
+            # Convert lists to numpy arrays
+            true_labels = np.argmax(Y_test.cpu().detach().numpy(), axis=1)
+            test_predictions = np.array(test_predictions)
+
+            # Calculate and print the confusion matrix
+            conf_matrix = confusion_matrix(true_labels, test_predictions)
+            print("Confusion Matrix:")
+            print(conf_matrix)
+
+            print("Classification Report:")
+            print(classification_report(true_labels, test_predictions))
+            
             utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
 
             torch.cuda.empty_cache()  # Clear cache if needed
@@ -2213,6 +2239,12 @@ else:
 
                 Y_validation_long = torch.argmax(Y_validation, dim=1).to(device)
 
+                true_labels = Y_validation_long.cpu().detach().numpy()
+                test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+                conf_matrix = confusion_matrix(true_labels, test_predictions)
+                print("Confusion Matrix:")
+                print(conf_matrix)
+
                 finetune_val_macro_auroc_metric(all_val_outputs, Y_validation_long)
                 finetune_val_macro_auprc_metric(all_val_outputs, Y_validation_long)
 
@@ -2297,6 +2329,19 @@ else:
                 preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
                 test_predictions.extend(preds)
 
+        # Print confusion matrix before plotting
+        # Convert lists to numpy arrays
+        true_labels = np.argmax(Y_test.cpu().detach().numpy(), axis=1)
+        test_predictions = np.array(test_predictions)
+
+        # Calculate and print the confusion matrix
+        conf_matrix = confusion_matrix(true_labels, test_predictions)
+        print("Confusion Matrix:")
+        print(conf_matrix)
+
+        print("Classification Report:")
+        print(classification_report(true_labels, test_predictions))
+            
         utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
 
         torch.cuda.empty_cache()  # Clear cache if needed
