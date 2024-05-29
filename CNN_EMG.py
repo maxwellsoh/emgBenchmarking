@@ -1668,6 +1668,7 @@ else:
 
                 train_loss = 0.0
                 with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+                    outputs_all = []
                     for X_batch, Y_batch in t:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
                         Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
@@ -1686,14 +1687,23 @@ else:
                         train_macro_top5_acc(output, Y_batch)
                         train_micro_acc(output, Y_batch)
                         train_micro_top5_acc(output, Y_batch)
-                        train_macro_auroc(output, Y_batch)
-                        train_macro_auprc(output, Y_batch)
+
+                        outputs_all.append(output)
+
+                        # train_macro_auroc(output, Y_batch)
+                        # train_macro_auprc(output, Y_batch)
 
                         if t.n % 10 == 0:
                             t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": train_micro_acc.compute().item()})
 
                         del X_batch, Y_batch, output
                         torch.cuda.empty_cache()
+                    
+                    outputs_all = torch.cat(outputs_all, dim=0).to(device)
+                    Y_train_long = torch.argmax(Y_train, dim=1).to(device).to(torch.int64)
+                    train_macro_auroc(outputs_all, Y_train_long)
+                    train_macro_auprc(outputs_all, Y_train_long)
+
 
                 # Validation
                 model.eval()
@@ -1869,6 +1879,8 @@ else:
             train_macro_auroc_metric.reset()
             train_macro_auprc_metric.reset()
 
+            outputs_train_all = []
+
             with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
                 for X_batch, Y_batch in t:
                     X_batch = X_batch.to(device).to(torch.float32)
@@ -1883,6 +1895,8 @@ else:
                     loss.backward()
                     optimizer.step()
 
+                    outputs_train_all.append(output)
+
                     train_loss += loss.item()
                     train_macro_acc_metric(output, Y_batch_long)
                     train_macro_precision_metric(output, Y_batch_long)
@@ -1891,14 +1905,19 @@ else:
                     train_macro_top5_acc_metric(output, Y_batch_long)
                     train_micro_acc_metric(output, Y_batch_long)
                     train_micro_top5_acc_metric(output, Y_batch_long)
-                    train_macro_auroc_metric(output, Y_batch_long)
-                    train_macro_auprc_metric(output, Y_batch_long)
+                    # train_macro_auroc_metric(output, Y_batch_long)
+                    # train_macro_auprc_metric(output, Y_batch_long)
 
                     if t.n % 10 == 0:
                         t.set_postfix({
                             "Batch Loss": loss.item(), 
                             "Batch Acc": train_micro_acc_metric.compute().item()
                         })
+
+                outputs_train_all = torch.cat(outputs_train_all, dim=0).to(device())
+
+            train_macro_auroc_metric(outputs_train_all, torch.argmax(Y_train, dim=1).to(device))
+            train_macro_auprc_metric(outputs_train_all, torch.argmax(Y_train, dim=1).to(device))
 
             # Validation phase
             model.eval()
@@ -2194,8 +2213,8 @@ else:
 
                 Y_validation_long = torch.argmax(Y_validation, dim=1).to(device)
 
-                val_macro_auroc_metric(all_val_outputs, Y_validation_long)
-                val_macro_auprc_metric(all_val_outputs, Y_validation_long)
+                finetune_val_macro_auroc_metric(all_val_outputs, Y_validation_long)
+                finetune_val_macro_auprc_metric(all_val_outputs, Y_validation_long)
 
 
                 # Calculate average metrics
