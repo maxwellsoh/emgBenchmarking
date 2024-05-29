@@ -625,7 +625,8 @@ else: # Not leave n subjects out randomly
         global_low_value = None
         global_high_value = None
         scaler = None
-        
+
+
 data = []
 
 class ToNumpy:
@@ -937,9 +938,7 @@ else:
         if not args.turn_on_unlabeled_domain_adaptation:
             print("Size of X_train_finetuning:  ", X_train_finetuning.size())
             print("Size of Y_train_finetuning:  ", Y_train_finetuning.size())
-        print("Size of X_validation:", X_validation.size())
-        print("Size of Y_validation:", Y_validation.size())
-        
+
         del data
         del emg
         del labels
@@ -1084,8 +1083,6 @@ else:
 
         print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE)
-        print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
         
         if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0:
             print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
@@ -1115,12 +1112,20 @@ else:
 
         print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_train:     ", Y_train.shape)
-        print("Size of X_validation:", X_validation.shape)
-        print("Size of Y_validation:", Y_validation.shape)
 
-    
     else: 
         raise ValueError("Please specify the type of test you want to run")
+
+# get X_test and Y_test from splitting validation 50-50 with stratify
+X_test, X_validation, Y_test, Y_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation, random_state=args.seed, shuffle=False)
+X_test = torch.from_numpy(X_test).to(torch.float16)
+Y_test = torch.from_numpy(Y_test).to(torch.float16)
+X_validation = torch.from_numpy(X_validation).to(torch.float16)
+Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
+print("Size of X_test:      ", X_test.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+print("Size of Y_test:      ", Y_test.shape) # (SAMPLE, GESTURE)
 
 model_name = args.model
 
