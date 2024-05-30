@@ -283,7 +283,6 @@ def make_gestures_sequential(balanced_restim, args):
     exercise_starts = {1: 1, 2: 18, 3: 41}
     decrements = get_decrements(args)
 
-    possible_gestures = []
     for x in range(len(balanced_restim)): 
         value = balanced_restim[x][0][0]
 
@@ -292,9 +291,6 @@ def make_gestures_sequential(balanced_restim, args):
             d = decrements[exercise]
             balanced_restim[x][0][0] = value - d
 
-        possible_gestures.append(value)
-
-    print(f"Unique gestures: {np.unique(possible_gestures)}")
     return balanced_restim
 
 def getLabels (input):
