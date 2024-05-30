@@ -1075,7 +1075,7 @@ else:
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
                 if args.cross_validation_for_time_series:
                     X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
-                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=labels_included, random_state=args.seed, shuffle=False, Y_is_force=args.force_regression)
+                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=labels_included, random_state=args.seed, shuffle=False, Y_is_labels=(not args.force_regression))
                 else:
                     assert False, "entering not cross_validation_for_time_series"
                     # Split the validation data into train and validation subsets
