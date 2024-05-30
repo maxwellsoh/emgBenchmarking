@@ -216,36 +216,92 @@ def getEMG (args):
     emg = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['emg']).to(torch.float16)
     return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
 
+# def make_gestures_sequential(balanced_restim):
+#     """
+#     Makes gestures numbers sequential. Determines if an exercise is missing 
+
+#     Example: if using exercise 3, subtracts all gestures by 40 such that they become [0, 1, ..., 9] instead of [0, 40, 41, ..., 49]
+
+#     Args:
+#         balanced_restim (_type_): _description_
+
+#     Returns:
+#         _type_: _description_
+#     """
+    
+
+#     exercise_starts = {1: 1, 2: 18, 3: 41}
+#     exercise_decrements = {1: 0, 2: 17, 3: 40}
+
+#     # i don't think this is a great solution because what if its exercise 1 and 3 ... ? 
+#     og_gestures = []
+#     new_gestures = []
+#     for x in range(len(balanced_restim)): 
+
+#         value = balanced_restim[x][0][0]
+
+#         if value != 0:
+#             exercise = max(ex for ex in exercise_starts if exercise_starts[ex] <= value)
+
+#             balanced_restim[x][0][0] = value - exercise_decrements[exercise]
+#             if exercise == 3: 
+#                 print("shifted gesture:", balanced_restim[x][0][0])
+        
+#         new_gestures.append(balanced_restim[x][0][0])
+
+#     print("====================================")
+    
+#     return balanced_restim
+    
+
+def get_decrements(args):
+    """
+    Calculates how much gestures from exercise 1, 2, and 3 should be decremented by to make them sequential.
+
+    Args:
+        args: args parser object
+
+    Returns:
+        (d1, d2, d3): decrements for each exercise
+    """
+    
+    decrements = {(1,): [0, 0, 0], (2,): [0, 17, 0], (3,): [0, 0, 40], (1,2): [0, 0, 0], (1,3): [0, 0, 23], (2,3): [0, 17, 17], (1,2,3): [0, 0, 0]}
+    exercises = tuple(args.exercises)
+    return decrements[exercises]
+
+
 def make_gestures_sequential(balanced_restim, args):
+    """
+    Removes missing gaps between gestures depending on which exercises are selected. 
+
+    Ex: If args.exercises = [1, 3], gestures in exercise 1 are kept the same while gestures in exercise 3 are decremented by 23. 
+
+    Returns:
+        balanced_restim: restim but with gestures now sequential
+    """
+    
+    exercise_starts = {1: 1, 2: 18, 3: 41}
+    decrements = get_decrements(args)
 
     possible_gestures = []
     for x in range(len(balanced_restim)): 
-               
-        assert balanced_restim[x][0][0] == 0 or 40 <= balanced_restim[x][0][0] <= 50, "Not just exercise C"
-
         value = balanced_restim[x][0][0]
 
         if value != 0:
-            balanced_restim[x][0][0] = value - 40 
+            exercise = (max(ex for ex in exercise_starts if exercise_starts[ex] <= value))-1
+            d = decrements[exercise]
+            balanced_restim[x][0][0] = value - d
+
         possible_gestures.append(value)
 
-    # print(f"Unique gestures: {np.unique(possible_gestures)}")
+    print(f"Unique gestures: {np.unique(possible_gestures)}")
     return balanced_restim
-    
-
 
 def getLabels (input):
     n, exercise, args = input
     restim = getRestim(n, exercise)
     balanced_restim = restim[balance(restim)]
     relabeled_restim = make_gestures_sequential(balanced_restim, args)
-
-    # so we should pass in args... its better to do here before we call contract because i think it would be annoying to go from one hot encoding back to the number then back to a new one hot encoding 
-
-    # balanced_restim[sample_number][0][0] would be the the gesture 
-    
-
-
     return contract(relabeled_restim)
 
 def getForces(args):

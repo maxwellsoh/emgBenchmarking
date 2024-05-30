@@ -217,10 +217,57 @@ def getEMG (args):
 
     return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
 
+
+def get_decrements(args):
+    """
+    Calculates how much gestures from exercise 1, 2, and 3 should be decremented by to make them sequential.
+
+    Args:
+        args: args parser object
+
+    Returns:
+        (d1, d2, d3): decrements for each exercise
+    """
+    
+    decrements = {(1,): [0, 0, 0], (2,): [0, 17, 0], (3,): [0, 0, 40], (1,2): [0, 0, 0], (1,3): [0, 0, 23], (2,3): [0, 17, 17], (1,2,3): [0, 0, 0]}
+    exercises = tuple(args.exercises)
+    return decrements[exercises]
+
+
+def make_gestures_sequential(balanced_restim, args):
+    """
+    Removes missing gaps between gestures depending on which exercises are selected. 
+
+    Ex: If args.exercises = [1, 3], gestures in exercise 1 are kept the same while gestures in exercise 3 are decremented by 23. 
+
+    Returns:
+        balanced_restim: restim but with gestures now sequential
+    """
+    
+    exercise_starts = {1: 1, 2: 18, 3: 41}
+    decrements = get_decrements(args)
+
+    possible_gestures = []
+    for x in range(len(balanced_restim)): 
+        value = balanced_restim[x][0][0]
+
+        if value != 0:
+            exercise = (max(ex for ex in exercise_starts if exercise_starts[ex] <= value))-1
+            d = decrements[exercise]
+            balanced_restim[x][0][0] = value - d
+
+        possible_gestures.append(value)
+
+    print(f"Unique gestures: {np.unique(possible_gestures)}")
+    return balanced_restim
+
+
 def getLabels (args):
-    n, exercise = args
+    n, exercise, args = input
     restim = getRestim(n, exercise)
-    return contract(restim[balance(restim)])
+    balanced_restim = restim[balance(restim)]
+    relabeled_restim = make_gestures_sequential(balanced_restim, args)
+    return contract(relabeled_restim)
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
