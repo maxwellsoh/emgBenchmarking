@@ -1016,6 +1016,8 @@ else:
             
         X_train_list = []
         Y_train_list = []
+        if args.force_regression:
+            label_train_list = []
 
         if args.proportion_unlabeled_data_from_training_subjects>0:
             assert False, "entering proportion_unlabeled_data_from_training_subjects>0"
@@ -1027,6 +1029,8 @@ else:
                 continue
             current_data = np.array(data[i])
             current_labels = np.array(labels[i])
+            if args.force_regression: 
+                current_forces = np.array(forces[i])
 
             if args.reduce_training_data_size:
                 assert False, "entering reduce_training_data_size"
@@ -1051,11 +1055,21 @@ else:
                 X_train_unlabeled_list.append(X_train_unlabeled)
                 Y_train_unlabeled_list.append(Y_train_unlabeled)
 
-            X_train_list.append(current_data)
-            Y_train_list.append(current_labels)
+            if args.force_regression:
+                X_train_list.append(current_data)
+                Y_train_list.append(current_forces)
+                label_train_list.append(current_labels)
+            else: 
+                X_train_list.append(current_data)
+                Y_train_list.append(current_labels)
+
+
             
         X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
         Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
+        if args.force_regression:
+            label_train = torch.from_numpy(np.concatenate(label_train_list, axis=0)).to(torch.float16)
+            
         if args.proportion_unlabeled_data_from_training_subjects>0:
             assert False, "entering proportion_unlabeled_data_from_training_subjects>0"
             X_train_unlabeled = torch.from_numpy(np.concatenate(X_train_unlabeled_list, axis=0)).to(torch.float16)
@@ -1074,8 +1088,13 @@ else:
             
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
                 if args.cross_validation_for_time_series:
-                    X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
-                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=labels_included, random_state=args.seed, shuffle=False, Y_is_labels=(not args.force_regression))
+                    if args.force_regression:
+                        X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject,label_validation_partial_leftout_subject= tts.train_test_split(
+                            X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=labels_included, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
+                    else: 
+                        X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject = tts.train_test_split(
+                            X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=labels_included, random_state=args.seed, shuffle=False)
+                        
                 else:
                     assert False, "entering not cross_validation_for_time_series"
                     # Split the validation data into train and validation subsets
@@ -1109,17 +1128,21 @@ else:
                     Y_train_unlabeled_partial_leftout_subject = np.zeros((unlabeled_data.shape[0], utils.numGestures))
 
             print("Size of X_train_partial_leftout_subject:     ", X_train_partial_leftout_subject.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-            print("Size of Y_train_partial_leftout_subject:     ", Y_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE)
+            print("Size of Y_train_partial_leftout_subject:     ", Y_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE/FORCE)
+            if args.force_regression:
+                print("Size of label_train_partial_leftout_subject:     ", label_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE)
 
             if not args.turn_on_unlabeled_domain_adaptation:
                 # Append the partial validation data to the training data
                 if proportion_to_keep_of_leftout_subject_for_training>0:
                     if not args.pretrain_and_finetune:
+                        assert False, "entering args.pretrain_and_finetune"
                         X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
                         Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
                     else:
                         X_train_finetuning = torch.tensor(X_train_partial_leftout_subject)
                         Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
+                        
 
             else: # unlabeled domain adaptation
                 assert False, "entering args.turn_on_unlabeled_domain_adaptation"
@@ -1155,20 +1178,33 @@ else:
             # Update the validation data
             X_train = torch.tensor(X_train).to(torch.float16)
             Y_train = torch.tensor(Y_train).to(torch.float16)
+            if args.force_regression:
+                label_train = torch.tensor(label_train).to(torch.float16)
+        
             X_validation = torch.tensor(X_validation_partial_leftout_subject).to(torch.float16)
             Y_validation = torch.tensor(Y_validation_partial_leftout_subject).to(torch.float16)
+            if args.force_regression:
+                label_validation = torch.tensor(label_validation_partial_leftout_subject).to(torch.float16)
+                del label_validation_partial_leftout_subject
             
             del X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject
 
+        print("Regression:", args.force_regression)
         print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE)
+        print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE/FORCE) 
         print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
+        print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE.FORCE)
+        if args.force_regression:
+            print("Size of label_train:", label_train.shape) # (SAMPLE, GESTURE)
+            print("Size of label_validation:", label_validation.shape) # (SAMPLE, GESTURE)
+
         
         if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0:
+            assert False, "entering turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0"
             print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
             print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
         if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
+            assert False, "entering turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0"
             print("Size of X_train_finetuning_unlabeled:     ", X_train_finetuning_unlabeled.shape)
             print("Size of Y_train_finetuning_unlabeled:     ", Y_train_finetuning_unlabeled.shape)
             
@@ -1177,6 +1213,7 @@ else:
             print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
             
     elif args.transfer_learning and utils.num_subjects == 1:
+        assert False, "entering transfer_learning and utils.num_subjects == 1"
         X_train = data[0]
         Y_train = labels[0]
         if args.cross_validation_for_time_series:
@@ -1192,7 +1229,6 @@ else:
         print("Size of Y_train:     ", Y_train.shape)
         print("Size of X_validation:", X_validation.shape)
         print("Size of Y_validation:", Y_validation.shape)
-
     
     else: 
         raise ValueError("Please specify the type of test you want to run")
@@ -1210,6 +1246,7 @@ def ceildiv(a, b):
         return -(a // -b)
     
 if args.turn_on_unlabeled_domain_adaptation:
+    assert False
     current_date_and_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     assert (args.transfer_learning and args.cross_validation_for_time_series) or args.leave_one_session_out, \
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
@@ -1332,6 +1369,7 @@ if args.turn_on_unlabeled_domain_adaptation:
                                                             num_epochs=args.epochs, num_iters=iters_for_loader)
     validation_loader = get_data_loader(semilearn_config, validation_dataset, semilearn_config.eval_batch_size, num_workers=multiprocessing.cpu_count()//8)
 
+# [START] Model Initialization
 else:
     if args.model == 'resnet50_custom':
         model = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -1394,11 +1432,16 @@ else:
     else: 
         # model_name = 'efficientnet_b0'  # or 'efficientnet_b1', ..., 'efficientnet_b7'
         # model_name = 'tf_efficientnet_b3.ns_jft_in1k'
-        model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
+
+        if args.force_regression: 
+            model = timm.create_model(model_name, pretrained=True, num_classes=Y_validation.shape[1])
+        else: 
+            model = timm.create_model(model_name, pretrained=True, num_classes=numGestures)
         # # Load the Vision Transformer model
         # model_name = 'vit_base_patch16_224'  # This is just one example, many variations exist
         # model = timm.create_model(model_name, pretrained=True, num_classes=utils.numGestures)
 
+# [END] Model Initialization
 class CustomDataset(Dataset):
     def __init__(self, X, Y, transform=None):
         self.X = X
@@ -1439,11 +1482,14 @@ if not args.turn_on_unlabeled_domain_adaptation:
     val_dataset = CustomDataset(X_validation, Y_validation, transform=resize_transform)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
     if (args.held_out_test):
+        assert False, "entering held_out_test"
         test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
+    if args.force_regression:
+        criterion = nn.MSELoss()
     learn = args.learning_rate
     if args.model not in ['MLP', 'SVC', 'RF']:
         optimizer = torch.optim.Adam(model.parameters(), lr=learn)
@@ -1465,75 +1511,80 @@ if not args.turn_on_unlabeled_domain_adaptation:
     gc.collect()
     torch.cuda.empty_cache()
 
-wandb_runname = 'CNN_seed-'+str(args.seed)
-if args.turn_on_kfold:
-    wandb_runname += '_k-fold-'+str(args.kfold)+'_fold-index-'+str(args.fold_index)
-if args.turn_on_cyclical_lr:
-    wandb_runname += '_cyclical-lr'
-if args.turn_on_cosine_annealing: 
-    wandb_runname += '_cosine-annealing'
-if args.turn_on_rms:
-    wandb_runname += '_rms-'+str(args.rms_input_windowsize)
-if args.turn_on_magnitude:  
-    wandb_runname += '_mag-'
-if args.leftout_subject != 0:
-    wandb_runname += '_LOSO-'+str(args.leftout_subject)
-wandb_runname += '_' + model_name
-if (exercises and not args.partial_dataset_ninapro):
-    wandb_runname += '_exer-' + ''.join(character for character in str(args.exercises) if character.isalnum())
-if args.dataset == "OzdemirEMG":
-    if args.full_dataset_ozdemir:
-        wandb_runname += '_full'
-    else:
-        wandb_runname += '_partial'
-if args.dataset == "ninapro-db2" or args.dataset == "ninapro-db5":
-    if args.partial_dataset_ninapro:
-        wandb_runname += '_partial'
-if args.turn_on_spectrogram:
-    wandb_runname += '_spect'
-if args.turn_on_cwt:
-    wandb_runname += '_cwt'
-if args.turn_on_hht:
-    wandb_runname += '_hht'
-if args.reduce_training_data_size:
-    wandb_runname += '_reduced-training-data-size-' + str(args.reduced_training_data_size)
-if args.leave_n_subjects_out_randomly != 0:
-    wandb_runname += '_leave_n_subjects_out-'+str(args.leave_n_subjects_out_randomly)
-if args.turn_off_scaler_normalization:
-    wandb_runname += '_no-scal-norm'
-if args.target_normalize > 0:
-    wandb_runname += '_targ-norm'
-if args.load_few_images:
-    wandb_runname += '_load-few'
-if args.transfer_learning:
-    wandb_runname += '_tran-learn'
-    wandb_runname += '-prop-' + str(args.proportion_transfer_learning_from_leftout_subject)
-if args.cross_validation_for_time_series:   
-    wandb_runname += '_cv-for-ts'
-if args.reduce_data_for_transfer_learning != 1:
-    wandb_runname += '_red-data-for-tran-learn-' + str(args.reduce_data_for_transfer_learning)
-if args.leave_one_session_out:
-    wandb_runname += '_leave-one-sess-out'
-if args.leave_one_subject_out:
-    wandb_runname += '_loso'
-if args.one_subject_for_training_set_for_session_test:
-    wandb_runname += '_one-subj-for-training-set'
-if args.held_out_test:
-    wandb_runname += '_held-out'
-if args.pretrain_and_finetune:
-    wandb_runname += '_pretrain-finetune'
-if args.turn_on_unlabeled_domain_adaptation:
-    wandb_runname += '_unlabeled-adapt'
-    wandb_runname += '-algo-' + args.unlabeled_algorithm
-    wandb_runname += '-prop-unlabel-leftout' + str(args.proportion_unlabeled_data_from_leftout_subject)
-if args.proportion_data_from_training_subjects<1.0:
-    wandb_runname += '_train-subj-prop-' + str(args.proportion_data_from_training_subjects)
-if args.proportion_unlabeled_data_from_training_subjects>0:
-    wandb_runname += '_unlabel-subj-prop-' + str(args.proportion_unlabeled_data_from_training_subjects)
-if args.load_unlabeled_data_jehan:
-    wandb_runname += '_load-unlabel-data-jehan'
+def create_wandb_runname():
+    wandb_runname = 'CNN_seed-'+str(args.seed)
+    if args.turn_on_kfold:
+        wandb_runname += '_k-fold-'+str(args.kfold)+'_fold-index-'+str(args.fold_index)
+    if args.turn_on_cyclical_lr:
+        wandb_runname += '_cyclical-lr'
+    if args.turn_on_cosine_annealing: 
+        wandb_runname += '_cosine-annealing'
+    if args.turn_on_rms:
+        wandb_runname += '_rms-'+str(args.rms_input_windowsize)
+    if args.turn_on_magnitude:  
+        wandb_runname += '_mag-'
+    if args.leftout_subject != 0:
+        wandb_runname += '_LOSO-'+str(args.leftout_subject)
+    wandb_runname += '_' + model_name
+    if (exercises and not args.partial_dataset_ninapro):
+        wandb_runname += '_exer-' + ''.join(character for character in str(args.exercises) if character.isalnum())
+    if args.dataset == "OzdemirEMG":
+        if args.full_dataset_ozdemir:
+            wandb_runname += '_full'
+        else:
+            wandb_runname += '_partial'
+    if args.dataset == "ninapro-db2" or args.dataset == "ninapro-db5":
+        if args.partial_dataset_ninapro:
+            wandb_runname += '_partial'
+    if args.turn_on_spectrogram:
+        wandb_runname += '_spect'
+    if args.turn_on_cwt:
+        wandb_runname += '_cwt'
+    if args.turn_on_hht:
+        wandb_runname += '_hht'
+    if args.reduce_training_data_size:
+        wandb_runname += '_reduced-training-data-size-' + str(args.reduced_training_data_size)
+    if args.leave_n_subjects_out_randomly != 0:
+        wandb_runname += '_leave_n_subjects_out-'+str(args.leave_n_subjects_out_randomly)
+    if args.turn_off_scaler_normalization:
+        wandb_runname += '_no-scal-norm'
+    if args.target_normalize > 0:
+        wandb_runname += '_targ-norm'
+    if args.load_few_images:
+        wandb_runname += '_load-few'
+    if args.transfer_learning:
+        wandb_runname += '_tran-learn'
+        wandb_runname += '-prop-' + str(args.proportion_transfer_learning_from_leftout_subject)
+    if args.cross_validation_for_time_series:   
+        wandb_runname += '_cv-for-ts'
+    if args.reduce_data_for_transfer_learning != 1:
+        wandb_runname += '_red-data-for-tran-learn-' + str(args.reduce_data_for_transfer_learning)
+    if args.leave_one_session_out:
+        wandb_runname += '_leave-one-sess-out'
+    if args.leave_one_subject_out:
+        wandb_runname += '_loso'
+    if args.one_subject_for_training_set_for_session_test:
+        wandb_runname += '_one-subj-for-training-set'
+    if args.held_out_test:
+        wandb_runname += '_held-out'
+    if args.pretrain_and_finetune:
+        wandb_runname += '_pretrain-finetune'
+    if args.turn_on_unlabeled_domain_adaptation:
+        wandb_runname += '_unlabeled-adapt'
+        wandb_runname += '-algo-' + args.unlabeled_algorithm
+        wandb_runname += '-prop-unlabel-leftout' + str(args.proportion_unlabeled_data_from_leftout_subject)
+    if args.proportion_data_from_training_subjects<1.0:
+        wandb_runname += '_train-subj-prop-' + str(args.proportion_data_from_training_subjects)
+    if args.proportion_unlabeled_data_from_training_subjects>0:
+        wandb_runname += '_unlabel-subj-prop-' + str(args.proportion_unlabeled_data_from_training_subjects)
+    if args.load_unlabeled_data_jehan:
+        wandb_runname += '_load-unlabel-data-jehan'
+
+    return wandb_runname
+wandb_runname = create_wandb_runname()
 
 if (args.held_out_test):
+
     if args.turn_on_kfold:
         project_name += '_k-fold-'+str(args.kfold)
     else:
@@ -1597,20 +1648,32 @@ X_train = torch.from_numpy(X_train).to(torch.float16) if isinstance(X_train, np.
 Y_train = torch.from_numpy(Y_train).to(torch.float16) if isinstance(Y_train, np.ndarray) else Y_train
 X_validation = torch.from_numpy(X_validation).to(torch.float16) if isinstance(X_validation, np.ndarray) else X_validation
 Y_validation = torch.from_numpy(Y_validation).to(torch.float16) if isinstance(Y_validation, np.ndarray) else Y_validation
+if args.force_regression:
+    label_validation = torch.from_numpy(label_validation).to(torch.float16) if isinstance(label_validation, np.ndarray) else label_validation
 if args.held_out_test:
     X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
     Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
 
 if args.held_out_test:
+    assert False, "entering held_out_test"
     # Plot and log images
     utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
     utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 
-utils.plot_average_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
-utils.plot_first_fifteen_images(X_validation, np.argmax(Y_validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')
+if args.force_regression: 
+    validation = label_validation
+    train = label_train
+else:
+    validation = Y_validation
+    train = Y_train
+    
 
-utils.plot_average_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-utils.plot_first_fifteen_images(X_train, np.argmax(Y_train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+
+utils.plot_average_images(X_validation, np.argmax(validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture validation')
+utils.plot_first_fifteen_images(X_validation, np.argmax(validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture validation')
+
+utils.plot_average_images(X_train, np.argmax(train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+utils.plot_first_fifteen_images(X_train, np.argmax(train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
 
 if args.pretrain_and_finetune:
     utils.plot_average_images(X_train_finetuning, np.argmax(Y_train_finetuning.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'train_finetuning')
@@ -1704,7 +1767,7 @@ else:
 
             for epoch in tqdm(range(num_epochs), desc="Epoch"):
                 model.train()
-
+                # find a different torch metrics
                 # Metrics
                 train_acc = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
                 precision = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
@@ -1739,11 +1802,16 @@ else:
 
                 # Validation
                 model.eval()
+
+                # [START] Metrics to modify
                 val_acc = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
                 val_precision = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
                 val_recall = torchmetrics.Recall(task="multiclass", num_classes=numGestures).to(device)
                 val_f1 = torchmetrics.F1Score(task="multiclass", num_classes=numGestures).to(device)
                 val_top5_acc = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures).to(device)
+
+                # [END] Metrics to modifty
+                
                 
                 val_loss = 0.0
                 with torch.no_grad():
@@ -1751,6 +1819,7 @@ else:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
                         Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
 
+                        # [START] metrics to modify
                         output = model(X_batch)
                         val_loss += criterion(output, Y_batch).item()
                         val_acc(output, Y_batch)
@@ -1761,6 +1830,8 @@ else:
 
                         del X_batch, Y_batch
                         torch.cuda.empty_cache()
+
+                        # [END] metrics to modify
 
                 # Average the losses and print the metrics
                 train_loss /= len(train_loader)
