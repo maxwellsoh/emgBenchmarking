@@ -517,7 +517,7 @@ else:
 leaveOutIndices = []
 # Generate scaler for normalization
 if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # will have to run and test this again, or just remove
-    assert False, "entered leave n_subjects_out_randomly != 0"
+    # assert False, "entered leave n_subjects_out_randomly != 0"
     leaveOut = args.leave_n_subjects_out_randomly
     print(f"Leaving out {leaveOut} subjects randomly")
     # subject indices to leave out randomly
@@ -637,7 +637,7 @@ else: # Not leave n subjects out randomly
             del emg_reshaped
 
     elif (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # Running LOSO standardization
-        assert False, "entered not turn_off_scaler_normalization"
+        # assert False, "entered not turn_off_scaler_normalization"
         emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
         # s = preprocessing.StandardScaler().fit(emg_in)
         global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
@@ -798,6 +798,8 @@ if args.leave_n_subjects_out_randomly != 0:
     X_validation = torch.from_numpy(X_validation).to(torch.float16)
     Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
     
+    # add label_validation if args.force_regresssion
+
     X_train = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
     Y_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
     X_train = torch.from_numpy(X_train).to(torch.float16)
@@ -1491,9 +1493,11 @@ if not args.turn_on_unlabeled_domain_adaptation:
         test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
 
     # Define the loss function and optimizer
-    criterion = nn.CrossEntropyLoss()
+    
     if args.force_regression:
         criterion = nn.MSELoss()
+    else:
+        criterion = nn.CrossEntropyLoss()
     learn = args.learning_rate
     if args.model not in ['MLP', 'SVC', 'RF']:
         optimizer = torch.optim.Adam(model.parameters(), lr=learn)
@@ -1678,6 +1682,64 @@ utils.plot_first_fifteen_images(X_validation, np.argmax(validation.cpu().detach(
 utils.plot_average_images(X_train, np.argmax(train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture train')
 utils.plot_first_fifteen_images(X_train, np.argmax(train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture train')
 
+# Initialize number of classes based on regressions or classification
+if args.force_regression:
+    num_classes = Y_train.shape[1]
+    assert num_classes == 6
+else: 
+    num_classes = numGestures
+    assert num_classes == 10 
+
+def get_metrics():
+    """
+    Constructs training and validation metric arrays based on whether it is a regression or classification task.
+    """
+    # TODO: have validation metrics just copy
+    if args.force_regression:
+        training_metrics = [
+            torchmetrics.MeanSquaredError().to(device), 
+            torchmetrics.MeanSquaredError(squared=False).to(device), 
+            torchmetrics.MeanAbsoluteError().to(device),
+            torchmetrics.R2Score(num_outputs=6, multioutput="uniform_average").to(device), 
+            torchmetrics.R2Score(num_outputs=6, multioutput="raw_values").to(device)
+        ]
+        for metric, name in zip(training_metrics, ["MeanSquaredError", "RootMeanSquaredError","MeanAbsoluteError", "R2Score_Uniform_Average", "R2Score_Raw_Values"]):
+            metric.name = name
+
+        validation_metrics = [
+            torchmetrics.MeanSquaredError().to(device), 
+            torchmetrics.MeanSquaredError(squared=False).to(device),
+            torchmetrics.MeanAbsoluteError().to(device),
+            torchmetrics.R2Score(num_outputs=6, multioutput="uniform_average").to(device), 
+            torchmetrics.R2Score(num_outputs=6, multioutput="raw_values").to(device)
+        ]
+        for metric, name in zip(validation_metrics, ["MeanSquaredError", "RootMeanSquaredError", "MeanAbsoluteError", "R2Score_Uniform_Average", "R2Score_Raw_Values"]):
+            metric.name = name
+
+    else: 
+        training_metrics = [
+            torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device), 
+            torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device),
+            torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device),
+            torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device),
+            torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
+        ]
+        for metric, name in zip(training_metrics, ["Accuracy", "Precision", "Recall", "F1Score", "Top5Accuracy"]):
+            metric.name = name
+
+        validation_metrics = [
+            torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device), 
+            torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device),
+            torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device),
+            torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device),
+            torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
+        ]
+        for metric, name in zip(validation_metrics, ["Accuracy", "Precision", "Recall", "F1Score", "Top5Accuracy"]):
+            metric.name = name
+
+    return training_metrics, validation_metrics
+        
+    
 if args.pretrain_and_finetune:
     
     if args.force_regression:
@@ -1731,7 +1793,7 @@ if args.turn_on_unlabeled_domain_adaptation:
 
 else: 
     if args.model in ['MLP', 'SVC', 'RF']:
-        assert False, "entering MLP, SVC, RF"
+        # New block of code to add 
         class MLP(nn.Module):
             def __init__(self, input_size, hidden_sizes, output_size):
                 super(MLP, self).__init__()
@@ -1762,10 +1824,14 @@ else:
             # PyTorch MLP model
             input_size = 3 * 224 * 224  # Change according to your input size
             hidden_sizes = [512, 256]  # Example hidden layer sizes
-            output_size = 10  # Number of classes
+            output_size = num_classes  # Number of classes
             model = MLP(input_size, hidden_sizes, output_size).to(device)
             optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-            criterion = nn.CrossEntropyLoss()
+
+            if args.force_regression:
+                criterion = nn.MSELoss()
+            else:
+                criterion = nn.CrossEntropyLoss()
         
         elif args.model == 'SVC':
             model = SVC(probability=True)
@@ -1776,115 +1842,141 @@ else:
         if args.model == 'MLP':
             # PyTorch training loop for MLP
 
-            # TODO: case on value of num_classes (should not always be numGestures)
+            training_metrics, validation_metrics = get_metrics()
 
             for epoch in tqdm(range(num_epochs), desc="Epoch"):
                 model.train()
-        
+                # TODO: should not be numGestures
                 # Metrics
-                train_acc = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
-                precision = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
-                recall = torchmetrics.Recall(task="multiclass", num_classes=numGestures).to(device)
-                f1 = torchmetrics.F1Score(task="multiclass", num_classes=numGestures).to(device)
-                top5_acc = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures).to(device)
+
+                # Initialize metrics 
+                for train_metric in training_metrics:
+                    train_metric.reset()
 
                 train_loss = 0.0
                 with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+                    
+                    output_list = []
+
                     for X_batch, Y_batch in t:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
-                        Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
+                        if args.force_regression:
+                            Y_batch = Y_batch.to(device).to(torch.float32) 
+                        else:
+                            Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
 
                         optimizer.zero_grad()
                         output = model(X_batch)
+
+                        output_list.append(output)
                         loss = criterion(output, Y_batch)
                         loss.backward()
                         optimizer.step()
-
                         train_loss += loss.item()
-                        train_acc(output, Y_batch)
-                        precision(output, Y_batch)
-                        recall(output, Y_batch)
-                        f1(output, Y_batch)
-                        top5_acc(output, Y_batch)
-
-                        if t.n % 10 == 0:
-                            t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": train_acc.compute().item()})
+                        
+                        if not args.force_regression:
+                            if t.n % 10 == 0:
+                                accuracy_metric = next(metric for metric in training_metrics if metric.name == "Accuracy")
+                                t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": accuracy_metric.compute().item()})
 
                         del X_batch, Y_batch, output
                         torch.cuda.empty_cache()
 
+                output_list = torch.cat(output_list, dim=0).to(device)
+                for train_metric in training_metrics:
+                    train_metric(output_list, Y_train.to(device).to(torch.float32))
+
                 # Validation
                 model.eval()
 
-                # [START] Metrics to modify
-                val_acc = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures).to(device)
-                val_precision = torchmetrics.Precision(task="multiclass", num_classes=numGestures).to(device)
-                val_recall = torchmetrics.Recall(task="multiclass", num_classes=numGestures).to(device)
-                val_f1 = torchmetrics.F1Score(task="multiclass", num_classes=numGestures).to(device)
-                val_top5_acc = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures).to(device)
-
-                # [END] Metrics to modifty
-                
+                for val_metric in validation_metrics:
+                    val_metric.reset()
                 
                 val_loss = 0.0
                 with torch.no_grad():
+                    
+                    validation_list = []
+
                     for X_batch, Y_batch in val_loader:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
-                        Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
+                        if args.force_regression:
+                            Y_batch =  Y_batch.to(device).to(torch.float32)
+                        else: 
+                            Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
 
-                        # [START] metrics to modify
                         output = model(X_batch)
+                        validation_list.append(output)
+
                         val_loss += criterion(output, Y_batch).item()
-                        val_acc(output, Y_batch)
-                        val_precision(output, Y_batch)
-                        val_recall(output, Y_batch)
-                        val_f1(output, Y_batch)
-                        val_top5_acc(output, Y_batch)
 
                         del X_batch, Y_batch
                         torch.cuda.empty_cache()
 
                         # [END] metrics to modify
 
+                validation_list = torch.cat(validation_list, dim=0).to(device)
+                for validation_metric in validation_metrics:  
+                    validation_metric(validation_list, Y_validation.to(device).to(torch.float32))
+
                 # Average the losses and print the metrics
                 train_loss /= len(train_loader)
                 val_loss /= len(val_loader)
 
-                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
-                confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device, numGestures)
+                # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
+                training_metrics_values = {metric.name: metric.compute() for metric in training_metrics}
+                validation_metrics_values = {metric.name: metric.compute() for metric in validation_metrics}
+
+                if not args.force_regression:
+                    tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                    confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device, numGestures)
 
                 print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
-                print(f"Train Metrics: Acc: {train_acc.compute().item():.4f}, Precision: {precision.compute().item():.4f}, Recall: {recall.compute().item():.4f}, F1: {f1.compute().item():.4f}, Top-5 Acc: {top5_acc.compute().item():.4f}")
-                print(f"Val Metrics: Acc: {val_acc.compute().item():.4f}, Precision: {val_precision.compute().item():.4f}, Recall: {val_recall.compute().item():.4f}, F1: {val_f1.compute().item():.4f}, Top-5 Acc: {val_top5_acc.compute().item():.4f}")
-                for fpr, tprs in tpr_results.items():
-                    print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
-                for confidence_level, accuracy in confidence_levels.items():
-                    print(f"Val Accuracy at confidence level >{confidence_level}: {accuracy:.4f}")
+
+                train_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in training_metrics_values.items())
+                print(f"Train Metrics: {train_metrics_str}")
+
+                val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in validation_metrics_values.items())
+                print(f"Val Metrics: {val_metrics_str}")
+                
+                if not args.force_regression:
+                    for fpr, tprs in tpr_results.items():
+                        print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+                    for confidence_level, accuracy in confidence_levels.items():
+                        print(f"Val Accuracy at confidence level >{confidence_level}: {accuracy:.4f}")
 
                 # Log metrics to wandb or any other tracking tool
                 wandb.log({
-                    "train/Loss": train_loss,
-                    "train/Accuracy": train_acc,
-                    "train/Precision": train_precision,
-                    "train/Recall": train_recall,
-                    "train/F1 Score": train_f1_score,
-                    "train/Top-5 Accuracy": train_top5_acc,
-                    "train/Learning Rate": optimizer.param_groups[0]['lr'],
-                    "train/Epoch": epoch,
-
-                    "validation/Loss": val_loss,
-                    "validation/Accuracy": val_acc,
-                    "validation/Precision": val_precision,
-                    "validation/Recall": val_recall,
-                    "validation/F1 Score": val_f1_score,
-                    "validation/Top-5 Accuracy": val_top5_acc,
-
-                    # **{f"tpr_at_fixed_fpr/Val TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
-                    **{f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
-                    **{f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()}, 
-                    **{f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
-                })
-
+                "train/Loss": train_loss,
+                "train/Learning Rate": optimizer.param_groups[0]['lr'],
+                "train/Epoch": epoch,
+                "validation/Loss": val_loss,
+                **{
+                    f"train/{name}": value.item() 
+                    for name, value in training_metrics_values.items() 
+                    if name != 'R2Score_Raw_Values'
+                },
+                **{
+                    f"train/R2Score_Raw_Values_{i+1}": v.item() 
+                    for name, value in training_metrics_values.items() 
+                    if name == 'R2Score_Raw_Values'
+                    for i, v in enumerate(value)
+                },
+                **{
+                    f"validation/{name}": value.item() 
+                    for name, value in validation_metrics_values.items() 
+                    if name != 'R2Score_Raw_Values'
+                },
+                **{
+                    f"validation/R2Score_Raw_Values_{i+1}": v.item() 
+                    for name, value in validation_metrics_values.items() 
+                    if name == 'R2Score_Raw_Values'
+                    for i, v in enumerate(value)
+                },
+                **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
+                **({f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not args.force_regression else {}),
+                **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {}),
+            })
+                
             torch.save(model.state_dict(), model_filename)
             wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
@@ -1924,62 +2016,8 @@ else:
             })
 
     else: # CNN training
-        
-        if args.force_regression:
-            num_classes = Y_train.shape[1] # should be 6
-            assert num_classes == 6
-        else: 
-            num_classes = numGestures
 
         # Initialize metrics
-        def get_metrics():
-            """
-            Constructs training and validation metric arrays based on whether it is a regression or classification task.
-            """
-
-            if args.force_regression:
-                training_metrics = [
-                    torchmetrics.MeanSquaredError().to(device), 
-                    torchmetrics.MeanAbsoluteError().to(device),
-                    torchmetrics.R2Score(num_outputs=6, multioutput="uniform_average").to(device), 
-                    torchmetrics.R2Score(num_outputs=6, multioutput="raw_values").to(device)
-                ]
-                for metric, name in zip(training_metrics, ["MeanSquaredError", "MeanAbsoluteError", "R2Score_Uniform_Average", "R2Score_Raw_Values"]):
-                    metric.name = name
-
-                validation_metrics = [
-                    torchmetrics.MeanSquaredError().to(device), 
-                    torchmetrics.MeanAbsoluteError().to(device),
-                    torchmetrics.R2Score(num_outputs=6, multioutput="uniform_average").to(device), 
-                    torchmetrics.R2Score(num_outputs=6, multioutput="raw_values").to(device)
-                ]
-                for metric, name in zip(validation_metrics, ["MeanSquaredError", "MeanAbsoluteError", "R2Score_Uniform_Average", "R2Score_Raw_Values"]):
-                    metric.name = name
-
-
-            else: 
-                training_metrics = [
-                    torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device), 
-                    torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device),
-                    torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device),
-                    torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device),
-                    torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
-                ]
-                for metric, name in zip(training_metrics, ["Accuracy", "Precision", "Recall", "F1Score", "Top5Accuracy"]):
-                    metric.name = name
-
-                validation_metrics = [
-                    torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device), 
-                    torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device),
-                    torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device),
-                    torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device),
-                    torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
-                ]
-                for metric, name in zip(validation_metrics, ["Accuracy", "Precision", "Recall", "F1Score", "Top5Accuracy"]):
-                    metric.name = name
-
-            return training_metrics, validation_metrics
-        
         training_metrics, validation_metrics = get_metrics()
 
         for metric in training_metrics:
@@ -1996,6 +2034,9 @@ else:
 
 
             with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+
+                output_list = [] 
+
                 for X_batch, Y_batch in t:
                     X_batch = X_batch.to(device).to(torch.float32)
                     Y_batch = Y_batch.to(device).to(torch.float32) # ground truth
@@ -2009,22 +2050,24 @@ else:
                     output = model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
+                    output_list.append(output)
                     loss = criterion(output, Y_batch)
                     loss.backward()
                     optimizer.step()
 
                     train_loss += loss.item()
-                    for train_metric in training_metrics:
-                        train_metric(output, Y_batch_long)
 
-                    ACCURACY_INDEX = 0
-                    # TODO: should make this not a magic number (but only needed once)
-
-                    if t.n % 10 == 0:
-                        t.set_postfix({
-                            "Batch Loss": loss.item(), 
-                            "Batch Acc": training_metrics[ACCURACY_INDEX].compute().item()
-                        })
+                    if not args.force_regression:
+                        accuracy_metric = next(metric for metric in training_metrics if metric.name == "Accuracy")
+                        if t.n % 10 == 0:
+                            t.set_postfix({
+                                "Batch Loss": loss.item(), 
+                                "Batch Acc": accuracy_metric.compute().item()
+                            })
+            # loop through and apply train_metric(output[i], Y_batch_long)
+            output_list = torch.concat(output_list, dim=0).to(device)
+            for train_metric in training_metrics:
+                train_metric(output_list, Y_train.to(device).to(torch.float32))            
 
             # Validation phase
             model.eval()
@@ -2034,6 +2077,9 @@ else:
                 val_metric.reset()
 
             with torch.no_grad():
+                
+                validation_list = []
+
                 for X_batch, Y_batch in val_loader:
                     X_batch = X_batch.to(device).to(torch.float32)
                     Y_batch = Y_batch.to(device).to(torch.float32)
@@ -2046,10 +2092,14 @@ else:
                     output = model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
+
+                    validation_list.append(output)
+                        
                     val_loss += criterion(output, Y_batch).item()
 
-                    for val_metric in validation_metrics:
-                        val_metric(output, Y_batch_long)
+            validation_list = torch.concat(validation_list, dim=0).to(device)
+            for val_metric in validation_metrics:
+                val_metric(validation_list, Y_validation.to(device).to(torch.float32))
 
             # Calculate average loss and metrics
             train_loss /= len(train_loader)
@@ -2154,12 +2204,13 @@ else:
                         for ft_train_metric in ft_training_metrics:
                             ft_train_metric(output, Y_batch_long)
 
-                        if t.n % 10 == 0:
-                            ACCURACY_INDEX = 0 # TODO: should make this not a magic number (but only needed once)
-                            t.set_postfix({
-                                "Batch Loss": loss.item(), 
-                                "Batch Acc": ft_training_metrics[ACCURACY_INDEX].compute().item()
-                            })
+                        if not args.force_regression: 
+                            if t.n % 10 == 0:
+                                ft_accuracy_metric = next(metric for metric in ft_training_metrics if metric.name == "Accuracy")
+                                t.set_postfix({
+                                    "Batch Loss": loss.item(), 
+                                    "Batch Acc": ft_accuracy_metric.compute().item()
+                                })
 
                 # Finetuning Validation
                 model.eval()
@@ -2243,7 +2294,8 @@ else:
                     **({f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not args.force_regression else {}),
                     **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {}),
                 })
-                
+
+        # TODO: add testing to get_metrics         
         # Testing
         # Initialize metrics for testing
         test_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device)
