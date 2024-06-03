@@ -198,6 +198,8 @@ def getGestures_separateSessions(args):
     gesture_count = []
     for gesture in gesture_labels: 
         data = np.array(file[gesture])
+        data = torch.from_numpy(data).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
+        data = data.reshape(data.shape[0]*data.shape[2], numElectrodes, wLenTimesteps)
         gesture_count.append(len(data))
     return gesture_count
 

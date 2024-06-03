@@ -166,13 +166,16 @@ def balance(restimulus):
                 
     return indices
 
-def contract(R):
-    numGestures = R.max() + 1 # account for rest
-    assert numGestures == 50 # recognizes that it's just B, C, and D 
+def contract(R, unfold=True):
+    numGestures = R.max() + 1
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
-    for x in range(len(R)):
-        labels[x][int(R[x][0][0])] = 1.0
+    if unfold:
+        for x in range(len(R)):
+            labels[x][int(R[x][0][0])] = 1.0
+    else:
+        for x in range(len(R)):
+            labels[x][int(R[x][0])] = 1.0
     return labels
 
 def filter(emg):
@@ -180,42 +183,92 @@ def filter(emg):
     b, a = butter(N=1, Wn=999.0, btype='lowpass', analog=False, fs=2000.0)
     return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 
-def getRestim (n: int, exercise: int = 2):
+def getRestim (n: int, exercise: int = 2, unfold=True):
     restim = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['restimulus'])
-    return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+    if unfold:
+        return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+    return restim
 
-def getForceData(n: int, exercise: int = 3):
-    """
-    Returns force data from exercise 3 for a given subject n unfolded. 
+def target_normalize (data, target_min, target_max, restim):
+    source_min = np.zeros(numElectrodes, dtype=np.float32)
+    source_max = np.zeros(numElectrodes, dtype=np.float32)
 
-    Args:
-        n (int): Subject number
-        exercise (int, optional): Exercise number. Must be 3.
-    """
-    assert exercise == 3, "Only exercise 3 has force data"
-    force = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['force'])
-    return force.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-
-def normalize (data, target_min, target_max, gesture):
-    source_min = np.zeros(len(data[0]), dtype=np.float32)
-    source_max = np.zeros(len(data[0]), dtype=np.float32)
-    for i in range(len(data[0])):
+    resize = min(len(data), len(restim))
+    data = data[:resize]
+    restim = restim[:resize]
+    
+    for i in range(numElectrodes):
         source_min[i] = np.min(data[:, i])
         source_max[i] = np.max(data[:, i])
 
-    for i in range(len(data[0])):
-        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
-        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
-    return data
+    data_norm = np.zeros(data.shape, dtype=np.float32)
+    for gesture in range(target_min.shape[1]):
+        if target_min[0][gesture] == 0 and target_max[0][gesture] == 0:
+            continue
+        for i in range(numElectrodes):
+            data_norm[:, i] = data_norm[:, i] + (restim[:, 0] == gesture) * (((data[:, i] - source_min[i]) / (source_max[i] 
+            - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture])
+    return data_norm
 
-def getEMG (args):
-    n, exercise = args
-    restim = getRestim(n, exercise)
+def getEMG (args, unfold=True):
+    if (len(args) == 2):
+        n, exercise = args
+        leftout = None
+    else:
+        n, exercise, target_max, target_min, leftout = args
+
     #emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
     #emg = torch.tensor(emg.values)
-    emg = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['emg']).to(torch.float16)
-    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+    emg = io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['emg']
     
+    if not(unfold):
+        return emg.astype(np.float16)
+
+    if (leftout != None and n != leftout):
+        emg = target_normalize(emg, target_min, target_max, np.array(getRestim(n, exercise, unfold=False)))
+    
+    restim = getRestim(n, exercise, unfold=True)
+    emg = torch.from_numpy(emg).to(torch.float16)
+    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+
+def getExtrema (n, p, exercise):
+    emg = getEMG((n, exercise), unfold=False)
+    labels = getLabels((n, exercise), unfold=False)
+    
+    resize = min(len(emg), len(labels))
+    emg = emg[:resize]
+    labels = labels[:resize]
+
+    mins = np.zeros((numElectrodes, labels.shape[1]))
+    maxes = np.zeros((numElectrodes, labels.shape[1]))
+
+    for i in range(labels.shape[1]):
+        subEMG = emg[labels[:, i] == 1.0]
+        subEMG = subEMG[:int(len(subEMG)*p)]
+
+        # set the min and max for all electrodes to 0
+        if len(subEMG) == 0:
+            continue
+        
+        # subEMG will be [# timesteps, # electrodes]
+        for j in range(numElectrodes):
+            mins[j][i] = np.min(subEMG[:, j])
+            maxes[j][i] = np.max(subEMG[:, j])
+    return mins, maxes
+  
+def getForces(args):
+    n, exercise = args
+    force = getForceData(n, exercise)
+    # needed to balance data
+    restim = getRestim(n,exercise)
+    return force[balance(restim)]
+
+def getLabels (args, unfold=True):
+    n, exercise = args
+    restim = getRestim(n, exercise, unfold)
+    if unfold:
+        return contract(make_gestures_sequential(restim[balance(restim)]))
+    return contract(restim, False)
 
 def get_decrements(args):
     """
@@ -255,21 +308,8 @@ def make_gestures_sequential(balanced_restim, args):
             balanced_restim[x][0][0] = value - d
 
     return balanced_restim
+  
 
-def getLabels (input):
-    n, exercise, args = input
-    restim = getRestim(n, exercise)
-    balanced_restim = restim[balance(restim)]
-    relabeled_restim = make_gestures_sequential(balanced_restim, args)
-    return contract(relabeled_restim)
-
-def getForces(args):
-    n, exercise = args
-    force = getForceData(n, exercise)
-    # needed to balance data
-    restim = getRestim(n,exercise)
-    return force[balance(restim)]
-    
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
     data = (data - global_min) / (global_max - global_min)
@@ -532,32 +572,8 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         
     elif turn_on_hht:
         raise NotImplementedError("HHT is not implemented yet")
-    
+
     return images
-        
-
-    # with multiprocessing.Pool(processes=32) as pool:
-    #     args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-    #     images_async = pool.starmap_async(optimized_makeOneImage, args)
-    #     images = images_async.get()
-
-    # if turn_on_magnitude:
-    #     with multiprocessing.Pool(processes=32) as pool:
-    #         args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
-    #         images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
-    #         images_magnitude = images_async.get()
-    #     images = np.concatenate((images, images_magnitude), axis=2)
-        
-    # if turn_on_cwt:
-    #     NotImplementedError("CWT is not implemented yet.")
-        
-    # if turn_on_spectrogram:
-    #     NotImplementedError("Spectrogram is not implemented yet.")
-        
-    # if turn_on_hht:
-    #     NotImplementedError("HHT is not implemented yet.")
-    
-    # return images
 
 def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):
     periodLength = 0
@@ -656,18 +672,13 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     # Create subplots
     fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))
 
-    # resize average images to 224 x 224
-    resize = transforms.Resize([224, 224], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-
     print(f"Plotting first fifteen {partition_name} images...")
     for i in range(total_gestures):
         # Find indices of the first 15 images for gesture i
         gesture_indices = np.where(true_np == i)[0][:rows_per_gesture]
 
-        current_images = torch.tensor(np.array([resize(img) for img in image_data[gesture_indices]]))
-        
         # Select and denormalize only the required images
-        gesture_images = denormalize(current_images).cpu().detach().numpy()
+        gesture_images = denormalize(transforms.Resize((224,224))(image_data[gesture_indices])).cpu().detach().numpy()
 
         for j in range(len(gesture_images)):  # len(gesture_images) is no more than rows_per_gesture
             ax = axs[j, i]
@@ -684,4 +695,3 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     firstThreeImages_filename = f'{testrun_foldername}firstFifteenImages_seed{args.seed}_{partition_name}_{formatted_datetime}.png'
     plt.savefig(firstThreeImages_filename, dpi=300)
     wandb.log({f"First Fifteen {partition_name.capitalize()} Images of Each Gesture": wandb.Image(firstThreeImages_filename)})
-

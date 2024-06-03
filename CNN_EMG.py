@@ -36,6 +36,7 @@ from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorit
 from semilearn.core.utils import send_model_cuda
 import torchmetrics
 import ml_metrics_utils as ml_utils
+from sklearn.metrics import confusion_matrix, classification_report
 
 
 # Define a custom argument type for a list of integers
@@ -111,7 +112,7 @@ parser.add_argument('--target_normalize', type=float, help='use a poportion of l
 # Test with transfer learning by using some data from the validation dataset
 parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
 # Add argument for cross validation for time series
-parser.add_argument('--train_test_split_for_time_series', type=utils.str2bool, help='whether or not to use cross validation for time series. Set to False by default.', default=False)
+parser.add_argument('--train_test_split_for_time_series', type=utils.str2bool, help='whether or not to use data split for time series. Set to False by default.', default=False)
 # Add argument for proportion of left-out-subject data to use for transfer learning
 parser.add_argument('--proportion_transfer_learning_from_leftout_subject', type=float, help='proportion of left-out-subject data to use for transfer learning. Set to 0.25 by default.', default=0.25)
 # Add argument for amount for reducing number of data to generate for transfer learning
@@ -185,7 +186,7 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
 
 elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
     import utils_NinaproDB3 as utils
-    assert args.exercises == [1], "Exercises C and D are not implemented due to missing data."
+    assert args.exercises == [1] or args.partial_dataset_ninapro, "Exercises C and D are not implemented due to missing data."
     print(f"The dataset being tested is ninapro-db3")
     project_name = 'emg_benchmarking_ninapro-db3'
     exercises = True
@@ -227,6 +228,8 @@ elif (args.dataset.lower() == "sci"):
     print(f"The dataset being tested is SCI")
     project_name = 'emg_benchmarking_sci'
     args.dataset = 'sci'
+    assert not args.transfer_learning, "Transfer learning not implemented for SCI dataset"
+    assert not args.leave_one_subject_out, "Leave one subject out not implemented for SCI dataset"
     
 
 elif (args.dataset.lower() == "ozdemiremg" or args.dataset.lower() == "ozdemir_emg"):
@@ -332,7 +335,6 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
     
 if exercises:
     emg = []
@@ -350,7 +352,12 @@ if exercises:
 
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
-            emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
+            if (args.target_normalize > 0):
+                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize, exercise)
+                emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
+            else:
+                emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
+            
             emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
             
             # labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
@@ -557,9 +564,8 @@ if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normali
     del emg_reshaped
 
 else: # Not leave n subjects out randomly
-    if (args.held_out_test): # should be deprecated and deleted
-        # assert False, "entered held_out_test"
-        # [WIP] updating skf
+
+    if (args.held_out_test): # can probably be deprecated and deleted
         if args.turn_on_kfold:
             skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
             
@@ -679,7 +685,8 @@ else: # Not leave n subjects out randomly
         global_low_value = None
         global_high_value = None
         scaler = None
-        
+
+
 data = []
 
 class ToNumpy:
@@ -925,7 +932,6 @@ else:
 
             if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices:
                 if args.proportion_data_from_training_subjects<1.0:
-                     
                     X_train_temp, _, Y_train_temp, _, label_train_temp, _ = tts.train_test_split(X_train_temp, Y_train_temp, label_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
                         
                 if args.proportion_unlabeled_data_from_training_subjects>0:
@@ -945,6 +951,7 @@ else:
                 if args.proportion_unlabeled_data_from_leftout_subject>0:
                     X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled, label_finetune_labeled, label_finetune_unlabeled = tts.train_test_split(
                         X_train_temp, Y_train_temp, label_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression = args.force_regression)
+
                     X_finetune.append(np.array(X_finetune_labeled))
                     Y_finetune.append(np.array(Y_finetune_labeled))
                     label_finetune.append(np.array(label_finetune_labeled))
@@ -1075,9 +1082,7 @@ else:
         if not args.turn_on_unlabeled_domain_adaptation:
             print("Size of X_train_finetuning:  ", X_train_finetuning.size())
             print("Size of Y_train_finetuning:  ", Y_train_finetuning.size())
-        print("Size of X_validation:", X_validation.size())
-        print("Size of Y_validation:", Y_validation.size())
-        
+
         del data
         del emg
         del labels
@@ -1127,22 +1132,12 @@ else:
     
                 
             if args.proportion_data_from_training_subjects<1.0:
-                # assert False, "entering proportion_data_from_training_subjects<1.0"
-
-               
                 current_data, _, current_forces, _, current_labels, _ = tts.train_test_split(current_data, current_forces, current_labels, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                     
                 
             if args.proportion_unlabeled_data_from_training_subjects>0:
-                # assert False, "entering proportion_unlabeled_data_from_training_subjects>0"
-                
-                if args.force_regression: 
-                    X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled, label_train_labeled, label_train_unlabeled = tts.train_test_split(
+                X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled, label_train_labeled, label_train_unlabeled = tts.train_test_split(
                         current_data, current_forces, current_labels, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
-                
-                else: 
-                    X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split(
-                        current_data, current_labels, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                 
                 current_data = X_train_labeled
                 if args.force_regression:
@@ -1177,16 +1172,17 @@ else:
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
         label_validation = torch.from_numpy(label_validation).to(torch.float16)
 
+        proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
         if args.transfer_learning: # while in leave one subject out
             proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
             proportion_unlabeled_of_proportion_to_keep_of_leftout = args.proportion_unlabeled_data_from_leftout_subject
-            proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
             
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
                 if args.train_test_split_for_time_series:
                     X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject,label_validation_partial_leftout_subject= tts.train_test_split(
                         X_validation, Y_validation, label_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
     
+
                 else:
                     # assert False, "entering not train_test_split_for_time_series"
                     # Split the validation data into train and validation subsets
@@ -1205,9 +1201,7 @@ else:
 
                 
             if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
-                # assert False, "entering turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0"
                 if args.train_test_split_for_time_series:
-                    
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
                         X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
@@ -1305,13 +1299,8 @@ else:
 
         print("Regression:", args.force_regression)
         print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE/FORCE) 
-        print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE.FORCE)
-        if args.force_regression:
-            print("Size of label_train:", label_train.shape) # (SAMPLE, GESTURE)
-            print("Size of label_validation:", label_validation.shape) # (SAMPLE, GESTURE)
 
+        print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE)
         
         if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0:
             # assert False, "entering turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0"
@@ -1329,7 +1318,7 @@ else:
                 print("Size of label_train_finetuning:     ", label_train_finetuning.shape)
             
     elif args.transfer_learning and utils.num_subjects == 1:
-        # assert False, "entering transfer_learning and utils.num_subjects == 1"
+
         # [transfer_learning]
         X_train = data[0]
         if args.force_regression:
@@ -1343,6 +1332,7 @@ else:
             X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, label_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=False)
         else:
             X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, label_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=True)
+
         X_train = torch.tensor(X_train).to(torch.float16)
         Y_train = torch.tensor(Y_train).to(torch.float16)
         label_train = torch.tensor(label_train).to(torch.float16)
@@ -1352,11 +1342,23 @@ else:
 
         print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_train:     ", Y_train.shape)
-        print("Size of X_validation:", X_validation.shape)
-        print("Size of Y_validation:", Y_validation.shape)
-    
     else: 
         raise ValueError("Please specify the type of test you want to run")
+
+# get X_test and Y_test from splitting validation 50-50 with stratify
+if args.train_test_split_for_time_series:
+    X_test, X_validation, Y_test, Y_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation, random_state=args.seed, shuffle=False)
+else:
+    X_test, X_validation, Y_test, Y_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation, random_state=args.seed, shuffle=True)
+
+X_test = torch.from_numpy(X_test).to(torch.float16)
+Y_test = torch.from_numpy(Y_test).to(torch.float16)
+X_validation = torch.from_numpy(X_validation).to(torch.float16)
+Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
+print("Size of X_test:      ", X_test.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+print("Size of Y_test:      ", Y_test.shape) # (SAMPLE, GESTURE)
 
 model_name = args.model
 
@@ -1370,8 +1372,8 @@ else:
 def ceildiv(a, b):
         return -(a // -b)
     
-if args.turn_on_unlabeled_domain_adaptation:
-    # assert False
+
+if args.turn_on_unlabeled_domain_adaptation: # set up datasets and config for unlabeled domain adaptation
     current_date_and_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     assert (args.transfer_learning and args.train_test_split_for_time_series) or args.leave_one_session_out, \
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
@@ -1515,13 +1517,15 @@ else:
         num_ftrs = model.fc.in_features  # Get the number of input features of the original fc layer
         model.fc = nn.Linear(num_ftrs, numGestures)  # Replace with a new linear layer
     elif args.model == 'convnext_tiny_custom':
-        # %% Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
         class LayerNorm2d(nn.LayerNorm):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 x = x.permute(0, 2, 3, 1)
                 x = torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
                 x = x.permute(0, 3, 1, 2)
                 return x
+            
+        # Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
+
 
         n_inputs = 768
         hidden_size = 128 # default is 2048
@@ -1583,7 +1587,7 @@ class CustomDataset(Dataset):
             x = self.transform(x)
         return x, y
 
-if not args.turn_on_unlabeled_domain_adaptation:
+if not args.turn_on_unlabeled_domain_adaptation: # set up datasets, loaders, schedulers, and optimizer
     if args.model not in ['MLP', 'SVC', 'RF']:
         num = 0
         for name, param in model.named_parameters():
@@ -1606,11 +1610,11 @@ if not args.turn_on_unlabeled_domain_adaptation:
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
     val_dataset = CustomDataset(X_validation, Y_validation, transform=resize_transform)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
+
     if (args.held_out_test):
-        # assert False, "entering held_out_test"
-        # [WIP] skf
         test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
+
 
     # Define the loss function and optimizer
     
@@ -1711,6 +1715,7 @@ def create_wandb_runname():
     return wandb_runname
 wandb_runname = create_wandb_runname()
 
+
 if (args.held_out_test):
 
     if args.turn_on_kfold:
@@ -1777,24 +1782,21 @@ Y_train = torch.from_numpy(Y_train).to(torch.float16) if isinstance(Y_train, np.
 label_train = torch.from_numpy(label_train).to(torch.float16) if isinstance(label_train, np.ndarray) else label_train
 X_validation = torch.from_numpy(X_validation).to(torch.float16) if isinstance(X_validation, np.ndarray) else X_validation
 Y_validation = torch.from_numpy(Y_validation).to(torch.float16) if isinstance(Y_validation, np.ndarray) else Y_validation
+
 label_validation = torch.from_numpy(label_validation).to(torch.float16) if isinstance(label_validation, np.ndarray) else label_validation
 
-if args.held_out_test:
-    # [WIP] skf
-    X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
-    Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
 
-if args.held_out_test:
-    # assert False, "entering held_out_test"
-    # [WIP] skf
-    # Plot and log images
-    if args.force_regression:
-        test = label_test
-    else:
-        test = Y_test
-    
-    utils.plot_average_images(X_test, np.argmax(test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture test')
-    utils.plot_first_fifteen_images(X_test, np.argmax(test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture test')
+X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
+Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
+
+# Plot and log images
+if args.force_regression:
+    test = label_test
+else:
+    test = Y_test
+
+utils.plot_average_images(X_test, np.argmax(test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture test')
+utils.plot_first_fifteen_images(X_test, np.argmax(test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture test')
     
 def get_metrics(return_testing=args.held_out_test):
     """
@@ -1815,13 +1817,17 @@ def get_metrics(return_testing=args.held_out_test):
 
     def get_classification_metrics():
         classification_metrics = [
-            torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device), 
-            torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
+          torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="macro").to(device),
+          torchmetrics.Precision(task="multiclass", num_classes=numGestures, average="macro").to(device),
+          torchmetrics.Recall(task="multiclass", num_classes=numGestures, average="macro").to(device),
+          torchmetrics.F1Score(task="multiclass", num_classes=numGestures, average="macro").to(device),
+          torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device),
+          torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device),
+          torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device),
+          torchmetrics.AUROC(task="multiclass", num_classes=numGestures, average="macro").to(device),
+          torchmetrics.AveragePrecision(task="multiclass", num_classes=numGestures, average="macro").to(device)
         ]
-        for metric, name in zip(classification_metrics, ["Accuracy", "Precision", "Recall", "F1Score", "Top5Accuracy"]):
+        for metric, name in zip(classification_metrics, ["Macro_Acc", "Macro_Precision", "Macro_Recall", "Macro_F1", "Macro_Top5Acc", "Micro_Acc", "Micro_Top5Acc", "Macro_Auroc", "Macro_Auprc"]):
             metric.name = name
         
         return classification_metrics
@@ -1831,6 +1837,7 @@ def get_metrics(return_testing=args.held_out_test):
         validation_metrics = get_regression_metrics()
         if return_testing:
             testing_metrics = get_regression_metrics()
+
 
     else: 
         training_metrics = get_classification_metrics()
@@ -1887,7 +1894,18 @@ if args.turn_on_unlabeled_domain_adaptation:
     semilearn_algorithm.scheduler = None
     
     semilearn_algorithm.train()
-    
+
+    if args.model == 'vit_tiny_patch2_32':
+        resize_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
+    else:
+        resize_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+    test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
+    criterion = nn.CrossEntropyLoss()
+    wandb.init(name=wandb_runname+"_unlab_test", project=project_name)
+    ml_utils.evaluate_model_on_test_set(semilearn_algorithm.model, test_loader, device, numGestures, criterion, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    wandb.finish()
+
     if args.pretrain_and_finetune:
         print("Finetuning the model...")
         run = wandb.init(name=wandb_runname+"_unlab_finetune", project=project_name)
@@ -1916,6 +1934,10 @@ if args.turn_on_unlabeled_domain_adaptation:
 
         semilearn_algorithm.loader_dict['eval'] = validation_loader
         semilearn_algorithm.train()
+
+        wandb.init(name=wandb_runname+"_unlab_finetune_test", project=project_name)
+        ml_utils.evaluate_model_on_test_set(semilearn_algorithm.model, test_loader, device, numGestures, criterion, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+        wandb.finish()
 
 else: 
     if args.model in ['MLP', 'SVC', 'RF']:
@@ -1971,7 +1993,7 @@ else:
 
             for epoch in tqdm(range(num_epochs), desc="Epoch"):
                 model.train()
-                # Metrics
+   
 
                 # Initialize metrics 
                 for train_metric in training_metrics:
@@ -1980,7 +2002,7 @@ else:
                 train_loss = 0.0
                 with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
                     
-                    # output_list = []
+                    outputs_all = []
 
                     for X_batch, Y_batch in t:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
@@ -1998,27 +2020,35 @@ else:
                         optimizer.step()
                         train_loss += loss.item()
 
+
                         for train_metric in training_metrics:
                             train_metric(output, Y_batch)
+      
+                        outputs_all.append(output)
                         
                         if not args.force_regression:
                             if t.n % 10 == 0:
-                                accuracy_metric = next(metric for metric in training_metrics if metric.name == "Accuracy")
+                                accuracy_metric = next(metric for metric in training_metrics if metric.name == "Macro_Acc")
                                 t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": accuracy_metric.compute().item()})
 
                         del X_batch, Y_batch, output
                         torch.cuda.empty_cache()
-
-                # output_list = torch.cat(output_list, dim=0).to(device)
-                # for train_metric in training_metrics:
-                #     train_metric(output_list, Y_train.to(device).to(torch.float32))
+                    
+                    outputs_all = torch.cat(outputs_all, dim=0).to(device)
+                    Y_train_long = torch.argmax(Y_train, dim=1).to(device).to(torch.int64)
+                    train_macro_auroc(outputs_all, Y_train_long)
+                    train_macro_auprc(outputs_all, Y_train_long)
 
                 # Validation
                 model.eval()
 
+
                 for val_metric in validation_metrics:
                     val_metric.reset()
-                
+      
+                all_val_outputs = []
+                all_val_labels = []
+
                 val_loss = 0.0
                 with torch.no_grad():
                     
@@ -2038,14 +2068,29 @@ else:
 
                         val_loss += criterion(output, Y_batch).item()
 
+                        all_val_outputs.append(output)
+                        all_val_labels.append(Y_batch)
+
                         del X_batch, Y_batch
                         torch.cuda.empty_cache()
 
-                        # [END] metrics to modify
+                all_val_outputs = torch.cat(all_val_outputs, dim=0)
+                all_val_labels = torch.cat(all_val_labels, dim=0)
 
-                # validation_list = torch.cat(validation_list, dim=0).to(device)
-                # for validation_metric in validation_metrics:  
-                #     validation_metric(validation_list, Y_validation.to(device).to(torch.float32))
+                if not args.force_regression: 
+                  Y_validation_long = torch.argmax(Y_validation, dim=1).to(device).to(torch.int64)
+
+                  true_labels = Y_validation_long.cpu().detach().numpy()
+                  test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+                  conf_matrix = confusion_matrix(true_labels, test_predictions)
+                  print("Confusion Matrix:")
+                  print(conf_matrix)
+                  
+                  val_macro_auroc = next(metric for metric in validation_metrics if metric.name == "Macro_Auroc")
+                  val_macro_auprc = next(metric for metric in validation_metrics if metric.name == "Macro_Auprc")
+
+                  val_macro_auroc(all_val_outputs, Y_validation_long)
+                  val_macro_auprc(all_val_outputs, Y_validation_long)
 
                 # Average the losses and print the metrics
                 train_loss /= len(train_loader)
@@ -2056,8 +2101,9 @@ else:
                 validation_metrics_values = {metric.name: metric.compute() for metric in validation_metrics}
 
                 if not args.force_regression:
-                    tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
-                    confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device, numGestures)
+                  tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                  fpr_results = ml_utils.evaluate_model_fpr_at_tpr(model, val_loader, device, numGestures)
+                  confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device, numGestures)
 
                 print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
 
@@ -2102,6 +2148,7 @@ else:
                     for i, v in enumerate(value)
                 },
                 **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
+                **({f"fpr_at_fixed_fpr/Average Val FPR at {tprs} TPR": np.mean(fpr) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
                 **({f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not args.force_regression else {}),
                 **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {}),
             })
@@ -2109,7 +2156,8 @@ else:
             torch.save(model.state_dict(), model_filename)
             wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
-        else:
+
+        else: # SVC or RF
             X_train, Y_train = get_data_from_loader(train_loader)
             X_val, Y_val = get_data_from_loader(val_loader)
             # X_test, Y_test = get_data_from_loader(test_loader)
@@ -2161,13 +2209,14 @@ else:
             train_loss = 0.0
 
             # Reset training metrics at the start of each epoch
+
             for train_metric in training_metrics:
                 train_metric.reset()
 
+            outputs_train_all = []
+
 
             with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
-
-                # output_list = [] 
 
                 for X_batch, Y_batch in t:
                     X_batch = X_batch.to(device).to(torch.float32)
@@ -2182,27 +2231,36 @@ else:
                     output = model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
-                    # output_list.append(output)
+                 
                     loss = criterion(output, Y_batch)
                     loss.backward()
                     optimizer.step()
 
+                    outputs_train_all.append(output)
+
                     train_loss += loss.item()
 
                     for train_metric in training_metrics:
+                      if train_metric.name != "Macro_Auroc" and train_metric.name != "Macro_Aupr":
                         train_metric(output, Y_batch_long)
 
                     if not args.force_regression:
-                        accuracy_metric = next(metric for metric in training_metrics if metric.name == "Accuracy")
+                        accuracy_metric = next(metric for metric in training_metrics if metric.name == "Micro_Acc")
                         if t.n % 10 == 0:
                             t.set_postfix({
                                 "Batch Loss": loss.item(), 
                                 "Batch Acc": accuracy_metric.compute().item()
                             })
-            # loop through and apply train_metric(output[i], Y_batch_long)
-            # output_list = torch.concat(output_list, dim=0).to(device)
-            # for train_metric in training_metrics:
-            #     train_metric(output_list, Y_train.to(device).to(torch.float32))            
+                     
+
+                outputs_train_all = torch.cat(outputs_train_all, dim=0).to(device)
+            
+            if not args.force_regression: 
+              train_macro_auroc_metric = next(metric for metric in training_metrics if metric.name == "Macro_Auroc")
+              train_macro_auprc_metric = next(metric for metric in training_metrics if metric.name == "Macro_Auprc")
+              
+              train_macro_auroc_metric(outputs_train_all, torch.argmax(Y_train, dim=1).to(device))
+              train_macro_auprc_metric(outputs_train_all, torch.argmax(Y_train, dim=1).to(device))
 
             # Validation phase
             model.eval()
@@ -2210,6 +2268,9 @@ else:
 
             for val_metric in validation_metrics:
                 val_metric.reset()
+
+            all_val_outputs = []
+            all_val_labels = []
 
             with torch.no_grad():
                 
@@ -2228,27 +2289,42 @@ else:
                     if isinstance(output, dict):
                         output = output['logits']
 
-                    # validation_list.append(output)
-                        
-                    val_loss += criterion(output, Y_batch).item()
+                    all_val_outputs.append(output)
+                    all_val_labels.append(Y_batch_long)
 
+                    val_loss += criterion(output, Y_batch).item()
                     for val_metric in validation_metrics:
                         val_metric(output, Y_batch_long)
 
-            # validation_list = torch.concat(validation_list, dim=0).to(device)
-            # for val_metric in validation_metrics:
-            #     val_metric(validation_list, Y_validation.to(device).to(torch.float32))
+            all_val_outputs = torch.cat(all_val_outputs, dim=0)
+            all_val_labels = torch.cat(all_val_labels, dim=0)
+            
+            if not args.force_regression: 
+              Y_validation_long = torch.argmax(Y_validation, dim=1).to(device)
+              true_labels = Y_validation_long.cpu().detach().numpy()
+              test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+              conf_matrix = confusion_matrix(true_labels, test_predictions)
+              print("Confusion Matrix:")
+              print(conf_matrix)
+              
+              val_macro_auroc_metric = next(metric for metric in validation_metrics if metric.name == "Macro_Auroc")
+              val_macro_auprc_metric = next(metric for metric in validation_metrics if metric.name == "Macro_Auroc")
+
+              val_macro_auroc_metric(all_val_outputs, Y_validation_long)
+              val_macro_auprc_metric(all_val_outputs, Y_validation_long)
 
             # Calculate average loss and metrics
             train_loss /= len(train_loader)
             val_loss /= len(val_loader)
+
 
             # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
             training_metrics_values = {metric.name: metric.compute() for metric in training_metrics}
             validation_metrics_values = {metric.name: metric.compute() for metric in validation_metrics}
 
             if not args.force_regression:
-                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, num_classes)
+                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                fpr_results = ml_utils.evaluate_model_fpr_at_tpr(model, val_loader, device, numGestures)
                 confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
 
             # Print metric values
@@ -2260,11 +2336,6 @@ else:
             val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in validation_metrics_values.items())
             print(f"Val Metrics: {val_metrics_str}")
 
-            if not args.force_regression: 
-                for fpr, tprs in tpr_results.items():
-                    print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
-                for confidence_level, acc in confidence_levels.items():
-                    print(f"Val Accuracy at {confidence_level} confidence level: {acc:.4f}")
 
             wandb.log({
                 "train/Loss": train_loss,
@@ -2294,6 +2365,7 @@ else:
                     for i, v in enumerate(value)
                 },
                 **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
+                **({f"fpr_at_fixed_fpr/Average Val FPR at {tpr} FPR": np.mean(fprs) for tpr, fprs in fpr_results.items()} if not args.force_regression else {}),
                 **({f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not args.force_regression else {}),
                 **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {}),
             })
@@ -2302,8 +2374,70 @@ else:
         wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
         if args.pretrain_and_finetune:
+            ### Finish the current run and start a new run for finetuning
+            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime)
+
+            model.eval()
+            with torch.no_grad():
+                test_predictions = []
+                for X_batch, Y_batch in tqdm(test_loader, desc="Test Batch Loading for Confusion Matrix"):
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    outputs = model(X_batch)
+                    if isinstance(outputs, dict):
+                        outputs = outputs['logits']
+                    preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+                    test_predictions.extend(preds)
+
+            # Print confusion matrix before plotting
+            # Convert lists to numpy arrays
+            true_labels = np.argmax(Y_test.cpu().detach().numpy(), axis=1)
+            test_predictions = np.array(test_predictions)
+
+            # Calculate and print the confusion matrix
+            conf_matrix = confusion_matrix(true_labels, test_predictions)
+            print("Confusion Matrix:")
+            print(conf_matrix)
+
+            print("Classification Report:")
+            print(classification_report(true_labels, test_predictions))
+            
+            utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
+
+            torch.cuda.empty_cache()  # Clear cache if needed
+
+            model.eval()
+            with torch.no_grad():
+                validation_predictions = []
+                for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading for Confusion Matrix"):
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    outputs = model(X_batch)
+                    if isinstance(outputs, dict):
+                        outputs = outputs['logits']
+                    preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+                    validation_predictions.extend(preds)
+
+            utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+
+            # Load training in smaller batches for memory purposes
+            torch.cuda.empty_cache()  # Clear cache if needed
+
+            model.eval()
+            train_loader_unshuffled = DataLoader(train_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
+            with torch.no_grad():
+                train_predictions = []
+                for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading for Confusion Matrix"):
+                    X_batch = X_batch.to(device).to(torch.float32)
+                    outputs = model(X_batch)
+                    if isinstance(outputs, dict):
+                            outputs = outputs['logits']
+                    preds = torch.argmax(outputs, dim=1)
+                    train_predictions.extend(preds.cpu().detach().numpy())
+
+            utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
             run.finish()
-            run = wandb.init(name=wandb_runname+"_finetune", project=project_name)
+
+            ### Initiate new logging of finetuning phase
+            run = wandb.init(name=wandb_runname+"_finetune", project=project_name) 
             num_epochs = args.finetuning_epochs
             # train more on fine tuning dataset
             finetune_dataset = CustomDataset(X_train_finetuning, Y_train_finetuning, transform=resize_transform)
@@ -2317,8 +2451,10 @@ else:
                 train_loss = 0.0
 
                 # Reset finetuning training metrics at the start of each epoch
+
                 for ft_train_metric in ft_training_metrics:
                     ft_train_metric.reset()
+
 
                 with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{num_epochs}", leave=False) as t:
                     for X_batch, Y_batch in t:
@@ -2333,7 +2469,7 @@ else:
                         output = model(X_batch)
                         if isinstance(output, dict):
                             output = output['logits']
-                        loss = criterion(output, Y_batch)
+                        loss = criterion(output, Y_batch_long)
                         loss.backward()
                         optimizer.step()
 
@@ -2344,15 +2480,20 @@ else:
 
                         if not args.force_regression: 
                             if t.n % 10 == 0:
-                                ft_accuracy_metric = next(metric for metric in ft_training_metrics if metric.name == "Accuracy")
+                                ft_accuracy_metric = next(metric for metric in ft_training_metrics if metric.name == "Macro_Acc")
                                 t.set_postfix({
                                     "Batch Loss": loss.item(), 
                                     "Batch Acc": ft_accuracy_metric.compute().item()
                                 })
 
+
                 # Finetuning Validation
                 model.eval()
                 val_loss = 0.0
+
+
+                all_val_outputs = []
+                all_val_labels = []
 
                 for ft_val_metric in ft_validation_metrics:
                     ft_val_metric.reset()
@@ -2370,23 +2511,51 @@ else:
                         if isinstance(output, dict):
                             output = output['logits']
                         val_loss += criterion(output, Y_batch).item()
-
                         for ft_val_metric in ft_validation_metrics:
                             ft_val_metric(output, Y_batch_long)
+
+                        all_val_outputs.append(output)
+                        all_val_labels.append(Y_batch_long)
+
+                all_val_outputs = torch.cat(all_val_outputs, dim=0)
+                all_val_labels = torch.cat(all_val_labels, dim=0)
+        
+                if not args.force_regression:
+
+                  Y_validation_long = torch.argmax(Y_validation, dim=1).to(device)
+
+                  true_labels = Y_validation_long.cpu().detach().numpy()
+                  test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+                  conf_matrix = confusion_matrix(true_labels, test_predictions)
+                  print("Confusion Matrix:")
+                  print(conf_matrix)
+                  
+                  finetune_val_macro_auroc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_Auroc")
+                  finetune_val_macro_auprc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_Auroc")
+
+                  finetune_val_macro_auroc_metric(all_val_outputs, Y_validation_long)
+                  finetune_val_macro_auprc_metric(all_val_outputs, Y_validation_long)
+
+
+                        
 
                 # Calculate average loss and metrics
                 train_loss /= len(finetune_loader)
                 val_loss /= len(val_loader)
 
+
                 # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
                 ft_training_metrics_values = {ft_metric.name: ft_metric.compute() for ft_metric in ft_training_metrics}
                 ft_validation_metrics_values = {ft_metric.name: ft_metric.compute() for ft_metric in ft_validation_metrics}
                 if not args.force_regression:
-                    tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, num_classes)
-                    confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
+                  tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                  fpr_results = ml_utils.evaluate_model_fpr_at_tpr(model, val_loader, device, numGestures)
+                  confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
+
 
                 # Print metric values
                 print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+
 
                 ft_train_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in ft_training_metrics_values.items())
                 print(f"Train Metrics | {ft_train_metrics_str}")
@@ -2428,6 +2597,7 @@ else:
                         for i, v in enumerate(value)
                     },
                     **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
+                    **({f"fpr_at_fixed_fpr/Average Val FPR at {tpr} FPR": np.mean(fprs) for tpr, fprs in fpr_results.items()} if not args.force_regression else {}),
                     **({f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not args.force_regression else {}),
                     **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {}),
                 })
@@ -2457,67 +2627,43 @@ else:
             pred = []
             true = []
 
-            with torch.no_grad():
-                for X_batch, Y_batch in test_loader:
-                    X_batch = X_batch.to(device).to(torch.float32)
-                    Y_batch = Y_batch.to(device).to(torch.float32)
-                    Y_batch_long = torch.argmax(Y_batch, dim=1)
+            # Evaluate the model on the test set
+            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime)
 
-                    output = model(X_batch)
-                    if isinstance(output, dict):
-                        output = output['logits']
-                    pred.extend(torch.argmax(output, dim=1).cpu().detach().numpy())
-                    true.extend(Y_batch_long.cpu().detach().numpy())
+        torch.cuda.empty_cache()  # Clear cache if needed
 
-                    test_loss += criterion(output, Y_batch).item()
-                    test_acc_metric(output, Y_batch_long)
-                    test_precision_metric(output, Y_batch_long)
-                    test_recall_metric(output, Y_batch_long)
-                    test_f1_score_metric(output, Y_batch_long)
-                    test_top5_acc_metric(output, Y_batch_long)
+        model.eval()
+        with torch.no_grad():
+            test_predictions = []
+            for X_batch, Y_batch in tqdm(test_loader, desc="Test Batch Loading for Confusion Matrix"):
+                X_batch = X_batch.to(device).to(torch.float32)
+                outputs = model(X_batch)
+                if isinstance(outputs, dict):
+                    outputs = outputs['logits']
+                preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+                test_predictions.extend(preds)
 
-            # Calculate average loss and metrics
-            test_loss /= len(test_loader)
-            test_acc = test_acc_metric.compute()
-            test_precision = test_precision_metric.compute()
-            test_recall = test_recall_metric.compute()
-            test_f1_score = test_f1_score_metric.compute()
-            test_top5_acc = test_top5_acc_metric.compute()
-            tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, test_loader, device, numGestures)
-            confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, test_loader, device)
+        # Print confusion matrix before plotting
+        # Convert lists to numpy arrays
+        true_labels = np.argmax(Y_test.cpu().detach().numpy(), axis=1)
+        test_predictions = np.array(test_predictions)
 
-            print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f} | Test Precision: {test_precision:.4f} | Test Recall: {test_recall:.4f} | Test F1 Score: {test_f1_score:.4f} | Test Top-5 Accuracy: {test_top5_acc:.4f}")
-            for fpr, tprs in tpr_results.items():
-                print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
-            for confidence_level, acc in confidence_levels.items():
-                print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
+        # Calculate and print the confusion matrix
+        conf_matrix = confusion_matrix(true_labels, test_predictions)
+        print("Confusion Matrix:")
+        print(conf_matrix)
 
-            wandb.log({
-                "test/Test Loss": test_loss,
-                "test/Test Acc": test_acc,  
-                "test/Test Precision": test_precision,
-                "test/Test Recall": test_recall,
-                "test/Test F1": test_f1_score,
-                "test/Test Top-5 Acc": test_top5_acc,
+        print("Classification Report:")
+        print(classification_report(true_labels, test_predictions))
+            
+        utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
 
-                # **{f"tpr_at_fixed_fpr/Test TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
-                **{f"tpr_at_fixed_fpr/Average Test TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
-                **{f"confidence_level_accuracies/Test Accuracy at {confidence_level} confidence level": acc for confidence_level, acc in confidence_levels.items()},
-                **{f"proportion_above_confidence_threshold/Test Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
-
-            })
-
-            # %% Confusion Matrix
-            # Plot and log confusion matrix in wandb
-            utils.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-
-        # Load validation in smaller batches for memory purposes
         torch.cuda.empty_cache()  # Clear cache if needed
 
         model.eval()
         with torch.no_grad():
             validation_predictions = []
-            for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading"):
+            for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading for Confusion Matrix"):
                 X_batch = X_batch.to(device).to(torch.float32)
                 outputs = model(X_batch)
                 if isinstance(outputs, dict):
@@ -2535,7 +2681,7 @@ else:
         train_loader_unshuffled = DataLoader(train_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
         with torch.no_grad():
             train_predictions = []
-            for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading"):
+            for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading for Confusion Matrix"):
                 X_batch = X_batch.to(device).to(torch.float32)
                 outputs = model(X_batch)
                 if isinstance(outputs, dict):
