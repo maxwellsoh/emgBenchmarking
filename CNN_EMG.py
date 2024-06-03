@@ -1333,7 +1333,7 @@ else:
             label_train = labels[0]
         else:
             Y_train = labels[0]
-            label_train = label_train[0]
+            label_train = labels[0]
         
         if args.cross_validation_for_time_series:
             X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, label_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=False)

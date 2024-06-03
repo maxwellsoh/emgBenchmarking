@@ -34,9 +34,13 @@ def train_test_split(
         if not force_regression and Y_train_set_og.shape[1] != 1:
             # if classification, change one hot encodings to 1D array   
             Y_train_set = np.argmax(Y_train_set_og, axis=1)
+        else:
+            Y_train_set = Y_train_set_og
 
         if label_train_set_og.shape[1] != 1:
             label_train_set = np.argmax(label_train_set_og, axis=1)
+        else:
+            label_train_set = label_train_set_og
 
         unique, counts = np.unique(stratify, return_counts=True)
         # split data for each class
@@ -81,7 +85,7 @@ def train_test_split(
         label_test = np.concatenate(label_test)
         
         # if Y_train_set is one-hot-encoded, turn results into one-hot-encoded
-        if Y_train_set_og.shape[1] != 1:
+        if not force_regression and Y_train_set_og.shape[1] != 1:
             y_train = np.eye(len(np.unique(y_train)))[y_train]
             y_test = np.eye(len(np.unique(y_test)))[y_test]
 
