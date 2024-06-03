@@ -1716,55 +1716,54 @@ if args.held_out_test:
     utils.plot_average_images(X_test, np.argmax(test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture test')
     utils.plot_first_fifteen_images(X_test, np.argmax(test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture test')
     
-def get_metrics():
+def get_metrics(return_testing=args.held_out_test):
     """
-    Constructs training and validation metric arrays based on whether it is a regression or classification task.
+    Constructs training and validation metric arrays based on whether it is a regression or classification task. Also returns testing metrics if args.held_out_test.
     """
-    # TODO: have validation metrics just copy
-    if args.force_regression:
-        training_metrics = [
+    def get_regression_metrics():
+        regression_metrics = [
             torchmetrics.MeanSquaredError().to(device), 
             torchmetrics.MeanSquaredError(squared=False).to(device), 
             torchmetrics.MeanAbsoluteError().to(device),
             torchmetrics.R2Score(num_outputs=6, multioutput="uniform_average").to(device), 
             torchmetrics.R2Score(num_outputs=6, multioutput="raw_values").to(device)
         ]
-        for metric, name in zip(training_metrics, ["MeanSquaredError", "RootMeanSquaredError","MeanAbsoluteError", "R2Score_Uniform_Average", "R2Score_Raw_Values"]):
+        for metric, name in zip(regression_metrics, ["MeanSquaredError", "RootMeanSquaredError","MeanAbsoluteError", "R2Score_UniformAverage", "R2Score_RawValues"]):
             metric.name = name
 
-        validation_metrics = [
-            torchmetrics.MeanSquaredError().to(device), 
-            torchmetrics.MeanSquaredError(squared=False).to(device),
-            torchmetrics.MeanAbsoluteError().to(device),
-            torchmetrics.R2Score(num_outputs=6, multioutput="uniform_average").to(device), 
-            torchmetrics.R2Score(num_outputs=6, multioutput="raw_values").to(device)
+        return regression_metrics
+
+    def get_classification_metrics():
+        classification_metrics = [
+            torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device), 
+            torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device),
+            torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device),
+            torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device),
+            torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
         ]
-        for metric, name in zip(validation_metrics, ["MeanSquaredError", "RootMeanSquaredError", "MeanAbsoluteError", "R2Score_Uniform_Average", "R2Score_Raw_Values"]):
+        for metric, name in zip(classification_metrics, ["Accuracy", "Precision", "Recall", "F1Score", "Top5Accuracy"]):
             metric.name = name
+        
+        return classification_metrics
+        
+    if args.force_regression:
+        training_metrics = get_regression_metrics()
+        validation_metrics = get_regression_metrics()
+        if return_testing:
+            testing_metrics = get_regression_metrics()
 
     else: 
-        training_metrics = [
-            torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device), 
-            torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
-        ]
-        for metric, name in zip(training_metrics, ["Accuracy", "Precision", "Recall", "F1Score", "Top5Accuracy"]):
-            metric.name = name
+        training_metrics = get_classification_metrics()
+        validation_metrics = get_classification_metrics()
+        if return_testing:
+            testing_metrics = get_classification_metrics()
 
-        validation_metrics = [
-            torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device), 
-            torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
-        ]
-        for metric, name in zip(validation_metrics, ["Accuracy", "Precision", "Recall", "F1Score", "Top5Accuracy"]):
-            metric.name = name
-
-    return training_metrics, validation_metrics
-        
+    if return_testing:
+        return training_metrics, validation_metrics, testing_metrics
+    else: 
+        assert training_metrics is not None and validation_metrics is not None
+        return training_metrics, validation_metrics
+       
 if args.force_regression: 
     validation = label_validation
     train = label_train
@@ -1888,7 +1887,7 @@ else:
             
         if args.model == 'MLP':
             # PyTorch training loop for MLP
-            training_metrics, validation_metrics = get_metrics(return_training=False)
+            training_metrics, validation_metrics = get_metrics(return_testing=False)
 
             for epoch in tqdm(range(num_epochs), desc="Epoch"):
                 model.train()
@@ -1901,7 +1900,7 @@ else:
                 train_loss = 0.0
                 with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
                     
-                    output_list = []
+                    # output_list = []
 
                     for X_batch, Y_batch in t:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
@@ -1913,11 +1912,14 @@ else:
                         optimizer.zero_grad()
                         output = model(X_batch)
 
-                        output_list.append(output)
+                        # output_list.append(output)
                         loss = criterion(output, Y_batch)
                         loss.backward()
                         optimizer.step()
                         train_loss += loss.item()
+
+                        for train_metric in training_metrics:
+                            train_metric(output, Y_batch)
                         
                         if not args.force_regression:
                             if t.n % 10 == 0:
@@ -1927,9 +1929,9 @@ else:
                         del X_batch, Y_batch, output
                         torch.cuda.empty_cache()
 
-                output_list = torch.cat(output_list, dim=0).to(device)
-                for train_metric in training_metrics:
-                    train_metric(output_list, Y_train.to(device).to(torch.float32))
+                # output_list = torch.cat(output_list, dim=0).to(device)
+                # for train_metric in training_metrics:
+                #     train_metric(output_list, Y_train.to(device).to(torch.float32))
 
                 # Validation
                 model.eval()
@@ -1940,7 +1942,7 @@ else:
                 val_loss = 0.0
                 with torch.no_grad():
                     
-                    validation_list = []
+                    # validation_list = []
 
                     for X_batch, Y_batch in val_loader:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
@@ -1950,7 +1952,9 @@ else:
                             Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
 
                         output = model(X_batch)
-                        validation_list.append(output)
+                        # validation_list.append(output)
+                        for validation_metric in validation_metrics:
+                            validation_metric(output, Y_batch)
 
                         val_loss += criterion(output, Y_batch).item()
 
@@ -1959,9 +1963,9 @@ else:
 
                         # [END] metrics to modify
 
-                validation_list = torch.cat(validation_list, dim=0).to(device)
-                for validation_metric in validation_metrics:  
-                    validation_metric(validation_list, Y_validation.to(device).to(torch.float32))
+                # validation_list = torch.cat(validation_list, dim=0).to(device)
+                # for validation_metric in validation_metrics:  
+                #     validation_metric(validation_list, Y_validation.to(device).to(torch.float32))
 
                 # Average the losses and print the metrics
                 train_loss /= len(train_loader)
@@ -1977,10 +1981,10 @@ else:
 
                 print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
 
-                training_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in training_metrics_values.items())
+                training_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in training_metrics_values.items())
                 print(f"Train Metrics: {training_metrics_str}")
 
-                val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in validation_metrics_values.items())
+                val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in validation_metrics_values.items())
                 print(f"Val Metrics: {val_metrics_str}")
                 
                 if not args.force_regression:
@@ -1998,23 +2002,23 @@ else:
                 **{
                     f"train/{name}": value.item() 
                     for name, value in training_metrics_values.items() 
-                    if name != 'R2Score_Raw_Values'
+                    if name != 'R2Score_RawValues'
                 },
                 **{
-                    f"train/R2Score_Raw_Values_{i+1}": v.item() 
+                    f"train/R2Score_RawValues_{i+1}": v.item() 
                     for name, value in training_metrics_values.items() 
-                    if name == 'R2Score_Raw_Values'
+                    if name == 'R2Score_RawValues'
                     for i, v in enumerate(value)
                 },
                 **{
                     f"validation/{name}": value.item() 
                     for name, value in validation_metrics_values.items() 
-                    if name != 'R2Score_Raw_Values'
+                    if name != 'R2Score_RawValues'
                 },
                 **{
-                    f"validation/R2Score_Raw_Values_{i+1}": v.item() 
+                    f"validation/R2Score_RawValues_{i+1}": v.item() 
                     for name, value in validation_metrics_values.items() 
-                    if name == 'R2Score_Raw_Values'
+                    if name == 'R2Score_RawValues'
                     for i, v in enumerate(value)
                 },
                 **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
@@ -2064,12 +2068,14 @@ else:
     else: # CNN training
 
         # Initialize metrics
-        training_metrics, validation_metrics = get_metrics()
+        if args.held_out_test:
+            training_metrics, validation_metrics, testing_metrics = get_metrics()
+        else: 
+            training_metrics, validation_metrics = get_metrics()
 
         for metric in training_metrics:
             print("metric_name:", metric.name)
         
-
         for epoch in tqdm(range(num_epochs), desc="Epoch"):
             model.train()
             train_loss = 0.0
@@ -2081,7 +2087,7 @@ else:
 
             with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
 
-                output_list = [] 
+                # output_list = [] 
 
                 for X_batch, Y_batch in t:
                     X_batch = X_batch.to(device).to(torch.float32)
@@ -2096,12 +2102,15 @@ else:
                     output = model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
-                    output_list.append(output)
+                    # output_list.append(output)
                     loss = criterion(output, Y_batch)
                     loss.backward()
                     optimizer.step()
 
                     train_loss += loss.item()
+
+                    for train_metric in training_metrics:
+                        train_metric(output, Y_batch_long)
 
                     if not args.force_regression:
                         accuracy_metric = next(metric for metric in training_metrics if metric.name == "Accuracy")
@@ -2111,9 +2120,9 @@ else:
                                 "Batch Acc": accuracy_metric.compute().item()
                             })
             # loop through and apply train_metric(output[i], Y_batch_long)
-            output_list = torch.concat(output_list, dim=0).to(device)
-            for train_metric in training_metrics:
-                train_metric(output_list, Y_train.to(device).to(torch.float32))            
+            # output_list = torch.concat(output_list, dim=0).to(device)
+            # for train_metric in training_metrics:
+            #     train_metric(output_list, Y_train.to(device).to(torch.float32))            
 
             # Validation phase
             model.eval()
@@ -2124,7 +2133,7 @@ else:
 
             with torch.no_grad():
                 
-                validation_list = []
+                # validation_list = []
 
                 for X_batch, Y_batch in val_loader:
                     X_batch = X_batch.to(device).to(torch.float32)
@@ -2139,13 +2148,16 @@ else:
                     if isinstance(output, dict):
                         output = output['logits']
 
-                    validation_list.append(output)
+                    # validation_list.append(output)
                         
                     val_loss += criterion(output, Y_batch).item()
 
-            validation_list = torch.concat(validation_list, dim=0).to(device)
-            for val_metric in validation_metrics:
-                val_metric(validation_list, Y_validation.to(device).to(torch.float32))
+                    for val_metric in validation_metrics:
+                        val_metric(output, Y_batch_long)
+
+            # validation_list = torch.concat(validation_list, dim=0).to(device)
+            # for val_metric in validation_metrics:
+            #     val_metric(validation_list, Y_validation.to(device).to(torch.float32))
 
             # Calculate average loss and metrics
             train_loss /= len(train_loader)
@@ -2162,10 +2174,10 @@ else:
             # Print metric values
             print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
 
-            train_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in training_metrics_values.items())
+            train_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in training_metrics_values.items())
             print(f"Train Metrics: {train_metrics_str}")
 
-            val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in validation_metrics_values.items())
+            val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in validation_metrics_values.items())
             print(f"Val Metrics: {val_metrics_str}")
 
             if not args.force_regression: 
@@ -2182,23 +2194,23 @@ else:
                 **{
                     f"train/{name}": value.item() 
                     for name, value in training_metrics_values.items() 
-                    if name != 'R2Score_Raw_Values'
+                    if name != 'R2Score_RawValues'
                 },
                 **{
-                    f"train/R2Score_Raw_Values_{i+1}": v.item() 
+                    f"train/R2Score_RawValues_{i+1}": v.item() 
                     for name, value in training_metrics_values.items() 
-                    if name == 'R2Score_Raw_Values'
+                    if name == 'R2Score_RawValues'
                     for i, v in enumerate(value)
                 },
                 **{
                     f"validation/{name}": value.item() 
                     for name, value in validation_metrics_values.items() 
-                    if name != 'R2Score_Raw_Values'
+                    if name != 'R2Score_RawValues'
                 },
                 **{
-                    f"validation/R2Score_Raw_Values_{i+1}": v.item() 
+                    f"validation/R2Score_RawValues_{i+1}": v.item() 
                     for name, value in validation_metrics_values.items() 
-                    if name == 'R2Score_Raw_Values'
+                    if name == 'R2Score_RawValues'
                     for i, v in enumerate(value)
                 },
                 **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
@@ -2296,12 +2308,11 @@ else:
                 # Print metric values
                 print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
 
-                ft_train_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in ft_training_metrics_values.items())
+                ft_train_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in ft_training_metrics_values.items())
                 print(f"Train Metrics | {ft_train_metrics_str}")
 
-                ft_val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in ft_validation_metrics_values.items())
+                ft_val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in ft_validation_metrics_values.items())
                 print(f"Val Metrics | {ft_val_metrics_str}")
-
 
                 if not args.force_regression: 
                     for fpr, tprs in tpr_results.items():
@@ -2314,12 +2325,12 @@ else:
                     **{
                         f"train/{name}": value.item() 
                         for name, value in ft_training_metrics_values.items() 
-                        if name != 'R2Score_Raw_Values'
+                        if name != 'R2Score_RawValues'
                     },
                     **{
-                        f"train/R2Score_Raw_Values_{i+1}": v.item() 
+                        f"train/R2Score_RawValues_{i+1}": v.item() 
                         for name, value in ft_training_metrics_values.items() 
-                        if name == 'R2Score_Raw_Values'
+                        if name == 'R2Score_RawValues'
                         for i, v in enumerate(value)
                     },
                     "train/Learning Rate": optimizer.param_groups[0]['lr'],
@@ -2328,12 +2339,12 @@ else:
                     **{
                         f"validation/{name}": value.item() 
                         for name, value in ft_validation_metrics_values.items() 
-                        if name != 'R2Score_Raw_Values'
+                        if name != 'R2Score_RawValues'
                     },
                     **{
-                        f"validation/R2Score_Raw_Values_{i+1}": v.item() 
+                        f"validation/R2Score_RawValues_{i+1}": v.item() 
                         for name, value in ft_validation_metrics_values.items() 
-                        if name == 'R2Score_Raw_Values'
+                        if name == 'R2Score_RawValues'
                         for i, v in enumerate(value)
                     },
                     **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
@@ -2350,20 +2361,18 @@ else:
         test_f1_score_metric = torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device)
         test_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
 
+
         # Assuming model, criterion, device, and test_loader are defined
         if args.held_out_test:
             
-            assert False, "entering held_out_test"
+            # assert False, "entering held_out_test"
 
             model.eval()
             test_loss = 0.0
 
             # Reset test metrics
-            test_acc_metric.reset()
-            test_precision_metric.reset()
-            test_recall_metric.reset()
-            test_f1_score_metric.reset()
-            test_top5_acc_metric.reset()
+            for test_metric in testing_metrics:
+                test_metric.reset()
 
             pred = []
             true = []
