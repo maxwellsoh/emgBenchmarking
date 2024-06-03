@@ -800,28 +800,26 @@ if args.leave_n_subjects_out_randomly != 0:
     
     # Instead of the below code, leave n subjects out randomly to be used as the 
     # validation set and the rest as the training set using leaveOutIndices
-    
     X_validation = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
     X_validation = torch.from_numpy(X_validation).to(torch.float16)
-
     if args.force_regression:
-        Y_validation = np.concatenate([np.array(forces[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float32)
-        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-        Y_validation = torch.from_numpy(Y_validation).to(torch.float32)
+        Y_validation = np.concatenate([np.array(forces[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
+        label_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
     else: 
         Y_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
-        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        label_validation = Y_validation
+    Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
     
     X_train = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
     X_train = torch.from_numpy(X_train).to(torch.float16)
 
     if args.force_regression: 
         Y_train = np.concatenate([np.array(forces[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float32)
-        Y_train = torch.from_numpy(Y_train).to(torch.float32)
-        
+        label_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
     else: 
         Y_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
-        Y_train = torch.from_numpy(Y_train).to(torch.float16)
+        label_train = Y_train
+    Y_train = torch.from_numpy(Y_train).to(torch.float16)
         
     print("Size of X_train:", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
     print("Size of Y_train:", Y_train.size()) # (SAMPLE, GESTURE)
@@ -844,8 +842,10 @@ else:
         X_train = combined_images[train_indices]
         if args.force_regression:
             Y_train = combined_forces[train_indices]
+            label_train = combined_labels[train_indices]
         else:
             Y_train = combined_labels[train_indices]
+            label_train = Y_train
         
         X_validation = combined_images[validation_indices]
         label_validation = combined_labels[validation_indices]
@@ -855,24 +855,28 @@ else:
             Y_validation = label_validation
 
         
-        if args.force_regression: 
-            X_validation, X_test, Y_validation, Y_test, label_validation, label_test= model_selection.train_test_split(X_validation, Y_validation, label_validation, test_size=0.5, stratify=label_validation)
-        else: 
-            X_validation, X_test, Y_validation, Y_test = model_selection.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation)
-
+        X_validation, X_test, Y_validation, Y_test, label_validation, label_test= model_selection.train_test_split(X_validation, Y_validation, label_validation, test_size=0.5, stratify=label_validation)
+    
 
         del combined_images
         del combined_labels
+        if args.force_regression:
+            del combined_forces
         del data
         del emg
+        if args.force_regression:
+        
         del forces
         
         X_train = torch.from_numpy(X_train).to(torch.float16)
         Y_train = torch.from_numpy(Y_train).to(torch.float16)
+        label_train = torch.from_numpy(label_train).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        label_validation = torch.from_numpy(label_validation).to(torch.float16)
         X_test = torch.from_numpy(X_test).to(torch.float16)
         Y_test = torch.from_numpy(Y_test).to(torch.float16)
+        label_test = torch.from_numpy(label_test).to(torch.float16)
         print("Size of X_train:     ", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_train:     ", Y_train.size()) # (SAMPLE, GESTURE)
         print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
@@ -891,25 +895,22 @@ else:
 
         X_pretrain = []
         Y_pretrain = []
-        if args.force_regression:
-            label_pretrain = []
+        label_pretrain = []
 
         if args.proportion_unlabeled_data_from_training_subjects>0:
             X_pretrain_unlabeled_list = []
             Y_pretrain_unlabeled_list = []
-            if args.force_regression:
-                label_pretrain_unlabeled_list = []
+            label_pretrain_unlabeled_list = []
+    
 
         X_finetune = []
         Y_finetune = []
-        if args.force_regression:
-            label_train_finetune = []
+        label_finetune = []
 
         if args.proportion_unlabeled_data_from_leftout_subject>0:
             X_finetune_unlabeled_list = []
             Y_finetune_unlabeled_list = []
-            if args.force_regression: 
-                label_finetune_unlabeled_list = []
+            label_finetune_unlabeled_list = []
 
         for i in range(total_number_of_sessions * utils.num_subjects):
             X_train_temp = data[i]
@@ -918,40 +919,45 @@ else:
                 Y_train_temp = forces[i]
             else:
                 Y_train_temp = label_train_temp
+
             if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices:
                 if args.proportion_data_from_training_subjects<1.0:
-                    if args.force_regression: 
-                        X_train_temp, _, Y_train_temp, _, label_train_temp, _ = tts.train_test_split(X_train_temp, Y_train_temp, label_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
-                        
-                    else: 
-                        X_train_temp, _, Y_train_temp, _ = tts.train_test_split(
-                            X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+                     
+                    X_train_temp, _, Y_train_temp, _, label_train_temp, _ = tts.train_test_split(X_train_temp, Y_train_temp, label_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                         
                 if args.proportion_unlabeled_data_from_training_subjects>0:
-                    X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled = tts.train_test_split(
-                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+                    X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled, label_pretrain_labeled, label_pretrain_unlabeled  = tts.train_test_split(
+                        X_train_temp, Y_train_temp, label_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                     X_pretrain.append(np.array(X_pretrain_labeled))
                     Y_pretrain.append(np.array(Y_pretrain_labeled))
+                    label_pretrain.append(np.array(label_pretrain_labeled))
                     X_pretrain_unlabeled_list.append(np.array(X_pretrain_unlabeled))
                     Y_pretrain_unlabeled_list.append(np.array(Y_pretrain_unlabeled))
+                    label_pretrain_unlabeled_list.append(np.array(label_pretrain_unlabeled))
                 else:
                     X_pretrain.append(np.array(X_train_temp))
                     Y_pretrain.append(np.array(Y_train_temp))
+                    label_pretrain.append(np.array(label_train_temp))
             elif i in left_out_subject_first_n_sessions_indices:
                 if args.proportion_unlabeled_data_from_leftout_subject>0:
-                    X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled = tts.train_test_split(
-                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+                    X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled, label_finetune_labeled, label_finetune_unlabeled = tts.train_test_split(
+                        X_train_temp, Y_train_temp, label_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                     X_finetune.append(np.array(X_finetune_labeled))
                     Y_finetune.append(np.array(Y_finetune_labeled))
+                    label_finetune.append(np.array(label_finetune_labeled))
                     X_finetune_unlabeled_list.append(np.array(X_finetune_unlabeled))
                     Y_finetune_unlabeled_list.append(np.array(Y_finetune_unlabeled))
+                    label_finetune_unlabeled_list.append(np.array(label_finetune_unlabeled))
                 else:
                     X_finetune.append(np.array(X_train_temp))
                     Y_finetune.append(np.array(Y_train_temp))
+                    label_finetune.append(np.array(label_train_temp))
         if args.load_unlabeled_data_jehan:
             assert(not args.force_regression)
             X_finetune_unlabeled_list.append(unlabeled_data)
             Y_finetune_unlabeled_list.append(np.zeros(unlabeled_data.shape[0]))
+            assert not args.force_regression, "Regression only for DB2/3"
+            label_finetune_unlabeled_list.append(np.zeros(unlabeled_data.shape[0])) 
 
         if utils.num_subjects == 1:
             assert not args.pretrain_and_finetune, "Cannot pretrain and finetune with only one subject"
@@ -959,37 +965,49 @@ else:
         if utils.num_subjects > 1:
             X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
             Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
+            label_pretrain = np.concatenate(label_pretrain, axis=0, dtype=np.float16)
         X_finetune = np.concatenate(X_finetune, axis=0, dtype=np.float16)
         Y_finetune = np.concatenate(Y_finetune, axis=0, dtype=np.float16)
+        label_finetune = np.concatenate(label_finetune, axis=0, dtype=np.float16)
         X_validation = np.array(data[left_out_subject_last_session_index])
         if args.force_regression:
             Y_validation = np.array(forces[left_out_subject_last_session_index])
+            label_validation = np.array(labels[left_out_subject_last_session_index])
         else:
             Y_validation = np.array(labels[left_out_subject_last_session_index])
+            label_validation = Y_validation
 
         if args.proportion_unlabeled_data_from_training_subjects>0:
             X_pretrain_unlabeled = np.concatenate(X_pretrain_unlabeled_list, axis=0, dtype=np.float16)
             Y_pretrain_unlabeled = np.concatenate(Y_pretrain_unlabeled_list, axis=0, dtype=np.float16)
+            label_pretrain_unlabeled = np.concatenate(label_pretrain_unlabeled_list, axis=0, dtype=np.float16)
         if args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_jehan:
             X_finetune_unlabeled = np.concatenate(X_finetune_unlabeled_list, axis=0, dtype=np.float16)
             Y_finetune_unlabeled = np.concatenate(Y_finetune_unlabeled_list, axis=0, dtype=np.float16)
+            label_finetune_unlabeled = np.concatenate(label_finetune_unlabeled_list, axis=0, dtype=np.float16)
         
         if utils.num_subjects > 1:
             X_train = torch.from_numpy(X_pretrain).to(torch.float16)
             Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
+            label_train = torch.from_numpy(label_pretrain).to(torch.float16)
         X_train_finetuning = torch.from_numpy(X_finetune).to(torch.float16)
         Y_train_finetuning = torch.from_numpy(Y_finetune).to(torch.float16)
+        label_train_finetuning = torch.from_numpy(label_finetune).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        label_validation = torch.from_numpy(label_validation).to(torch.float16)
         if args.proportion_unlabeled_data_from_training_subjects>0:
             X_train_unlabeled = torch.from_numpy(X_pretrain_unlabeled).to(torch.float16)
             Y_train_unlabeled = torch.from_numpy(Y_pretrain_unlabeled).to(torch.float16)
+            label_train_unlabeled = torch.from_numpy(label_pretrain_unlabeled).to(torch.float16)
         if args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_jehan:
             X_train_finetuning_unlabeled = torch.from_numpy(X_finetune_unlabeled).to(torch.float16)
             Y_train_finetuning_unlabeled = torch.from_numpy(Y_finetune_unlabeled).to(torch.float16)
+            label_train_finetuning_unlabeled = torch.from_numpy(label_finetune_unlabeled).to(torch.float16)
 
         del X_finetune
         del Y_finetune
+        del label_finetune
         
         if args.turn_on_unlabeled_domain_adaptation: # while in leave one session out
             proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
@@ -1025,8 +1043,10 @@ else:
             else: 
                 X_train_finetuning = torch.tensor(X_train_finetuning)
                 Y_train_finetuning = torch.tensor(Y_train_finetuning)
+                label_train_finetuning = torch.tensor(label_train_finetuning)
                 X_train_finetuning_unlabeled = None
                 Y_train_finetuning_unlabeled = None
+                label_train_finetuning_unlabeled = None
                 
                 print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
                 print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
@@ -1035,14 +1055,17 @@ else:
             if not args.pretrain_and_finetune:
                 X_train = torch.concat((X_train, X_train_finetuning), axis=0)
                 Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
+                label_train = torch.concat((label_train, label_train_finetuning), axis=0)
                 
         else: 
             if utils.num_subjects == 1:
                 X_train = X_train_finetuning
                 Y_train = Y_train_finetuning
+                label_train = label_train_finetuning
             elif not args.pretrain_and_finetune:
                 X_train = torch.concat((X_train, X_train_finetuning), axis=0)
                 Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
+                label_train = torch.concat((label_train, label_train_finetuning), axis=0)
             
         print("Size of X_train:     ", X_train.size())
         print("Size of Y_train:     ", Y_train.size())
@@ -1055,19 +1078,20 @@ else:
         del data
         del emg
         del labels
+        if args.force_regression:
+            del forces
         
     elif args.leave_one_subject_out: # Running LOSO rather than leave one session out
         if args.reduce_training_data_size:
             # assert False, "entering reduce_training_data_size"
             reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
 
-        # Use EMG data to predict force data
+     
+            
+        X_validation = np.array(data[leaveOut-1])
         if args.force_regression: 
-            X_validation = np.array(data[leaveOut-1])
             Y_validation = np.array(forces[leaveOut-1])
-            label_validation = np.array(labels[leaveOut-1]) # needed for stratify
-
-        # Use EMG data to classify gestures     
+            label_validation = np.array(labels[leaveOut-1]) # needed for stratify     
         else: 
             X_validation = np.array(data[leaveOut-1])
             Y_validation = np.array(labels[leaveOut-1])
@@ -1075,15 +1099,13 @@ else:
 
         X_train_list = []
         Y_train_list = []
-        if args.force_regression:
-            label_train_list = []
+        label_train_list = []
 
         if args.proportion_unlabeled_data_from_training_subjects>0:
             # assert False, "entering proportion_unlabeled_data_from_training_subjects>0"
             X_train_unlabeled_list = []
             Y_train_unlabeled_list = []
-            if args.force_regression:
-                label_train_unlabeled_list = []
+            label_train_unlabeled_list = []
         
         for i in range(len(data)):
             if i == leaveOut-1:
@@ -1097,20 +1119,16 @@ else:
                 # assert False, "entering reduce_training_data_size"
                 proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
 
-                if args.force_regression:
-                    current_data, _, current_forces, _, current_labels, _ = model_selection.train_test_split(current_data, current_forces, current_labels, train_size=proportion_to_keep, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+                current_data, _, current_forces, _, current_labels, _ = model_selection.train_test_split(current_data, current_forces, current_labels, train_size=proportion_to_keep, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                     
-                else: 
-                    current_data, _, current_labels, _ = model_selection.train_test_split(current_data, current_labels, train_size=proportion_to_keep, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+    
                 
             if args.proportion_data_from_training_subjects<1.0:
                 # assert False, "entering proportion_data_from_training_subjects<1.0"
 
-                if args.force_regression:
-                    current_data, _, current_forces, _, current_labels, _ = tts.train_test_split(current_data, current_forces, current_labels, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
+               
+                current_data, _, current_forces, _, current_labels, _ = tts.train_test_split(current_data, current_forces, current_labels, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                     
-                else: 
-                    current_data, _, current_labels, _ = tts.train_test_split(current_data, current_labels, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.cross_validation_for_time_series))
                 
             if args.proportion_unlabeled_data_from_training_subjects>0:
                 # assert False, "entering proportion_unlabeled_data_from_training_subjects>0"
@@ -1126,39 +1144,35 @@ else:
                 current_data = X_train_labeled
                 if args.force_regression:
                     current_forces = Y_train_labeled
-                    current_labels = label_train_labeled
                 else: 
                     current_labels = Y_train_labeled
+                current_labels = label_train_labeled
 
                 X_train_unlabeled_list.append(X_train_unlabeled)
                 Y_train_unlabeled_list.append(Y_train_unlabeled)
-                if args.force_regression:
-                    label_train_unlabeled_list.append(label_train_unlabeled)
+                label_train_unlabeled_list.append(label_train_unlabeled)
 
+            X_train_list.append(current_data)
             if args.force_regression:
-                X_train_list.append(current_data)
                 Y_train_list.append(current_forces)
-                label_train_list.append(current_labels)
             else: 
-                X_train_list.append(current_data)
                 Y_train_list.append(current_labels)
+            label_train_list.append(current_labels)
             
         X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
         Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
-        if args.force_regression:
-            label_train = torch.from_numpy(np.concatenate(label_train_list, axis=0)).to(torch.float16)
+       
+        label_train = torch.from_numpy(np.concatenate(label_train_list, axis=0)).to(torch.float16)
             
         if args.proportion_unlabeled_data_from_training_subjects>0:
             # assert False, "entering proportion_unlabeled_data_from_training_subjects>0"
             X_train_unlabeled = torch.from_numpy(np.concatenate(X_train_unlabeled_list, axis=0)).to(torch.float16)
             Y_train_unlabeled = torch.from_numpy(np.concatenate(Y_train_unlabeled_list, axis=0)).to(torch.float16)
-            if args.force_regression: 
-                label_train_unlabeled = torch.from_numpy(np.concatenate(label_train_unlabeled_list, axis=0)).to(torch.float16)
+            label_train_unlabeled = torch.from_numpy(np.concatenate(label_train_unlabeled_list, axis=0)).to(torch.float16)
 
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-        if args.force_regression: 
-            label_validation = torch.from_numpy(label_validation).to(torch.float16)
+        label_validation = torch.from_numpy(label_validation).to(torch.float16)
 
         if args.transfer_learning: # while in leave one subject out
             proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
@@ -1167,70 +1181,52 @@ else:
             
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
                 if args.cross_validation_for_time_series:
-                    if args.force_regression:
-                        X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject,label_validation_partial_leftout_subject= tts.train_test_split(
-                            X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
-                    else: 
-                        X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject= tts.train_test_split(
-                            X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=False)
-                        
+                    X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject,label_validation_partial_leftout_subject= tts.train_test_split(
+                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
+    
                 else:
                     # assert False, "entering not cross_validation_for_time_series"
                     # Split the validation data into train and validation subsets
-                    if args.force_regression:
-                        X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject, label_validation_partial_leftout_subject = tts.train_test_split(
-                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
+                    X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject, label_validation_partial_leftout_subject = tts.train_test_split(
+                    X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
                         
-                    else: 
-                        X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject = tts.train_test_split(
-                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=True)
-                    
-
             else:
                 # assert False, "entering not proportion_to_keep_of_leftout_subject_for_training > 0.0"
                 X_validation_partial_leftout_subject = X_validation
                 Y_validation_partial_leftout_subject = Y_validation
-                if args.force_regression:
-                    label_validation_partial_leftout_subject = label_validation
+                label_validation_partial_leftout_subject = label_validation
+
                 X_train_partial_leftout_subject = torch.tensor([])
                 Y_train_partial_leftout_subject = torch.tensor([])
-                if args.force_regression:
-                    label_train_partial_leftout_subject = torch.tensor([])
+                label_train_partial_leftout_subject = torch.tensor([])
 
                 
             if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
                 # assert False, "entering turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0"
                 if args.cross_validation_for_time_series:
                     
-                    if args.force_regression:
-                        X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
-                        Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
-                            X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
-                    else:
-                        X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
-                        Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
-                            X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=False)
+                    X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
+                    Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
+                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
+        
                 else:
-                    
-                    if args.force_regression:
-                        X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
-                        Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
-                            X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
-                        
-                    else:
-                        X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
-                        Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
-                            X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=True)
+                    X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
+                    Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
+                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
             
             if args.load_unlabeled_data_jehan:
                 # assert False, "entering load_unlabeled_data_jehan"
                 # no need for force data, only for DB2/3
+                assert not args.force_regression, "Regression only for DB2/3"
                 if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
                     X_train_unlabeled_partial_leftout_subject = np.concatenate([X_train_unlabeled_partial_leftout_subject, unlabeled_data], axis=0)
                     Y_train_unlabeled_partial_leftout_subject = np.concatenate([Y_train_unlabeled_partial_leftout_subject, np.zeros((unlabeled_data.shape[0], utils.numGestures))], axis=0)
+                    label_train_unlabeled_partial_leftout_subject = Y_train_unlabeled_partial_leftout_subject
+
                 else:
                     X_train_unlabeled_partial_leftout_subject = unlabeled_data
                     Y_train_unlabeled_partial_leftout_subject = np.zeros((unlabeled_data.shape[0], utils.numGestures))
+                    label_train_unlabeled_partial_leftout_subject = Y_train_unlabeled_partial_leftout_subject
 
             print("Size of X_train_partial_leftout_subject:     ", X_train_partial_leftout_subject.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
             print("Size of Y_train_partial_leftout_subject:     ", Y_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE/FORCE)
@@ -1244,13 +1240,11 @@ else:
                         # assert False, "entering args.pretrain_and_finetune"
                         X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
                         Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
-                        if args.force_regression:
-                            label_train = np.concatenate((label_train, label_train_partial_leftout_subject), axis=0)
+                        label_train = np.concatenate((label_train, label_train_partial_leftout_subject), axis=0)
                     else:
                         X_train_finetuning = torch.tensor(X_train_partial_leftout_subject)
                         Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
-                        if args.force_regression: 
-                            label_train_finetuning = torch.tensor(label_train_partial_leftout_subject)
+                        label_train_finetuning = torch.tensor(label_train_partial_leftout_subject)
                         
 
             else: # unlabeled domain adaptation
@@ -1258,49 +1252,53 @@ else:
                 if proportion_unlabeled_of_training_subjects>0:
                     X_train = torch.tensor(X_train)
                     Y_train = torch.tensor(Y_train)
-                    if args.force_regression:
-                        label_train = torch.tensor(label_train)
+                    label_train = torch.tensor(label_train)
                     X_train_unlabeled = torch.tensor(X_train_unlabeled)
                     Y_train_unlabeled = torch.tensor(Y_train_unlabeled)
-                    if args.force_regression:
-                        label_train_unlabeled = torch.tensor(label_train_unlabeled)
+                    label_train_unlabeled = torch.tensor(label_train_unlabeled)
 
                 if proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_jehan:
                     if proportion_unlabeled_of_proportion_to_keep_of_leftout==0:
                         X_train_labeled_partial_leftout_subject = X_train_partial_leftout_subject
                         Y_train_labeled_partial_leftout_subject = Y_train_partial_leftout_subject
+                        label_train_labeled_partial_leftout_subject = label_train_partial_leftout_subject
                     if not args.pretrain_and_finetune:
                         X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
                         Y_train = torch.tensor(np.concatenate((Y_train, Y_train_labeled_partial_leftout_subject), axis=0))
+                        label_train = torch.tensor(np.concatenate((label_train, label_train_labeled_partial_leftout_subject), axis=0))
                         X_train_unlabeled = torch.tensor(np.concatenate((X_train_unlabeled, X_train_unlabeled_partial_leftout_subject), axis=0))
                         Y_train_unlabeled = torch.tensor(np.concatenate((Y_train_unlabeled, Y_train_unlabeled_partial_leftout_subject), axis=0))
+                        label_train_unlabeled = torch.tensor(np.concatenate((label_train_unlabeled, label_train_unlabeled_partial_leftout_subject), axis=0))
                     else:
                         X_train_finetuning = torch.tensor(X_train_labeled_partial_leftout_subject)
                         Y_train_finetuning = torch.tensor(Y_train_labeled_partial_leftout_subject)
+                        label_train_finetuning = torch.tensor(label_train_labeled_partial_leftout_subject)
                         X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
                         Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
+                        label_train_finetuning_unlabeled = torch.tensor(label_train_unlabeled_partial_leftout_subject)
                 else:
                     if proportion_to_keep_of_leftout_subject_for_training>0:
                         if not args.pretrain_and_finetune:
                             X_train = torch.tensor(np.concatenate((X_train, X_train_partial_leftout_subject), axis=0))
                             Y_train = torch.tensor(np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0))
+                            label_train = torch.tensor(np.concatenate((label_train, label_train_partial_leftout_subject), axis=0))
                         else: 
                             X_train_finetuning = torch.tensor(X_train_partial_leftout_subject)
                             Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
+                            label_train_finetuning = torch.tensor(label_train_partial_leftout_subject)
 
             # Update the validation data
             X_train = torch.tensor(X_train).to(torch.float16)
             Y_train = torch.tensor(Y_train).to(torch.float16)
+            label_train = torch.tensor(label_train).to(torch.float16)
             if args.force_regression:
                 label_train = torch.tensor(label_train).to(torch.float16)
         
             X_validation = torch.tensor(X_validation_partial_leftout_subject).to(torch.float16)
             Y_validation = torch.tensor(Y_validation_partial_leftout_subject).to(torch.float16)
-            if args.force_regression:
-                label_validation = torch.tensor(label_validation_partial_leftout_subject).to(torch.float16)
-                del label_validation_partial_leftout_subject
+            label_validation = torch.tensor(label_validation_partial_leftout_subject).to(torch.float16)
             
-            del X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject
+            del X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject, label_validation_partial_leftout_subject
 
         print("Regression:", args.force_regression)
         print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
@@ -1313,11 +1311,11 @@ else:
 
         
         if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0:
-            assert False, "entering turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0"
+            # assert False, "entering turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0"
             print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
             print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
         if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
-            assert False, "entering turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0"
+            # assert False, "entering turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0"
             print("Size of X_train_finetuning_unlabeled:     ", X_train_finetuning_unlabeled.shape)
             print("Size of Y_train_finetuning_unlabeled:     ", Y_train_finetuning_unlabeled.shape)
             
@@ -1333,16 +1331,21 @@ else:
         X_train = data[0]
         if args.force_regression:
             Y_train = forces[0]
+            label_train = labels[0]
         else:
             Y_train = labels[0]
+            label_train = label_train[0]
+        
         if args.cross_validation_for_time_series:
-            X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=False)
+            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, label_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=False)
         else:
-            X_train, X_validation, Y_train, Y_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=True)
+            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, label_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, shuffle=True)
         X_train = torch.tensor(X_train).to(torch.float16)
         Y_train = torch.tensor(Y_train).to(torch.float16)
+        label_train = torch.tensor(label_train).to(torch.float16)
         X_validation = torch.tensor(X_validation).to(torch.float16)
         Y_validation = torch.tensor(Y_validation).to(torch.float16)
+        label_train = torch.tensor(label_train).to(torch.float16)
 
         print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_train:     ", Y_train.shape)
@@ -1365,7 +1368,7 @@ def ceildiv(a, b):
         return -(a // -b)
     
 if args.turn_on_unlabeled_domain_adaptation:
-    assert False
+    # assert False
     current_date_and_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     assert (args.transfer_learning and args.cross_validation_for_time_series) or args.leave_one_session_out, \
         "Unlabeled Domain Adaptation requires transfer learning and cross validation for time series or leave one session out"
@@ -1768,11 +1771,11 @@ else:
 # if X_train, validation, test or Y_train validation, test are numpy arrays, convert them to tensors
 X_train = torch.from_numpy(X_train).to(torch.float16) if isinstance(X_train, np.ndarray) else X_train
 Y_train = torch.from_numpy(Y_train).to(torch.float16) if isinstance(Y_train, np.ndarray) else Y_train
+label_train = torch.from_numpy(label_train).to(torch.float16) if isinstance(label_train, np.ndarray) else label_train
 X_validation = torch.from_numpy(X_validation).to(torch.float16) if isinstance(X_validation, np.ndarray) else X_validation
 Y_validation = torch.from_numpy(Y_validation).to(torch.float16) if isinstance(Y_validation, np.ndarray) else Y_validation
-if args.force_regression:
-    label_train = torch.from_numpy(label_train).to(torch.float16) if isinstance(label_train, np.ndarray) else label_train
-    label_validation = torch.from_numpy(label_validation).to(torch.float16) if isinstance(label_validation, np.ndarray) else label_validation
+label_validation = torch.from_numpy(label_validation).to(torch.float16) if isinstance(label_validation, np.ndarray) else label_validation
+
 if args.held_out_test:
     # [WIP] skf
     X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
@@ -1871,7 +1874,7 @@ if args.pretrain_and_finetune:
     utils.plot_first_fifteen_images(X_train_finetuning, np.argmax(train_finetuning.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture train_finetuning')
 
 if args.turn_on_unlabeled_domain_adaptation:
-    assert False, "entering turn_on_unlabeled_domain_adaptation"
+    # assert False, "entering turn_on_unlabeled_domain_adaptation"
     print("Pretraining the model...")
     semilearn_algorithm.loader_dict = {}
     semilearn_algorithm.loader_dict['train_lb'] = train_labeled_loader
