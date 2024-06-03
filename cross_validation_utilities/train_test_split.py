@@ -8,7 +8,7 @@ def train_test_split(
     random_state=None,
     shuffle=True,
     stratify=None,
-    force_regression=False, # NOTE: assumes gesture classification if false 
+    force_regression=False, # TODO: tidy, but essentialyl always true because alwawys using the labels instead
 ): 
     if shuffle==False and not stratify is None:
         reshape_Y = False
@@ -16,6 +16,7 @@ def train_test_split(
 
         X_train_set = arrays[0]
         Y_train_set = arrays[1]
+        label_train_set = arrays[2]
 
         if train_size is None and test_size is None:
             train_size = 0.75
@@ -24,18 +25,13 @@ def train_test_split(
 
         train_size = train_size or 1 - test_size
 
-        # Convert from one-hot-encoding to 1D array
+        # Convert stratify labels from one-hot-encoding to 1D array
         if stratify.shape[1] != 1:
-            # assumes stratify is always labels
             stratify = np.argmax(stratify, axis=1)
         if not force_regression and Y_train_set.shape[1] != 1:
             # if classification and Y_train_set is one hot encoded gestures (and not force)
             reshape_Y = True
             Y_train_set = np.argmax(Y_train_set, axis=1)
-        if force_regression:
-            reshape_labels = True
-            # assumes that for force_regressions stratify is the gesture labels
-            labels_train_set = stratify.clone()
         
     
         unique, counts = np.unique(stratify, return_counts=True)
@@ -44,8 +40,8 @@ def train_test_split(
         X_test = []
         y_train = []
         y_test = []
-        labels_train = []
-        labels_test = []
+        label_train = []
+        label_test = []
         
 
         train_size_for_each_class = np.round(train_size * counts).astype(int)
@@ -60,44 +56,40 @@ def train_test_split(
             # get all data for current class
             X_train_class = X_train_set[indices_train]
             y_train_class = Y_train_set[indices_train] 
-            if force_regression:
-                labels_train_class = labels_train_set[indices_train]
+            label_train_class = label_train_set[indices_train]
 
             # test set is the rest of the data
             indices_test = np.setdiff1d(indices, indices_train)
             X_test_class = X_train_set[indices_test]
             y_test_class = Y_train_set[indices_test]
-            if force_regression:
-                labels_test_class = labels_train_set[indices_test]
+            label_test_class = label_train_set[indices_test]
 
             X_train.append(X_train_class)
             X_test.append(X_test_class)
             y_train.append(y_train_class)
             y_test.append(y_test_class)
-            if force_regression:
-                labels_train.append(labels_train_class)
-                labels_test.append(labels_test_class)
+            label_train.append(label_train_class)
+            label_test.append(label_test_class)
 
         X_train = np.concatenate(X_train)
         X_test = np.concatenate(X_test)
         y_train = np.concatenate(y_train)
         y_test = np.concatenate(y_test)
-        if force_regression:
-            labels_train = np.concatenate(labels_train)
-            labels_test = np.concatenate(labels_test)
+       
+        label_train = np.concatenate(label_train)
+        label_test = np.concatenate(label_test)
         
         # for classification, convert Y_train_set gestures back to a one hot encoding
         if not force_regression and reshape_Y:
             y_train = np.eye(len(np.unique(y_train)))[y_train]
             y_test = np.eye(len(np.unique(y_test)))[y_test]
         
-        # for regression, convert labels back to a one hot encoding
-        if force_regression and reshape_labels:
-            labels_train = np.eye(len(np.unique(labels_train)))[labels_train]
-            labels_test = np.eye(len(np.unique(labels_test)))[labels_test]
+        # convert labels back to a one hot encoding
+        label_train = np.eye(len(np.unique(label_train)))[label_train]
+        label_test = np.eye(len(np.unique(label_test)))[label_test]
             
     else:
-        X_train, X_test, y_train, y_test = model_selection.train_test_split(
+        X_train, X_test, y_train, y_test, label_train, label_test = model_selection.train_test_split(
             *arrays,
             test_size=test_size,
             train_size=train_size,
@@ -105,10 +97,7 @@ def train_test_split(
             shuffle=shuffle,
             stratify=stratify,
         )
-        
-    if force_regression:
-        assert y_test.shape[0] == labels_test.shape[0], "y_test and labels_test should have the same size"
-        return X_train, X_test, y_train, y_test, labels_train, labels_test
-    else:
-        return X_train, X_test, y_train, y_test
+     
+    return X_train, X_test, y_train, y_test, label_train, label_test
+  
 
