@@ -540,7 +540,7 @@ class Data(Dataset):
 
 def plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
     # Calculate confusion matrix
-    cf_matrix = confusion_matrix(true, pred)
+    cf_matrix = confusion_matrix(true, pred, labels=range(numGestures))
     df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
                         columns=gesture_labels)
