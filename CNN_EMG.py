@@ -24,15 +24,15 @@ import gc
 import datetime
 from PIL import Image
 from torch.utils.data import Dataset
-import VisualTransformer
+#import VisualTransformer
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from joblib import dump
 from sklearn.metrics import accuracy_score, log_loss
 import torch.nn.functional as F
-from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
-from semilearn.core.utils import send_model_cuda
+#from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
+#from semilearn.core.utils import send_model_cuda
 import torchmetrics
 import ml_metrics_utils as ml_utils
 from sklearn.metrics import confusion_matrix, classification_report
@@ -340,7 +340,7 @@ if exercises:
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
             if (args.target_normalize > 0):
-                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize, exercise)
+                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, exercise)
                 emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
             else:
                 emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
@@ -413,15 +413,24 @@ else: # Not exercises
     if (args.target_normalize > 0):
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out:
-                NotImplementedError("leave-one-session-out not implemented with target_normalize yet")
-
-            mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize)
-            
-            emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
-            emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-            
-            labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
-            labels = labels_async.get()
+                total_number_of_sessions = 2
+                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, lastSessionOnly=True)
+                emg = []
+                labels = []
+                for i in range(1, total_number_of_sessions+1):
+                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.leftout_subject + 1) for j in range(utils.num_subjects)])
+                    emg.extend(emg_async.get())
+                    
+                    labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
+                    labels.extend(labels_async.get())
+            else:
+                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize)
+                
+                emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
+                emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+                
+                labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
+                labels = labels_async.get()
     else: # Not target_normalize
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out: # based on 2 sessions for each subject
