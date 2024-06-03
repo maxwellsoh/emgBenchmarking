@@ -146,6 +146,9 @@ args = parser.parse_args()
 
 exercises = False
 
+if args.force_regression:
+    assert args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db2" or args.datasets.lower() == "ninapro_db3", "Regression only implemented for Ninapro DB2 and DB3"
+
 if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
     print("Warning: not using pytorch, many arguments will be ignored")
     if args.turn_on_unlabeled_domain_adaptation:
@@ -168,6 +171,7 @@ elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_
         ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
     if args.force_regression:
         assert args.exercises == [3], "Regression only implemented for exercise 3"
+        assert not args.partial_dataset_ninapro, "Partial dataset not implemented for regression"
     args.dataset = 'ninapro-db2'
 
 elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_db5"):
