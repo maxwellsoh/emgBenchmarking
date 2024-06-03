@@ -1771,11 +1771,11 @@ else:
                 confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device, numGestures)
 
                 print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
-                print(f"Train Macro Accuracy: {train_macro_acc:.4f} | Train Macro Precision: {train_macro_precision:.4f} | Train Macro Recall: {train_macro_recall:.4f} | Train Macro F1: {train_macro_f1_score:.4f} | Train Macro Top-5 Acc: {train_macro_top5_acc:.4f}")
+                print(f"Train Macro Accuracy: {train_macro_acc:.4f} | Train Macro Precision: {train_macro_precision:.4f} | Train Macro Recall: {train_macro_recall:.4f} | Train Macro F1: {train_macro_f1:.4f} | Train Macro Top-5 Acc: {train_macro_top5_acc:.4f}")
                 print(f"Train_Micro_Accuracy: {train_micro_acc:.4f} | Train Micro Top-5 Acc: {train_micro_top5_acc:.4f}")
                 print(f"Train AUROC Macro: {train_macro_auroc:.4f}")
                 print(f"Train AUPRC Macro: {train_macro_auprc:.4f}")
-                print(f"Val Macro Accuracy: {val_macro_acc:.4f} | Val Macro Precision: {val_macro_precision:.4f} | Val Macro Recall: {val_macro_recall:.4f} | Val Macro F1: {val_macro_f1_score:.4f} | Val Macro Top-5 Acc: {val_macro_top5_acc:.4f}")
+                print(f"Val Macro Accuracy: {val_macro_acc:.4f} | Val Macro Precision: {val_macro_precision:.4f} | Val Macro Recall: {val_macro_recall:.4f} | Val Macro F1: {val_macro_f1:.4f} | Val Macro Top-5 Acc: {val_macro_top5_acc:.4f}")
                 print(f"Val Micro Accuracy: {val_micro_acc:.4f} | Val Micro Top-5 Acc: {val_micro_top5_acc:.4f}")
                 print(f"Val AUROC Macro: {val_macro_auroc:.4f}")
                 print(f"Val AUPRC Macro: {val_macro_auprc:.4f}")
