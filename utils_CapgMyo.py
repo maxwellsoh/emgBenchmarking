@@ -145,17 +145,27 @@ def getData (subject, gesture, trial, session=None):
         return window(tensor_data)
 
 def getEMG (x):
-    #return torch.cat((getData(x-1,1,1), getData(x,1,1)), dim=0)
-    return filter(getData(x, 1, 1))
+    if (isinstance(x, int)):  
+        return filter(getData(participants_first_session_index[x-1], 1, 1))
+    n, mins, maxes, leftout = x
+    return filter(getData((participants_first_session_index[n-1], mins, maxes, leftout), 1, 1))
 
 def getEMG_separateSessions(args):
-    subject_number, session_number = args
+    if (len(args) == 2):
+        subject_number, session_number = args
+    else:
+        subject_number, session_number, mins, maxes, leftout = args
     data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
-    return filter(getData(data_index, 1, 1))
+    return filter(getData((data_index, mins, maxes, leftout), 1, 1))
 
 def getExtrema (n, p, lastSessionOnly=False):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
+
+    if lastSessionOnly:
+        n = participants_second_session_index[n-1]
+    else:
+        n = participants_first_session_index[n-1]
     
     sub = str(n)
     if (n < 10):
