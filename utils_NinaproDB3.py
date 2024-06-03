@@ -212,6 +212,8 @@ def target_normalize (data, target_min, target_max, restim):
     for i in range(numElectrodes):
         source_min[i] = np.min(data[:, i])
         source_max[i] = np.max(data[:, i])
+        if source_min[i] == source_max[i]:
+            source_max[i] = source_min[i] + 1
 
     data_norm = np.zeros(data.shape, dtype=np.float32)
     for gesture in range(target_min.shape[1]):
@@ -227,7 +229,7 @@ def getEMG (args, unfold=True):
         n, exercise = args
         leftout = None
     else:
-        n, exercise, target_max, target_min, leftout = args
+        n, exercise, target_min, target_max, leftout = args
 
     restim = getRestim(n, exercise)
     #emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
@@ -271,7 +273,7 @@ def getExtrema (n, p, exercise):
 
 def getLabels (args, unfold=True):
     n, exercise = args
-    restim = getRestim(n, exercise)
+    restim = getRestim(n, exercise, unfold)
     if unfold:
         return contract(restim[balance(restim)])
     return contract(restim, False)
@@ -664,18 +666,13 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     # Create subplots
     fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))
 
-    # resize average images to 224 x 224
-    resize = transforms.Resize([224, 224], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-
     print(f"Plotting first fifteen {partition_name} images...")
     for i in range(total_gestures):
         # Find indices of the first 15 images for gesture i
         gesture_indices = np.where(true_np == i)[0][:rows_per_gesture]
 
-        current_images = torch.tensor(np.array([resize(img) for img in image_data[gesture_indices]]))
-        
         # Select and denormalize only the required images
-        gesture_images = denormalize(current_images).cpu().detach().numpy()
+        gesture_images = denormalize(transforms.Resize((224,224))(image_data[gesture_indices])).cpu().detach().numpy()
 
         for j in range(len(gesture_images)):  # len(gesture_images) is no more than rows_per_gesture
             ax = axs[j, i]

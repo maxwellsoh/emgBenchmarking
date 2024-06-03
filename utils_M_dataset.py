@@ -108,8 +108,8 @@ def getEMG (args):
         n = args
     else:
         n = args[0]
-        target_max = args[1]
-        target_min = args[2]
+        target_min = args[1]
+        target_max = args[2]
         leftout = args[3]
 
     emg = []

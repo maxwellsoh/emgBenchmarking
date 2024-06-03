@@ -215,7 +215,7 @@ def getEMG (args, unfold=True):
         n, exercise = args
         leftout = None
     else:
-        n, exercise, target_max, target_min, leftout = args
+        n, exercise, target_min, target_max, leftout = args
 
     #emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
     #emg = torch.tensor(emg.values)

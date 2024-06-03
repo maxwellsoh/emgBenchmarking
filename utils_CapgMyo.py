@@ -122,8 +122,8 @@ def getData (subject, gesture, trial, session=None):
         sub = str(subject[0])
         if subject[0] < 10:
             sub = '0' + sub
-        target_max = subject[1]
-        target_min = subject[2]
+        target_min = subject[1]
+        target_max = subject[2]
         leftout = subject[3]
 
     name = '0' + sub + '-00' + str(gesture) + '-00' +str(trial)
@@ -151,13 +151,21 @@ def getEMG (x, session_number=1):
     return filter(getData(data_index, 1, 1))
 
 def getEMG_separateSessions(args):
-    subject_number, session_number = args
+    if (len(args) == 2):
+        subject_number, session_number = args
+    else:
+        subject_number, session_number, mins, maxes, leftout = args
     data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
-    return filter(getData(data_index, 1, 1))
+    return filter(getData((data_index, mins, maxes, leftout), 1, 1))
 
-def getExtrema (n, p):
+def getExtrema (n, p, lastSessionOnly=False):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
+
+    if lastSessionOnly:
+        n = participants_second_session_index[n-1]
+    else:
+        n = participants_first_session_index[n-1]
     
     sub = str(n)
     if (n < 10):
