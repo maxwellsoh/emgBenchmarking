@@ -2352,16 +2352,6 @@ else:
                     **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {}),
                 })
 
-        # TODO: add testing to get_metrics         
-        # Testing
-        # Initialize metrics for testing
-        test_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device)
-        test_precision_metric = torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device)
-        test_recall_metric = torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device)
-        test_f1_score_metric = torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device)
-        test_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
-
-
         # Assuming model, criterion, device, and test_loader are defined
         if args.held_out_test:
             
@@ -2390,40 +2380,59 @@ else:
                     true.extend(Y_batch_long.cpu().detach().numpy())
 
                     test_loss += criterion(output, Y_batch).item()
-                    test_acc_metric(output, Y_batch_long)
-                    test_precision_metric(output, Y_batch_long)
-                    test_recall_metric(output, Y_batch_long)
-                    test_f1_score_metric(output, Y_batch_long)
-                    test_top5_acc_metric(output, Y_batch_long)
+                    
+                    for test_metric in testing_metrics:
+                        test_metric(output, Y_batch_long)
 
             # Calculate average loss and metrics
             test_loss /= len(test_loader)
-            test_acc = test_acc_metric.compute()
-            test_precision = test_precision_metric.compute()
-            test_recall = test_recall_metric.compute()
-            test_f1_score = test_f1_score_metric.compute()
-            test_top5_acc = test_top5_acc_metric.compute()
-            tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, test_loader, device, numGestures)
-            confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, test_loader, device)
 
-            print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f} | Test Precision: {test_precision:.4f} | Test Recall: {test_recall:.4f} | Test F1 Score: {test_f1_score:.4f} | Test Top-5 Accuracy: {test_top5_acc:.4f}")
-            for fpr, tprs in tpr_results.items():
-                print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
-            for confidence_level, acc in confidence_levels.items():
-                print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
+            # Compute metrics and store in dictionary (to prevent multiple calls to compute)
+            testing_metrics_values = {metric.name: metric.compute() for metric in testing_metrics}
+
+
+            if not args.force_regression: 
+                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, test_loader, device, numGestures)
+                confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, test_loader, device)
+
+            # Print metric values
+            print(f"Test Loss: {test_loss:.4f}")
+
+            test_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in testing_metrics_values.items())
+            print(f"Test Metrics: {test_metrics_str}")
+
+            if not args.force_regression: 
+                for fpr, tprs in tpr_results.items():
+                    print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+                for confidence_level, acc in confidence_levels.items():
+                    print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
 
             wandb.log({
                 "test/Test Loss": test_loss,
+
                 "test/Test Acc": test_acc,  
                 "test/Test Precision": test_precision,
                 "test/Test Recall": test_recall,
                 "test/Test F1": test_f1_score,
                 "test/Test Top-5 Acc": test_top5_acc,
 
+                **{
+                    f"test/{name}": value.item() 
+                    for name, value in testing_metrics_values.items() 
+                    if name != 'R2Score_RawValues'
+                },
+                **{
+                    f"test/R2Score_RawValues_{i+1}": v.item() 
+                    for name, value in testing_metrics_values.items() 
+                    if name == 'R2Score_RawValues'
+                    for i, v in enumerate(value)
+                },
+
                 # **{f"tpr_at_fixed_fpr/Test TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
-                **{f"tpr_at_fixed_fpr/Average Test TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
-                **{f"confidence_level_accuracies/Test Accuracy at {confidence_level} confidence level": acc for confidence_level, acc in confidence_levels.items()},
-                **{f"proportion_above_confidence_threshold/Test Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
+
+                **({f"tpr_at_fixed_fpr/Average Test TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
+                **({f"confidence_level_accuracies/Test Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not args.force_regression else {}),
+                **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {}),
 
             })
 
