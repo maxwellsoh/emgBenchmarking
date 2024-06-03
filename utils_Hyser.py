@@ -148,7 +148,7 @@ def getEMG_help (sub, session, target_max=None, target_min=None, leftout=None, u
         
     return emg
 
-def getEMG (args):
+def getEMG (args, session_number=1):
     if (type(args) == int):
         n = args
         target_max = None
@@ -165,7 +165,9 @@ def getEMG (args):
     else:
         sub = f'{n}'
 
-    emg = getEMG_help(sub, "1", target_max, target_min, leftout) + getEMG_help(sub, "2", target_max, target_min, leftout)
+    # emg = getEMG_help(sub, "1", target_max, target_min, leftout) + getEMG_help(sub, "2", target_max, target_min, leftout)
+    emg = getEMG_help(sub, str(session_number), target_max, target_min, leftout)
+    
     return filter(torch.cat(emg, dim=0))
 
 def getEMG_separateSessions(args):
@@ -224,7 +226,7 @@ def contract(R):
     return labels
 
 # returns [# samples, # gestures]
-def getLabels (n, unfold=True):
+def getLabels (n, unfold=True, session_number=1):
     labels = []
 
     if (n < 10):
@@ -232,17 +234,16 @@ def getLabels (n, unfold=True):
     else:
         sub = f'{n}'
 
-    for i in range(1, 3):
-        file = open(f'hyser/subject{sub}_session{i}/label_dynamic.txt', 'r')
-        vals = file.readline().strip().split(',')
-        for v in vals:
-            if (v in gesture_nums):
-                if (unfold):
-                    for i in range(7):
-                        labels.append(v)
-                else:
+    file = open(f'hyser/subject{sub}_session{session_number}/label_dynamic.txt', 'r')
+    vals = file.readline().strip().split(',')
+    for v in vals:
+        if (v in gesture_nums):
+            if (unfold):
+                for i in range(7):
                     labels.append(v)
-        file.close()
+            else:
+                labels.append(v)
+    file.close()
 
     return contract(labels)
 

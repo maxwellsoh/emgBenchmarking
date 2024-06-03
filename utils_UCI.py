@@ -93,11 +93,15 @@ def filter(emg):
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
-def getRestim (n, unfold=True):
+def getRestim (n, unfold=True, session_number=1):
     restim = []
     n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
         try:
+            if file[0] == str(session_number):
+                print("Reading file", file, "Subject", n)
+            else:
+                continue
             if (unfold):
                 data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
                 restim.append(data[:, -1][balance(data[:, -1])])
@@ -127,7 +131,7 @@ def target_normalize (data, target_min, target_max):
     data_norm[:, -1] = data[:, -1]
     return data_norm
 
-def getEMG (args, unfold=True):
+def getEMG (args, unfold=True, session_number=1):
     if (type(args) == int):
         n = args
         target_max = None
@@ -144,18 +148,21 @@ def getEMG (args, unfold=True):
     n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
         try: 
-            data = np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]
+            # data = np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]
+            
+            if file[0] == str(session_number):
+                data = np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]
 
-            if (leftout != None and n != leftout):
-                data = target_normalize(data, target_min, target_max)
+                if (leftout != None and n != leftout):
+                    data = target_normalize(data, target_min, target_max)
 
-            data = torch.from_numpy(data)
-            if (unfold):
-                data = data.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-                data = data[balance(data[:, -1])]
+                data = torch.from_numpy(data)
+                if (unfold):
+                    data = data.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                    data = data[balance(data[:, -1])]
 
-            emg.append(data[:, :-1])
-            restim.append(data[:, -1])        
+                emg.append(data[:, :-1])
+                restim.append(data[:, -1])
         except Exception as e:
             print("Error reading file", file, "Subject", n)
             print(e)
