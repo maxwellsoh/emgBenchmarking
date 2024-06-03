@@ -11,7 +11,8 @@ from tqdm import tqdm
 import argparse
 import random 
 import utils_OzdemirEMG as utils
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold # classification
+from sklearn.model_selection import KFold # regression
 import os
 import datetime
 import logging
@@ -442,7 +443,7 @@ if exercises:
     # 
 
 else: # Not exercises
-    assert False, "entered Not exercises"
+
     if (args.target_normalize > 0):
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out:
@@ -518,6 +519,7 @@ leaveOutIndices = []
 # Generate scaler for normalization
 if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # will have to run and test this again, or just remove
     # assert False, "entered leave n_subjects_out_randomly != 0"
+    # [WIP] updating leaveOutIndices
     leaveOut = args.leave_n_subjects_out_randomly
     print(f"Leaving out {leaveOut} subjects randomly")
     # subject indices to leave out randomly
@@ -552,7 +554,8 @@ if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normali
 
 else: # Not leave n subjects out randomly
     if (args.held_out_test): # should be deprecated and deleted
-        assert False, "entered held_out_test"
+        # assert False, "entered held_out_test"
+        # [WIP] updating skf
         if args.turn_on_kfold:
             skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
             
@@ -597,11 +600,15 @@ else: # Not leave n subjects out randomly
             del emg_reshaped
 
         else: 
+            assert False, "else of held_out_test"
             # Reshape and concatenate EMG data
             # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
             # Then concatenate along the subject dimension (axis=0)
             emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
             labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+            if args.force_regression:
+                forces_in = np.concatenate([np.array(i) for i in forces], axis=0, dtype=np.float32)
+
             indices = np.arange(emg_in.shape[0])
             train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
             train_emg_in = emg_in[train_indices]  # Select only the train indices
@@ -788,23 +795,34 @@ if args.load_unlabeled_data_jehan:
     del unlabeled_images, unlabeled_online_data
 
 if args.leave_n_subjects_out_randomly != 0:
-    assert False, "entered leave_n_subjects_out_randomly != 0"
+    # assert False, "entered leave_n_subjects_out_randomly != 0"
+    # [WIP] leaveOutIndices
     
     # Instead of the below code, leave n subjects out randomly to be used as the 
     # validation set and the rest as the training set using leaveOutIndices
     
     X_validation = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
-    Y_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
     X_validation = torch.from_numpy(X_validation).to(torch.float16)
-    Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-    
-    # add label_validation if args.force_regresssion
 
-    X_train = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
-    Y_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
-    X_train = torch.from_numpy(X_train).to(torch.float16)
-    Y_train = torch.from_numpy(Y_train).to(torch.float16)
+    if args.force_regression:
+        Y_validation = np.concatenate([np.array(forces[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float32)
+        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        Y_validation = torch.from_numpy(Y_validation).to(torch.float32)
+    else: 
+        Y_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
+        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
     
+    X_train = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
+    X_train = torch.from_numpy(X_train).to(torch.float16)
+
+    if args.force_regression: 
+        Y_train = np.concatenate([np.array(forces[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float32)
+        Y_train = torch.from_numpy(Y_train).to(torch.float32)
+        
+    else: 
+        Y_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
+        Y_train = torch.from_numpy(Y_train).to(torch.float16)
+        
     print("Size of X_train:", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
     print("Size of Y_train:", Y_train.size()) # (SAMPLE, GESTURE)
     print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
@@ -816,18 +834,39 @@ if args.leave_n_subjects_out_randomly != 0:
 
 else: 
     if args.held_out_test:
-        assert False, "entering held_out_test"
+        # assert False, "entering held_out_test"
+        # [WIP] updating skf
         combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
         combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
+        if args.force_regression:
+            combined_forces = np.concatenate([np.array(i) for i in forces], axis=0, dtype=np.float32)
+
         X_train = combined_images[train_indices]
-        Y_train = combined_labels[train_indices]
+        if args.force_regression:
+            Y_train = combined_forces[train_indices]
+        else:
+            Y_train = combined_labels[train_indices]
+        
         X_validation = combined_images[validation_indices]
-        Y_validation = combined_labels[validation_indices]
-        X_validation, X_test, Y_validation, Y_test = model_selection.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=Y_validation)
+        label_validation = combined_labels[validation_indices]
+        if args.force_regression:
+            Y_validation = combined_forces[validation_indices]
+        else:
+            Y_validation = label_validation
+
+        
+        if args.force_regression:
+            # TODO: verify that you can do this 
+            X_validation, X_test, Y_validation, Y_test, label_validation, label_test= model_selection.train_test_split(X_validation, Y_validation, label_validation, test_size=0.5, stratify=label_validation)
+        else: 
+            X_validation, X_test, Y_validation, Y_test = model_selection.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation)
+
+
         del combined_images
         del combined_labels
         del data
         del emg
+        del forces
         
         X_train = torch.from_numpy(X_train).to(torch.float16)
         Y_train = torch.from_numpy(Y_train).to(torch.float16)
@@ -1488,7 +1527,8 @@ if not args.turn_on_unlabeled_domain_adaptation:
     val_dataset = CustomDataset(X_validation, Y_validation, transform=resize_transform)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
     if (args.held_out_test):
-        assert False, "entering held_out_test"
+        # assert False, "entering held_out_test"
+        # [WIP] skf
         test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
 
@@ -1660,36 +1700,22 @@ if args.force_regression:
     label_train = torch.from_numpy(label_train).to(torch.float16) if isinstance(label_train, np.ndarray) else label_train
     label_validation = torch.from_numpy(label_validation).to(torch.float16) if isinstance(label_validation, np.ndarray) else label_validation
 if args.held_out_test:
+    # [WIP] skf
     X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
     Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
 
 if args.held_out_test:
-    assert False, "entering held_out_test"
+    # assert False, "entering held_out_test"
+    # [WIP] skf
     # Plot and log images
-    utils.plot_average_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-    utils.plot_first_fifteen_images(X_test, np.argmax(Y_test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-
-if args.force_regression: 
-    validation = label_validation
-    train = label_train
-else:
-    validation = Y_validation
-    train = Y_train
-
-utils.plot_average_images(X_validation, np.argmax(validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture validation')
-utils.plot_first_fifteen_images(X_validation, np.argmax(validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture validation')
-
-utils.plot_average_images(X_train, np.argmax(train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture train')
-utils.plot_first_fifteen_images(X_train, np.argmax(train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture train')
-
-# Initialize number of classes based on regressions or classification
-if args.force_regression:
-    num_classes = Y_train.shape[1]
-    assert num_classes == 6
-else: 
-    num_classes = numGestures
-    assert num_classes == 10 
-
+    if args.force_regression:
+        test = label_test
+    else:
+        test = Y_test
+    
+    utils.plot_average_images(X_test, np.argmax(test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture test')
+    utils.plot_first_fifteen_images(X_test, np.argmax(test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture test')
+    
 def get_metrics():
     """
     Constructs training and validation metric arrays based on whether it is a regression or classification task.
@@ -1739,7 +1765,28 @@ def get_metrics():
 
     return training_metrics, validation_metrics
         
-    
+if args.force_regression: 
+    validation = label_validation
+    train = label_train
+else:
+    validation = Y_validation
+    train = Y_train
+
+utils.plot_average_images(X_validation, np.argmax(validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture validation')
+utils.plot_first_fifteen_images(X_validation, np.argmax(validation.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture validation')
+
+utils.plot_average_images(X_train, np.argmax(train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture train')
+utils.plot_first_fifteen_images(X_train, np.argmax(train.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'gesture train')
+
+# Initialize number of classes based on regressions or classification
+if args.force_regression:
+    num_classes = Y_train.shape[1]
+    assert num_classes == 6
+else: 
+    num_classes = numGestures
+    assert num_classes == 10 
+
+# def get_metrrics  
 if args.pretrain_and_finetune:
     
     if args.force_regression:
@@ -1841,12 +1888,10 @@ else:
             
         if args.model == 'MLP':
             # PyTorch training loop for MLP
-
-            training_metrics, validation_metrics = get_metrics()
+            training_metrics, validation_metrics = get_metrics(return_training=False)
 
             for epoch in tqdm(range(num_epochs), desc="Epoch"):
                 model.train()
-                # TODO: should not be numGestures
                 # Metrics
 
                 # Initialize metrics 
@@ -1932,8 +1977,8 @@ else:
 
                 print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
 
-                train_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in training_metrics_values.items())
-                print(f"Train Metrics: {train_metrics_str}")
+                training_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in training_metrics_values.items())
+                print(f"Train Metrics: {training_metrics_str}")
 
                 val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_Raw_Values' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in validation_metrics_values.items())
                 print(f"Val Metrics: {val_metrics_str}")
@@ -2015,6 +2060,7 @@ else:
                 # "Test Acc": test_acc
             })
 
+  
     else: # CNN training
 
         # Initialize metrics
