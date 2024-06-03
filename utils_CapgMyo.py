@@ -144,9 +144,11 @@ def getData (subject, gesture, trial, session=None):
     else:
         return window(tensor_data)
 
-def getEMG (x):
+def getEMG (x, session_number=1):
     #return torch.cat((getData(x-1,1,1), getData(x,1,1)), dim=0)
-    return filter(getData(x, 1, 1))
+    subject_number = x[0] if isinstance(x, tuple) else x
+    data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
+    return filter(getData(data_index, 1, 1))
 
 def getEMG_separateSessions(args):
     subject_number, session_number = args
