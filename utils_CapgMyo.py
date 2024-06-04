@@ -161,7 +161,10 @@ def getEMG_separateSessions(args):
     else:
         subject_number, session_number, mins, maxes, leftout = args
     data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
-    return filter(getData((data_index, mins, maxes, leftout), 1, 1))
+    if (len(args) == 2):
+        return filter(getData(data_index, 1, 1))
+    else:
+        return filter(getData((data_index, mins, maxes, leftout), 1, 1))
 
 def getExtrema (n, p, lastSessionOnly=False):
     mins = np.zeros((numElectrodes, numGestures))

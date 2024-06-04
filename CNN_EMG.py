@@ -107,7 +107,7 @@ parser.add_argument('--reduced_training_data_size', type=int, help='size of redu
 # Add argument to leve n subjects out randomly
 parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
 # use target domain for normalization
-parser.add_argument('--target_normalize', type=float, help='use a poportion of leftout data for normalization. Set to 0 by default.', default=0)
+parser.add_argument('--target_normalize', type=float, help='use a poportion of leftout data for normalization. Set to 0 by default.', default=0.0)
 # Test with transfer learning by using some data from the validation dataset
 parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
 # Add argument for cross validation for time series
@@ -243,6 +243,9 @@ elif (args.dataset.lower() == "ozdemiremg" or args.dataset.lower() == "ozdemir_e
 else: 
     raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'm-dataset', 'hyser'," +
                     "'capgmyo', 'jehan', 'sci', or 'ozdemiremg'")
+    
+if args.turn_off_scaler_normalization:
+    assert args.target_normalize == 0.0, "Cannot turn off scaler normalization and turn on target normalize at the same time"
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
@@ -639,7 +642,6 @@ else: # Not leave n subjects out randomly
 
 data = []
 
-assert not args.turn_off_scaler_normalization and args.target_normalize > 0, "Cannot turn off scaler normalization and turn on target normalize at the same time"
 class ToNumpy:
         """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
         def __call__(self, pic):
