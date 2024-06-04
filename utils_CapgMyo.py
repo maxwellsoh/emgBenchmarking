@@ -113,7 +113,7 @@ def fft_plot(signal):
     plt.grid(True)
     plt.show()
 
-def getData (subject, gesture, trial, session=None):    
+def getData (subject, gesture, trial):    
     if (isinstance(subject, int)):  
         sub = str(subject)
         if subject < 10:
@@ -148,11 +148,16 @@ def getEMG (x, session_number=1):
     #return torch.cat((getData(x-1,1,1), getData(x,1,1)), dim=0)
     subject_number = x[0] if isinstance(x, tuple) else x
     data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
+    if isinstance(x, tuple):
+        return filter(getData((data_index, x[1], x[2], x[3]), 1, 1))
     return filter(getData(data_index, 1, 1))
 
 def getEMG_separateSessions(args):
     if (len(args) == 2):
         subject_number, session_number = args
+        mins = None
+        maxes = None
+        leftout = None
     else:
         subject_number, session_number, mins, maxes, leftout = args
     data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
