@@ -639,6 +639,7 @@ else: # Not leave n subjects out randomly
 
 data = []
 
+assert not args.turn_off_scaler_normalization and args.target_normalize > 0, "Cannot turn off scaler normalization and turn on target normalize at the same time"
 class ToNumpy:
         """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
         def __call__(self, pic):
@@ -679,6 +680,8 @@ if args.turn_off_scaler_normalization:
     scaler = None
 else:
     base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(leaveOut) + '/'
+    if args.target_normalize > 0:
+        base_foldername_zarr += 'target_normalize_' + str(args.target_normalize) + '/'  
 
 if args.turn_on_rms:
     base_foldername_zarr += 'RMS_input_windowsize_' + str(args.rms_input_windowsize) + '/'
