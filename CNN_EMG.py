@@ -418,7 +418,7 @@ else: # Not exercises
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out:
                 total_number_of_sessions = 2
-                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, lastSessionOnly=True)
+                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, lastSessionOnly=False)
                 emg = []
                 labels = []
                 for i in range(1, total_number_of_sessions+1):
