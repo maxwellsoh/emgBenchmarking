@@ -131,7 +131,7 @@ parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool
 # Add argument to specify algorithm to use for unlabeled domain adaptation
 parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "fixmatch" by default.', default="fixmatch")
 # Add argument to specify proportion from left-out-subject to keep as unlabeled data
-parser.add_argument('--proportion_unlabeled_data_from_leftout_subject', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75)
+parser.add_argument('--proportion_unlabeled_data_from_leftout_subject', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75) # TODO: fix, we note that this affects leave-one-session-out even when fully supervised
 # Add argument to specify batch size
 parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by default.', default=64)
 # Add argument for whether to use unlabeled data for subjects used for training as well
