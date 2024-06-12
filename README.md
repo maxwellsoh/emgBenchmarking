@@ -40,9 +40,9 @@ Currently, to download the datasets, you will have to go to the website that hos
 You will follow this up with running the python notebooks `dataset_processing_[DATASET-NAME].ipynb` in order to process the dataset into hdf5 files (with the exception of Jehan's dataset, which is already in hdf5 format). 
 
 # Adding Datasets
-New datasets can be benchmarked with CNN_EMG.py after being processed into hdf5 files by saving them to the following directory: 'DatasetsProcessed_hdf5/[DATASET-NAME]/p[N]/participant_[N].hdf5' where N is the participant's number ranging from 1 to the number of subjects. The keys of each hdf5 file should be the the names of each gesture and the data for each gesture should be stored with shape [# trials, # electrodes, # timesteps]. Also create a file 'DatasetsProcessed_hdf5/[DATASET-NAME]/frequency.txt' just containing the frequency of the dataset in Hz. 
+New datasets can be benchmarked with `CNN_EMG.py` after being processed into HDF5 files by saving them to the following directory: `DatasetsProcessed_hdf5/[DATASET-NAME]/p[N]/participant_[N].hdf5` where `N` is the participant's number ranging from 1 to the number of subjects. The keys of each HDF5 file should be the the names of each gesture and the data for each gesture should be stored with shape `[# TRIALS, # ELECTRODES, # TIMESTEPS]`. Also, create a file `DatasetsProcessed_hdf5/[DATASET-NAME]/frequency.txt` just containing the frequency of the dataset in Hz. 
 
-To run the new dataset, input the dataset name to the dataset argument of CNN_EMG.py. Every subject must have data for all of the gestures in order for the dataset to be processed by utils_generic.py.
+To run the new dataset, input the dataset name to the dataset argument of `CNN_EMG.py`. Every subject must have data for all of the gestures in order for the dataset to be processed by `utils_generic.py`.
 
 ## Diffusion Augmentation
 Go to the `diffusion_augmentation` folder and run the scripts as specified in that `README.md`.
