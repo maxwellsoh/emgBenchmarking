@@ -124,7 +124,7 @@ best_model=resnet18 # set to the model that performed best for the dataset
 
 for subj in $(seq $starting_index $ending_index)
 do
-    python CNN_EMG.py --dataset=$current_dataset --seed=0 --model=$best_model $preprocessing --epochs=50 --project_name_suffix=__intersession-comparison --turn_off_scaler_normalization=True --leftout_subject=$subj --leave_one_subject_out=True --leave_one_session_out=True --train_test_split_for_time_series=True --save_images=True --learning_rate=5e-4 --proportion_data_from_training_subjects=1.0 --finetuning_epochs=375 --pretrain_and_finetune=True --partial_dataset_ninapro=True --proportion_transfer_learning_from_leftout_subject=0.25;
+    python CNN_EMG.py --dataset=$current_dataset --seed=0 --model=$best_model $preprocessing --epochs=50 --project_name_suffix=__intersession-comparison --turn_off_scaler_normalization=True --leftout_subject=$subj --leave_one_subject_out=True --leave_one_session_out=True --train_test_split_for_time_series=True --save_images=True --learning_rate=5e-4 --proportion_data_from_training_subjects=1.0 --finetuning_epochs=375 --pretrain_and_finetune=True --partial_dataset_ninapro=True --proportion_unlabeled_data_from_leftout_subject=0.75;
     wait
 done
 ```
