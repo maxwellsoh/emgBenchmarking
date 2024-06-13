@@ -161,7 +161,6 @@ dependencies:
   - torchmetrics=0.11.4
   - traitlets=5.14.3
   - typing=3.10.0.0
-  - typing-extensions=4.7.1
   - typing_extensions=4.11.0
   - unicodedata2=15.1.0
   - wandb=0.16.1
