@@ -147,11 +147,9 @@ $ ulimit -n 65536
 To update the virtual environment, run
 ```console
 $ mamba env update --file environment.yml --prune
-$ pip install -r requirements.txt
 ```
 
 FOR DEVELOPMENT: To save the virtual environment, run
 ```console
 $ mamba env export --no-builds > environment.yml
-$ pip list --format=freeze > requirements.txt
 ```
