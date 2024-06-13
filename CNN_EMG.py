@@ -181,6 +181,7 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
     if (not os.path.exists("./NinaproDB5")):
         print("NinaproDB5 dataset does not exist yet. Downloading now...")
         subprocess.run(['python', './get_datasets.py', '--NinaproDB5'])
+        subprocess.run(['python', './process_NinaproDB5.py'])
     import utils_NinaproDB5 as utils
     print(f"The dataset being tested is ninapro-db5")
     project_name = 'emg_benchmarking_ninapro-db5'
@@ -212,7 +213,7 @@ elif (args.dataset.lower() == "m-dataset" or args.dataset.lower() == "m_dataset"
 elif (args.dataset.lower() == "hyser"):
     if (not os.path.exists("./hyser")):
         print("Hyser dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--hyser'])
+        subprocess.run(['python', './get_datasets.py', '--Hyser'])
     import utils_Hyser as utils
     print(f"The dataset being tested is hyser")
     project_name = 'emg_benchmarking_hyser'
