@@ -18,12 +18,14 @@ import h5py
 import os
 from scipy.signal import spectrogram, stft
 import pywt
+import fcwt
 
 numGestures = 6 # 7 total, but not all subjects have 7
-fs = 1000 #Hz
+fs = 1000 #Hz (device sampling frequency is 200Hz but raw data is collected at 1000Hz)
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 50 #50 ms
+stepLen = 50 # 125 ms (increased from 50ms due to high number of subjects)
+stepLen = int(stepLen / 1000 * fs)
 numElectrodes = 8
 num_subjects = 36
 cmap = mpl.colormaps['viridis']
@@ -65,20 +67,21 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 def balance (restimulus):
-    numZero = 0
     indices = []
     for x in range (len(restimulus)):
-        L = torch.chunk(restimulus[x], 2, dim=0)
-        if torch.equal(L[0], L[1]):
-            if (L[0][0] > 0 and L[0][0] < 7):
-                indices.append(x)
+        if len(torch.unique(restimulus[x])) == 1 and restimulus[x][0] > 0 and restimulus[x][0] < 7:
+            indices.append(x)
     return indices
 
-def contract(R):
+def contract(R, unfold=True):
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
-    for x in range(len(R)):
-        labels[x][int(R[x][0]) - 1] = 1.0
+    if (unfold):
+        for x in range(len(R)):
+            labels[x][int(R[x][0]) - 1] = 1.0
+    else:
+        for x in range(len(R)):
+            labels[x][int(R[x]) - 1] = 1.0
     return labels
 
 def filter(emg):
@@ -90,158 +93,282 @@ def filter(emg):
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
-def getRestim (n):
+def getRestim (n, unfold=True, session_number=1):
     restim = []
     n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
         try:
-            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-            restim.append(data[:, -1][balance(data[:, -1])])
+            if file[0] == str(session_number):
+                print("Reading file", file, "Subject", n)
+            else:
+                continue
+            if (unfold):
+                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                restim.append(data[:, -1][balance(data[:, -1])])
+            else:
+                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:])
+                restim.append(data[:, -1])
         except:
             print("Error reading file", file, "Subject", n)
-    if numGestures == 6:
+    if numGestures == 6 and unfold:
         for i in range(len(restim)):
             restim[i] = restim[i][torch.all(restim[i] != 7, axis=1)]
-        return torch.cat(restim, dim=0)
     return torch.cat(restim, dim=0)
 
-def normalize (data, target_min, target_max, gesture):
-    source_min = np.zeros(len(data[0]), dtype=np.float32)
-    source_max = np.zeros(len(data[0]), dtype=np.float32)
-    for i in range(len(data[0])):
+def target_normalize (data, target_min, target_max):
+    source_min = np.zeros(numElectrodes, dtype=np.float32)
+    source_max = np.zeros(numElectrodes, dtype=np.float32)
+    
+    for i in range(numElectrodes):
         source_min[i] = np.min(data[:, i])
         source_max[i] = np.max(data[:, i])
 
-    for i in range(len(data[0])):
-        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
-        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
-    return data
+    data_norm = np.zeros(data.shape, dtype=np.float32)
+    for gesture in range(numGestures):
+        for i in range(numElectrodes):
+            data_norm[:, i] = data_norm[:, i] + (data[:, -1] == (gesture+1)) * (((data[:, i] - source_min[i]) / (source_max[i] 
+            - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture])
+    data_norm[:, -1] = data[:, -1]
+    return data_norm
 
-def getEMG (n):
+def getEMG (args, unfold=True, session_number=1):
+    if (type(args) == int):
+        n = args
+        target_min = None
+        target_max = None
+        leftout = None
+    else:
+        n = args[0]
+        target_min = args[1]
+        target_max = args[2]
+        leftout = args[3]
+
     emg = []
     restim = []
     n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
         try: 
-            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-            emg.append(data[:, :-1][balance(data[:, -1])])
-            restim.append(data[:, -1][balance(data[:, -1])])
+            # data = np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]
+            
+            if file[0] == str(session_number):
+                data = np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]
+
+                if (leftout != None and n != leftout):
+                    data = target_normalize(data, target_min, target_max)
+
+                data = torch.from_numpy(data)
+                if (unfold):
+                    data = data.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                    data = data[balance(data[:, -1])]
+
+                emg.append(data[:, :-1])
+                restim.append(data[:, -1])
         except Exception as e:
             print("Error reading file", file, "Subject", n)
             print(e)
-    if numGestures == 6:
+
+    if numGestures == 6 and unfold:
         for i in range(len(restim)):
             emg[i] = emg[i][torch.all(restim[i] != 7, axis=1)]
-        return torch.cat(emg, dim=0)
+
     return torch.cat(emg, dim=0)
 
-def getEMG_separateSessions(args):
-    subject_number, session_number = args
+def getEMG_separateSessions(args, unfold=True):
+    if (len(args) == 2):
+        subject_number, session_number = args
+        target_min = None
+        target_max = None
+        leftout = None
+    else:
+        subject_number, session_number, target_min, target_max, leftout = args
+    
     emg = [] 
     restim = []  
     n = "{:02d}".format(subject_number)
     for file in os.listdir(f"uciEMG/{n}/"):
         try: 
             if file[0] == str(session_number):
-                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-                emg.append(data[:, :-1][balance(data[:, -1])])
-                restim.append(data[:, -1][balance(data[:, -1])])
+                data = np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]
+                
+                if (leftout != None and n != leftout):
+                    data = target_normalize(data, target_min, target_max)
+
+                data = torch.from_numpy(data)
+                if (unfold):
+                    data = data.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                    data = data[balance(data[:, -1])]
+                
+                emg.append(data[:, :-1])
+                restim.append(data[:, -1])
         except Exception as e:
             print("Error reading file", file, "Subject", n)
             print(e)
-    if numGestures == 6:
+    if numGestures == 6 and unfold:
         for i in range(len(restim)):
             emg[i] = emg[i][torch.all(restim[i] != 7, axis=1)]
         return torch.cat(emg, dim=0)
     return torch.cat(emg, dim=0)
 
-def getRestim_separateSessions(args):
+def getExtrema (n, p, lastSessionOnly=False):
+    mins = np.zeros((numElectrodes, numGestures))
+    maxes = np.zeros((numElectrodes, numGestures))
+
+    if lastSessionOnly:
+        emg = getEMG_separateSessions((n, 2), unfold=False)
+        labels = getLabels_separateSessions((n, 2), unfold=False)
+    else:
+        emg = getEMG(n, unfold=False)
+        labels = getLabels(n, unfold=False)
+
+    for i in range(numGestures):
+        subEMG = emg[labels[:, i] == 1.0]
+        subEMG = np.array(subEMG[:int(len(subEMG)*p)])
+
+        # subEMG will be [# timesteps, # electrodes]
+        for j in range(numElectrodes):
+            mins[j][i] = np.min(subEMG[:, j])
+            maxes[j][i] = np.max(subEMG[:, j])
+    return mins, maxes
+
+def getRestim_separateSessions(args, unfold=True):
     subject_number, session_number = args
     restim = []
     n = "{:02d}".format(subject_number)
     for file in os.listdir(f"uciEMG/{n}/"):
         try:
             if file[0] == str(session_number):
-                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-                restim.append(data[:, -1][balance(data[:, -1])])
+                if unfold:
+                    data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                    restim.append(data[:, -1][balance(data[:, -1])])
+                else:
+                    data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:])
+                    restim.append(data[:, -1])
         except:
             print("Error reading file", file, "Subject", n)
-    if numGestures == 6:
+    if numGestures == 6 and unfold:
         for i in range(len(restim)):
             restim[i] = restim[i][torch.all(restim[i] != 7, axis=1)]
         return torch.cat(restim, dim=0)
     return torch.cat(restim, dim=0)
 
-def getLabels (n):
-    return contract(getRestim(n))
+def getLabels (n, unfold=True):
+    return contract(getRestim(n, unfold), unfold)
 
-def getLabels_separateSessions(args):
+def getLabels_separateSessions(args, unfold=True):
     subject_number, session_number = args
-    return contract(getRestim_separateSessions((subject_number, session_number)))
+    return contract(getRestim_separateSessions((subject_number, session_number), unfold), unfold)
+
+def closest_factors(num):
+    # Find factors of the number
+    factors = [(i, num // i) for i in range(1, int(np.sqrt(num)) + 1) if num % i == 0]
+    # Sort factors by their difference, so the closest pair is first
+    factors.sort(key=lambda x: abs(x[0] - x[1]))
+    return factors[0]
 
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
-    emg_sample = data
-    # Convert EMG sample to numpy array for CWT computation
-    emg_sample_np = emg_sample.astype(np.float16).flatten()
-    highest_cwt_scale = 31
-    downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
-    scales = np.arange(1, highest_cwt_scale)  
-    wavelet = 'cmor1.5-1.0'  # Complex Morlet wavelet; adjust as needed
+    # Reshape and preprocess EMG data
+    data = data.reshape(length, width).astype(np.float16)
+    highest_cwt_scale = wLenTimesteps
+    scales = np.arange(1, highest_cwt_scale)
+
+    # Pre-allocate the array for the CWT coefficients
+    grid_width, grid_length = closest_factors(numElectrodes)
+
+    length_to_resize_to = min(native_resnet_size, grid_width * highest_cwt_scale)
+    width_to_transform_to = min(native_resnet_size, grid_length * width)
+
+    time_frequency_emg = np.zeros((length * (highest_cwt_scale), width))
+
     # Perform Continuous Wavelet Transform (CWT)
-    # Note: PyWavelets returns scales and coeffs (coefficients)
-    coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
-    coefficients_dB = 10 * np.log10(np.abs(coefficients) + 1e-6)  # Adding a small constant to avoid log(0)
-    # Convert back to PyTorch tensor and reshape
-    emg_sample = torch.tensor(coefficients_dB).float().reshape(-1, coefficients_dB.shape[-1])
-    # Normalization
-    emg_sample -= torch.min(emg_sample)
-    emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
-    blocks = emg_sample.reshape(highest_cwt_scale-1, numElectrodes, -1)
-    emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale-1), -1)
-        
-    # Update 'window_size' if necessary
-    window_size = emg_sample.shape[1]
+    for i in range(length):
+        frequencies, coefficients = fcwt.cwt(data[i, :], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
+        coefficients_abs = np.abs(coefficients) 
+        # coefficients_dB = 10 * np.log10(coefficients_abs + 1e-12)  # Avoid log(0)
+        time_frequency_emg[i * (highest_cwt_scale):(i + 1) * (highest_cwt_scale), :] = coefficients_abs
 
-    emg_sample -= torch.min(emg_sample)
-    emg_sample /= torch.max(emg_sample)
-    data = emg_sample
+    # Convert to PyTorch tensor and normalize
+    emg_sample = torch.tensor(time_frequency_emg).float()
+    emg_sample = emg_sample.view(numElectrodes, wLenTimesteps, -1)
 
-    data_converted = cmap(data)
+    # Reshape into blocks
+    
+    blocks = emg_sample.view(grid_width, grid_length, wLenTimesteps, -1)
+
+    # Combine the blocks into the final image
+    rows = [torch.cat([blocks[i, j] for j in range(grid_length)], dim=1) for i in range(grid_width)]
+    combined_image = torch.cat(rows, dim=0)
+
+    # Normalize combined image
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
+
+    # Convert to RGB and resize
+    data_converted = cmap(combined_image)
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
-    
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
-                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+
+    resize = transforms.Resize([length_to_resize_to, width_to_transform_to],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
-    # Clamp between 0 and 1 using torch.clamp
+    # Clamp and normalize
     image_clamped = torch.clamp(image_resized, 0, 1)
-
-    # Normalize with standard ImageNet normalization
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     image_normalized = normalize(image_clamped)
 
-    # Since no split occurs, we don't need to concatenate halves back together
-    final_image = image_normalized.numpy().astype(np.float32)
-
+    # Return final image as a NumPy array
+    final_image = image_normalized.numpy().astype(np.float16)
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = 64
+    spectrogram_window_size = wLenTimesteps // 4
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
-    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1) # defaults to hann window
-    Sxx_dB = 10 * np.log10(np.abs(Sxx) + 1e-6) # small constant added to avoid log(0)
-    emg_sample = torch.from_numpy(Sxx_dB)
+    number_of_frequencies = wLenTimesteps 
+
+    # Pre-allocate the array for the CWT coefficients
+    grid_width, grid_length = closest_factors(numElectrodes)
+
+    length_to_resize_to = min(native_resnet_size, grid_width * number_of_frequencies)
+    width_to_transform_to = min(native_resnet_size, grid_length * width)
+    
+    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size - 1, noverlap=spectrogram_window_size-2, nfft=number_of_frequencies - 1) # defaults to hann window
+    Sxx_abs = np.abs(Sxx) # small constant added to avoid log(0)
+    # Sxx_dB = 10 * np.log10(np.abs(Sxx_abs) + 1e-12)
+    emg_sample = torch.from_numpy(Sxx_abs)
     emg_sample -= torch.min(emg_sample)
     emg_sample /= torch.max(emg_sample)
     emg_sample = emg_sample.reshape(emg_sample.shape[0]*emg_sample.shape[1], emg_sample.shape[2])
-    data = emg_sample
+    # flip spectrogram vertically for each electrode
+    for i in range(numElectrodes):
+        num_frequencies = len(frequencies)
+        emg_sample[i*num_frequencies:(i+1)*num_frequencies, :] = torch.flip(emg_sample[i*num_frequencies:(i+1)*num_frequencies, :], dims=[0])
+
+    # Convert to PyTorch tensor and normalize
+    emg_sample = torch.tensor(emg_sample).float()
+    emg_sample = emg_sample.view(numElectrodes, len(frequencies), -1)
+
+    # Reshape into blocks
+    
+    blocks = emg_sample.view(grid_width, grid_length, len(frequencies), -1)
+
+    # Combine the blocks into the final image
+    rows = [torch.cat([blocks[i, j] for j in range(grid_length)], dim=1) for i in range(grid_width)]
+    combined_image = torch.cat(rows, dim=0)
+
+    # Normalize combined image
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
+
+    data = combined_image.numpy()
 
     data_converted = cmap(data)
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
+
+    width_to_transform_to = min(native_resnet_size, image.shape[-1])
     
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+    resize = transforms.Resize([length_to_resize_to, width_to_transform_to],
+
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
@@ -312,11 +439,11 @@ def calculate_rms(array_2d):
 
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, 
               global_min=None, global_max=None, turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
-
+    
     if standardScaler is not None:
-        emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
+        emg = standardScaler.transform(np.array(emg.view(len(emg), length * width)))
     else:
-        emg = np.array(emg.view(len(emg), length*width))
+        emg = np.array(emg.view(len(emg), length * width))
         
     # Use RMS preprocessing
     if turn_on_rms:
@@ -328,40 +455,40 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         emg_rms = np.apply_along_axis(calculate_rms, -1, emg)
         emg = emg_rms  # Resulting shape will be (SAMPLES, 16, 5)
         width = rms_windows
-        emg = emg.reshape(len(emg), length*width)
+        emg = emg.reshape(len(emg), length * width)
 
     # Parameters that don't change can be set once
     resize_length_factor = 1
     native_resnet_size = 224
 
+    args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+
     with multiprocessing.Pool(processes=5) as pool:
-        args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-        images_async = pool.starmap_async(optimized_makeOneImage, args)
-        images = images_async.get()
+        images = list(tqdm(pool.starmap(optimized_makeOneImage, args), total=len(args), desc="Creating Images"))
 
     if turn_on_magnitude:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
         with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
-            images_magnitude = images_async.get()
+            images_magnitude = list(tqdm(pool.starmap(optimized_makeOneMagnitudeImage, args), total=len(args), desc="Creating Magnitude Images"))
         images = np.concatenate((images, images_magnitude), axis=2)
 
     elif turn_on_spectrogram:
-        with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
-            images_spectrogram = images_async.get()
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_spectrogram = []
+        for i in tqdm(range(len(emg)), desc="Creating Spectrogram Images"):
+            images_spectrogram.append(optimized_makeOneSpectrogramImage(*args[i]))
         images = images_spectrogram
     
     elif turn_on_cwt:
-        with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
-            images_cwt = images_async.get()
-        images = images_cwt
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_cwt_list = []
+        # with multiprocessing.Pool(processes=5) as pool:
+        for i in tqdm(range(len(emg)), desc="Creating CWT Images"):
+            images_cwt_list.append(optimized_makeOneCWTImage(*args[i]))
+        images = images_cwt_list
         
     elif turn_on_hht:
-        NotImplementedError("HHT is not implemented yet")
+        raise NotImplementedError("HHT is not implemented yet")
     
     return images
 

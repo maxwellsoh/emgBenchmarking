@@ -20,21 +20,45 @@ import pywt
 import scipy
 import emd
 import fcwt
+import os
 
-fs = 2000 #Hz
+# image mapping
+cmap = mpl.colormaps['jet']
+normalize_for_colormap_benchmark = mpl.colors.Normalize(vmin=-60, vmax=-20)
+
+# frequency
+fs = 1000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 250 # 250 ms increased from 50 ms to reduce data size for large dataset
+stepLen = 50 # ms; increase to reduce data size for large dataset
 stepLen = int(stepLen / 1000 * fs)
-numElectrodes = 4
-num_subjects = 40
-normalize_for_colormap_benchmark = mpl.colors.Normalize(vmin=-60, vmax=-20)
-cmap = mpl.colormaps['jet']
-# Gesture Labels
-gesture_labels_partial = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction'] 
-gesture_labels_full = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
-gesture_labels = gesture_labels_full
-numGestures = len(gesture_labels)
+
+# dataset attributes
+dataset_name = ""
+num_subjects = 0
+numElectrodes = 0
+numGestures = 0
+gesture_labels = []
+
+
+def initialize(name):
+    global fs, wLenTimesteps, stepLen, dataset_name, num_subjects, numElectrodes, numGestures, gesture_labels
+    dataset_name = name
+    root = f'DatasetsProcessed_hdf5/{dataset_name}/'
+
+    fs = float(open(root + 'frequency.txt', 'r').read())
+    wLenTimesteps = int(wLen / 1000 * fs)
+    stepLen = int(stepLen / 1000 * fs)
+
+    files = os.listdir(f'DatasetsProcessed_hdf5/{dataset_name}')
+    files.remove('frequency.txt')
+    num_subjects = len(files)
+
+    f = h5py.File(f'DatasetsProcessed_hdf5/{dataset_name}/p{1}/participant_{1}.hdf5', 'r')
+    gesture_labels = list(f.keys())
+    numGestures = len(gesture_labels)
+    numElectrodes = f[gesture_labels[0]].shape[1]
+
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -78,14 +102,17 @@ def contract(R):
 
 def filter(emg):
     # sixth-order Butterworth bandpass filter
-    b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=2000.0)
+    if fs > 500.0:
+        b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=fs)
+    else:
+        b, a = butter(N=3, Wn=5, btype='highpass', analog=False, fs=fs)
     emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 
     #second-order notch filter at 50 Hz
-    b, a = iirnotch(w0=50.0, Q=0.0001, fs=2000.0)
+    b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
-# NOTE: modified version of target_normalize where data is [# channels, # timesteps]
+# data is [# channels, # timesteps]
 # target min/max is [# channels, # gestures]
 def target_normalize (data, target_min, target_max, gesture):
     source_min = np.zeros(numElectrodes, dtype=np.float32)
@@ -93,9 +120,9 @@ def target_normalize (data, target_min, target_max, gesture):
     for i in range(numElectrodes):
         source_min[i] = np.min(data[i])
         source_max[i] = np.max(data[i])
-        # was getting 1 divide by 0 error
+        # prevents 1 divide by 0 error
         if (source_max[i] == source_min[i]):
-            source_max[i]  += 0.01
+            source_max[i] += 1
 
     for i in range(numElectrodes):
         data[i] = ((data[i] - source_min[i]) / (source_max[i] 
@@ -112,12 +139,12 @@ def getEMG (args):
         leftout = args[3]
 
     assert n >= 1 and n <= num_subjects
-    file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
+    file = h5py.File(f'DatasetsProcessed_hdf5/{dataset_name}/p{n}/participant_{n}.hdf5', 'r')
     emg = []
     for i, gesture in enumerate(gesture_labels):
         assert "Gesture" + gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
         # [# repetitions, # electrodes, # timesteps]
-        data = np.array(file["Gesture" + gesture])
+        data = np.array(file[gesture])
         
         if (type(args) != int and n != leftout):
             for j in range(len(data)):
@@ -127,16 +154,14 @@ def getEMG (args):
         emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)).to(torch.float16))
     return torch.cat(emg, dim=0)
 
-# assumes first of the 4 repetitions accessed
 def getExtrema (n, p):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
     assert n >= 1 and n <= num_subjects
-    file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
+    file = h5py.File(f'DatasetsProcessed_hdf5/{dataset_name}/p{n}/participant_{n}.hdf5', 'r')
     for i, gesture in enumerate(gesture_labels):
-        # get the first repetition for each gesture
-        data = np.array(file["Gesture" + gesture])
+        data = np.array(file[gesture])
         data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
         data = data[:, :int(len(data[0])*p)]
 
@@ -146,7 +171,9 @@ def getExtrema (n, p):
     return mins, maxes
 
 def getLabels (n):
-    timesteps_for_one_gesture = 100 # 250 ms window with 250 step len empirically determines this
+    file = h5py.File(f'DatasetsProcessed_hdf5/{dataset_name}/p{n}/participant_{n}.hdf5', 'r')
+    data = torch.from_numpy(np.array(file[gesture_labels[0]])).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
+    timesteps_for_one_gesture = data.size(0) * data.size(2)
     labels = np.zeros((timesteps_for_one_gesture*numGestures, numGestures))
     for i in range(timesteps_for_one_gesture):
         for j in range(numGestures):

@@ -13,28 +13,43 @@ import wandb
 from sklearn.metrics import confusion_matrix
 import seaborn as sn
 import matplotlib.pyplot as plt
-from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
-import os
-from scipy.signal import spectrogram, stft
-import pywt
-import fcwt
 from tqdm import tqdm
+from scipy import io
+from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
+from scipy.signal import stft
+import fcwt
 
-numGestures = 10
-fs = 2048.0 # Hz 
-wLen = 250.0 # ms
+fs = 2000 # Hz (SEMG signals sampling rate)
+wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = int(125.0 / 1000 * fs) # 125 ms
-numElectrodes = 256
-num_subjects = 20
+stepLen = int(50.0 / 1000 * fs) # 50 ms
+
+numElectrodes = 12 # number of EMG columns
+num_subjects = 11
+
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
-gesture_nums = {'6' : 0, '7' : 1, '8' : 2, '9' : 3, '10' : 4, '11' : 5, '30' : 6, '31' : 7, '32' : 8, '34' : 9}
-gesture_labels = ["wrist flexion", "wrist extension", "wrist radial", "wrist ulnar", "wrist pronation", "wrist supination", 
-                    "hand close", "hand open", "thumb and index fingers pinch", "thumb and middle fingers pinch"]
+gesture_labels = {}
+gesture_labels['Rest'] = ['Rest'] # Shared between exercises
 
-class CustomDataset(Dataset):
-    def __init__(self, data, labels, transform=None):
+gesture_labels[1] = ['Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction',
+                    'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation',
+                    'Ulnar Deviation', 'Wrist Extension Fist'] # End exercise B
+
+gesture_labels[2] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook Grasp', 'Index Finger Extension Grasp', 'Medium Wrap',
+                    'Ring Grasp', 'Prismatic Four Fingers Grasp', 'Stick Grasp', 'Writing Tripod Grasp', 'Power Sphere Grasp', 'Three Finger Sphere Grasp', 'Precision Sphere Grasp',
+                    'Tripod Grasp', 'Prismatic Pinch Grasp', 'Tip Pinch Grasp', 'Quadrupod Grasp', 'Lateral Grasp', 'Parallel Extension Grasp', 'Extension Type Grasp', 'Power Disk Grasp',
+                    'Open A Bottle With A Tripod Grasp', 'Turn A Screw', 'Cut Something'] # End exercise C
+
+gesture_labels[3] = ['Flexion Of The Little Finger', 'Flexion Of The Ring Finger', 'Flexion Of The Middle Finger', 'Flexion Of The Index Finger', 
+                     'Abduction Of The Thumb', 'Flexion Of The Thumb', 'Flexion Of Index And Little Finger', 'Flexion Of Ring And Middle Finger', 
+                     'Flexion Of Index Finger And Thumb'] # End exercise D
+
+partial_gesture_labels = ['Rest', 'Finger Abduction', 'Fist', 'Finger Adduction', 'Middle Axis Supination', 
+                          'Middle Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 'Ulnar Deviation']
+partial_gesture_indices = [0] + [gesture_labels[1].index(g) + len(gesture_labels['Rest']) for g in partial_gesture_labels[1:]] # 0 is for rest
+class CustomDataset_swav(Dataset):
+    def __init__(self, data, labels=None, transform=None):
         self.data = data
         self.labels = labels
         self.transform = transform
@@ -45,12 +60,63 @@ class CustomDataset(Dataset):
     def __getitem__(self, idx):
         x = self.data[idx]
         y = self.labels[idx]
-
+        
         if self.transform:
             x = self.transform(x)
-
+        
         return x, y
+    
+class CustomDataset_Simclr(Dataset):
+    def __init__(self, data, labels=None, transform=None):
+        self.data = data
+        self.labels = labels
+        self.transform = transform
 
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        x = self.data[idx]
+        if self.transform:
+            x_i = self.transform(x)
+            x_j = self.transform(x)
+        else:
+            x_i = x_j = x
+        
+        if self.labels is not None:
+            y = self.labels[idx]
+            return (x_i, x_j), y
+        return (x_i, x_j)
+    
+class CustomDataset(Dataset):
+    def __init__(self, data, labels=None, transform=None):
+        self.data = data
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        x = self.data[idx]
+        y = self.labels[idx]
+        
+        if self.transform:
+            x = self.transform(x)
+        
+        return x, y
+    
+def getPartialEMG (args):
+    n, exercise = args
+    restim = getRestim(n, exercise)
+    emg = torch.from_numpy(io.loadmat(f'./NinaproDB3/DB3_s{n}/S{n}_E{exercise}_A1.mat')['emg']).to(torch.float16)
+    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+
+def getPartialLabels (args):
+    n, exercise = args
+    restim = getRestim(n, exercise)
+    return contract(restim[balance(restim)])
+        
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -66,212 +132,151 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
+def balance (restimulus):
+    numZero = 0
+    indices = []
+    count_dict = {}
+    
+    # First pass: count the occurrences of each unique tensor
+    for x in range(len(restimulus)):
+        unique_elements = torch.unique(restimulus[x])
+        if len(unique_elements) == 1:
+            element = unique_elements.item()
+            if element in count_dict:
+                count_dict[element] += 1
+            else:
+                count_dict[element] = 1
+    
+    # Calculate average count of non-zero elements
+    non_zero_counts = [count for key, count in count_dict.items() if key != 0]
+    if non_zero_counts:
+        avg_count = sum(non_zero_counts) / len(non_zero_counts)
+    else:
+        avg_count = 0  # Handle case where there are no non-zero unique elements
+
+    # Second pass: apply the threshold logic
+    for x in range(len(restimulus)):
+        unique_elements = torch.unique(restimulus[x])
+        if len(unique_elements) == 1:
+            if unique_elements.item() == 0:
+                if numZero < avg_count:
+                    indices.append(x)
+                numZero += 1
+            else:
+                indices.append(x)
+                
+    return indices
+
+def contract(R, unfold=True):
+    numGestures = R.max() + 1
+    labels = torch.tensor(())
+    labels = labels.new_zeros(size=(len(R), numGestures))
+    if unfold:
+        for x in range(len(R)):
+            labels[x][int(R[x][0][0])] = 1.0
+    else:
+        for x in range(len(R)):
+            labels[x][int(R[x][0])] = 1.0
+    return labels
+
 def filter(emg):
-    # sixth-order Butterworth bandpass filter
-    b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=fs)
-    emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy()).to(dtype=torch.float32)
+    # sixth-order Butterworth highpass filter
+    b, a = butter(N=1, Wn=999.0, btype='lowpass', analog=False, fs=2000.0)
+    return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 
-    #second-order notch filter at 50 Hz
-    b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
-    emgNotch = torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy()).to(dtype=torch.float32)
+def getRestim (n: int, exercise: int = 2, unfold=True):
+    """
+    Returns a restiumulus tensor for participant n and exercise exercise unfolded across time. 
 
-    return emgNotch
+    Args:
+        n (int): _description_
+        exercise (int, optional): _description_. Defaults to 2.
 
-# partition data by channel
-def format_emg (data):
-    emg = np.zeros((len(data) // numElectrodes, numElectrodes))
-    for i in range(len(data) // numElectrodes):
-        for j in range(numElectrodes):
-            emg[i][j] = data[i * numElectrodes + j]
-    return emg
+    Returns:
+        _type_: _description_
+    """
 
-# data is [# samples, # channels]
-# target min/max is [# channels, # gestures]
-def target_normalize (data, target_min, target_max, gesture):
-    source_min = np.zeros(len(data[0]), dtype=np.float16)
-    source_max = np.zeros(len(data[0]), dtype=np.float16)
-    for i in range(len(data[0])):
+    restim = torch.from_numpy(io.loadmat(f'./NinaproDB3/DB3_s{n}/S{n}_E{exercise}_A1.mat')['restimulus'])
+    if unfold:
+        return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+    return restim
+
+def target_normalize (data, target_min, target_max, restim):
+    source_min = np.zeros(numElectrodes, dtype=np.float32)
+    source_max = np.zeros(numElectrodes, dtype=np.float32)
+
+    resize = min(len(data), len(restim))
+    data = data[:resize]
+    restim = restim[:resize]
+    
+    for i in range(numElectrodes):
         source_min[i] = np.min(data[:, i])
         source_max[i] = np.max(data[:, i])
+        if source_min[i] == source_max[i]:
+            source_max[i] = source_min[i] + 1
 
-    for i in range(len(data[0])):
-        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
-        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
-    return data
-
-def getEMG_help (sub, session, target_min=None, target_max=None, leftout=None, unfold=True):
-    emg = []
-
-    currFile = 1
-    select_gestures = set([])
-    curr_gestures = []
-    with open(f'hyser/subject{sub}_session{session}/label_dynamic.txt', 'r') as file:
-        vals = file.readline().strip().split(',')
-        for v in vals:
-            if (v in gesture_nums):
-                select_gestures.add(currFile)
-                curr_gestures.append(gesture_nums[v])
-            currFile += 1
-
-    currFile = 1
-    while (os.path.isfile(f'hyser/subject{sub}_session{session}/dynamic_raw_sample{currFile}.dat')):
-        if (currFile not in select_gestures):
-            currFile += 1
+    data_norm = np.zeros(data.shape, dtype=np.float32)
+    for gesture in range(target_min.shape[1]):
+        if target_min[0][gesture] == 0 and target_max[0][gesture] == 0:
             continue
+        for i in range(numElectrodes):
+            data_norm[:, i] = data_norm[:, i] + (restim[:, 0] == gesture) * (((data[:, i] - source_min[i]) / (source_max[i] 
+            - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture])
+    return data_norm
 
-        data = np.fromfile(f'hyser/subject{sub}_session{session}/dynamic_raw_sample{currFile}.dat', dtype=np.int16).reshape((256, -1)).astype(np.float32)
-
-        adjustment = []
-        with open(f'hyser/subject{sub}_session{session}/dynamic_raw_sample{currFile}.hea', 'r') as file:
-            ignoreFirst = True
-            for line in file:
-                if (ignoreFirst):
-                    ignoreFirst = False
-                else:
-                    values = line.split(" ")[2].split("(")
-                    adjustment.append((float(values[0]), float(values[1].split(")")[0])))
-
-        for col in range(len(data)):
-            data[col] = (data[col] - adjustment[col][1]) / (adjustment[col][0])
-
-        # converts data to form [# samples, # channels]
-        data = data.transpose((1, 0))
-        if (leftout != None and sub != leftout):
-            data = target_normalize(data, target_min, target_max, curr_gestures.pop(0))
-
-        if (unfold):
-            emg.append(torch.from_numpy(data).unfold(dimension=0, size=wLenTimesteps, step=stepLen))
-        else:
-            emg.append(torch.from_numpy(data))
-
-        currFile += 1
-        
-    return emg
-
-def getEMG (args, session_number=1):
-    if (type(args) == int):
-        n = args
-        target_min = None
-        target_max = None
-        leftout = None
-    else:
-        n = args[0]
-        target_min = args[1]
-        target_max = args[2]
-        leftout = args[3]
-    
-    if (n < 10):
-        sub = f'0{n}'
-    else:
-        sub = f'{n}'
-
-    # emg = getEMG_help(sub, "1", target_max, target_min, leftout) + getEMG_help(sub, "2", target_max, target_min, leftout)
-    emg = getEMG_help(sub, str(session_number), target_max, target_min, leftout)
-    
-    return filter(torch.cat(emg, dim=0))
-
-def getEMG_separateSessions(args):
+def getEMG (args, unfold=True):
     if (len(args) == 2):
-        subject_number = args[0]
-        session_number = args[1]
-        target_min = None
-        target_max = None
+        n, exercise = args
         leftout = None
     else:
-        subject_number = args[0]
-        session_number = args[1]
-        target_min = args[2]
-        target_max = args[3]
-        leftout = args[4]
-    
-    if (subject_number < 10):
-        sub = f'0{subject_number}'
-    else:
-        sub = f'{subject_number}'
+        n, exercise, target_min, target_max, leftout = args
 
-    emg = getEMG_help(sub, str(session_number), target_min, target_max, leftout)
-    emg = filter(torch.cat(emg, dim=0))
-    return emg
+    restim = getRestim(n, exercise)
+    #emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
+    #emg = torch.tensor(emg.values)
+    emg = io.loadmat(f'./NinaproDB3/DB3_s{n}/S{n}_E{exercise}_A1.mat')['emg']
+
+    if not(unfold):
+        return emg.astype(np.float16)
+
+    if (leftout != None and n != leftout):
+        emg = target_normalize(emg, target_min, target_max, np.array(getRestim(n, exercise, unfold=False)))
+
+    restim = getRestim(n, exercise, unfold=True)
+    emg = torch.from_numpy(emg).to(torch.float16)
+    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+
+def getExtrema (n, p, exercise):
+    emg = getEMG((n, exercise), unfold=False)
+    labels = getLabels((n, exercise), unfold=False)
+    
+    resize = min(len(emg), len(labels))
+    emg = emg[:resize]
+    labels = labels[:resize]
+
+    mins = np.zeros((numElectrodes, labels.shape[1]))
+    maxes = np.zeros((numElectrodes, labels.shape[1]))
+
+    for i in range(labels.shape[1]):
+        subEMG = emg[labels[:, i] == 1.0]
+        subEMG = subEMG[:int(len(subEMG)*p)]
+
+        # set the min and max for all electrodes to 0
+        if len(subEMG) == 0:
+            continue
         
-    
-def getExtrema (n, p, lastSessionOnly=False):
-    mins = np.zeros((numElectrodes, numGestures))
-    maxes = np.zeros((numElectrodes, numGestures))
-
-    if (n < 10):
-        sub = f'0{n}'
-    else:
-        sub = f'{n}'
-
-    if lastSessionOnly:
-        emg = getEMG_help(sub, "2", unfold=False)
-        labels = getLabels_separateSessions((n, 2), unfold=False)
-    else:
-        emg = getEMG_help(sub, "1", unfold=False)
-        labels = getLabels_separateSessions((n, 1), unfold=False)
-
-    for i in range(numGestures):
-        subEMG = [emg[j] for j in range(len(emg)) if labels[j, i] == 1.0]
-        subEMG = torch.cat(subEMG, dim=0)
-        subEMG = np.array(subEMG[:int(len(subEMG)*p)])
-
         # subEMG will be [# timesteps, # electrodes]
         for j in range(numElectrodes):
             mins[j][i] = np.min(subEMG[:, j])
             maxes[j][i] = np.max(subEMG[:, j])
     return mins, maxes
 
-def contract(R):
-    labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(R), numGestures))
-    for x in range(len(R)):
-        labels[x][gesture_nums[R[x]]] = 1.0
-    return labels
-
-# returns [# samples, # gestures]
-def getLabels (n, unfold=True, session_number=1):
-    labels = []
-
-    if (n < 10):
-        sub = f'0{n}'
-    else:
-        sub = f'{n}'
-
-    file = open(f'hyser/subject{sub}_session{session_number}/label_dynamic.txt', 'r')
-    vals = file.readline().strip().split(',')
-    for v in vals:
-        if (v in gesture_nums):
-            if (unfold):
-                for i in range(7):
-                    labels.append(v)
-            else:
-                labels.append(v)
-    file.close()
-
-    return contract(labels)
-
-def getLabels_separateSessions(args, unfold=True):
-    subject_number = args[0]
-    session_number = args[1]
-    
-    if (subject_number < 10):
-        sub = f'0{subject_number}'
-    else:
-        sub = f'{subject_number}'
-    
-    labels = []
-    file = open(f'hyser/subject{sub}_session{session_number}/label_dynamic.txt', 'r')
-    vals = file.readline().strip().split(',')
-    for v in vals:
-        if (v in gesture_nums):
-            if unfold:
-                for i in range(7):
-                    labels.append(v)
-            else:
-                labels.append(v)
-                
-    file.close()
-    return contract(labels)
+def getLabels (args, unfold=True):
+    n, exercise = args
+    restim = getRestim(n, exercise, unfold)
+    if unfold:
+        return contract(restim[balance(restim)])
+    return contract(restim, False)
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
@@ -283,9 +288,10 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
     
     # Split image and resize
     imageL, imageR = np.split(image, 2, axis=2)
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    #resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+    #                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    #imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
     
     # Clamp between 0 and 1 using torch.clamp
     imageL, imageR = map(lambda img: torch.clamp(img, 0, 1), (imageL, imageR))
@@ -296,17 +302,16 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
     
     return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
 
-def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size):
-    # Contrast normalize and convert data
-    # NOTE: Should this be contrast normalized? Then only patterns of data will be visible, not absolute values
+def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size, index, display_interval=1000):
+    # Normalize and convert data to a usable color map
     data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
-    image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
+    image_data = np.reshape(rgb_data, (length, width, 3))
     image = np.transpose(image_data, (2, 0, 1))
 
-    # Split image and resize
     imageL, imageR = np.split(image, 2, axis=1)
+    # print(imageL.shape)
     imageL, imageR = map(lambda img: torch.from_numpy(img), (imageL, imageR))
     
     # Get max and min values after interpolation
@@ -347,14 +352,15 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     for i in range(length):
         frequencies, coefficients = fcwt.cwt(data[i, :], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
         coefficients_abs = np.abs(coefficients) 
-        coefficients_dB = 10 * np.log10(coefficients_abs + 1e-12)  # Avoid log(0)
-        time_frequency_emg[i * (highest_cwt_scale):(i + 1) * (highest_cwt_scale), :] = coefficients_dB
+        # coefficients_dB = 10 * np.log10(coefficients_abs + 1e-12)  # Avoid log(0)
+        time_frequency_emg[i * (highest_cwt_scale):(i + 1) * (highest_cwt_scale), :] = coefficients_abs
 
     # Convert to PyTorch tensor and normalize
     emg_sample = torch.tensor(time_frequency_emg).float()
     emg_sample = emg_sample.view(numElectrodes, wLenTimesteps, -1)
 
     # Reshape into blocks
+    
     blocks = emg_sample.view(grid_width, grid_length, wLenTimesteps, -1)
 
     # Combine the blocks into the final image
@@ -384,7 +390,7 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = wLenTimesteps // 16
+    spectrogram_window_size = wLenTimesteps // 4
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
     number_of_frequencies = wLenTimesteps 
 
@@ -396,8 +402,8 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     
     frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size - 1, noverlap=spectrogram_window_size-2, nfft=number_of_frequencies - 1) # defaults to hann window
     Sxx_abs = np.abs(Sxx) # small constant added to avoid log(0)
-    Sxx_dB = 10 * np.log10(np.abs(Sxx_abs) + 1e-12)
-    emg_sample = torch.from_numpy(Sxx_dB)
+    # Sxx_dB = 10 * np.log10(np.abs(Sxx_abs) + 1e-12)
+    emg_sample = torch.from_numpy(Sxx_abs)
     emg_sample -= torch.min(emg_sample)
     emg_sample /= torch.max(emg_sample)
     emg_sample = emg_sample.reshape(emg_sample.shape[0]*emg_sample.shape[1], emg_sample.shape[2])
@@ -447,7 +453,7 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
 
 def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
-    return np.sqrt(np.mean(array_2d**2))
+    return np.sqrt(np.mean(array_2d**2, axis=-1))
 
 def process_chunk(data_chunk):
     return np.apply_along_axis(calculate_rms, -1, data_chunk)
@@ -457,6 +463,18 @@ def process_optimized_makeOneImage(args_tuple):
 
 def process_optimized_makeOneMagnitudeImage(args_tuple):
     return optimized_makeOneMagnitudeImage(*args_tuple)
+
+def process_optimized_makeOneImageChunk(args_tuple):
+    images = [None] * len(args_tuple)
+    for i in range(len(args_tuple)):
+        images[i] = optimized_makeOneImage(*args_tuple[i])
+    return images
+
+def process_optimized_makeOneMagnitudeImageChunk(args_tuple):
+    images = [None] * len(args_tuple)
+    for i in range(len(args_tuple)):
+        images[i] = optimized_makeOneMagnitudeImage(*args_tuple[i])
+    return images
 
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None,
               turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
@@ -473,11 +491,12 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         # Reshape data for RMS calculation: (SAMPLES, 16, 5, 10)
         emg = emg.reshape(len(emg), length, rms_windows, width // rms_windows)
         
-        num_splits = multiprocessing.cpu_count()
+        num_splits = multiprocessing.cpu_count() // 2
         data_chunks = np.array_split(emg, num_splits)
         
         emg_rms = process_map(process_chunk, data_chunks, chunksize=1, max_workers=num_splits, desc="Calculating RMS")
         # Apply RMS calculation along the last axis (axis=-1)
+        # emg_rms = np.apply_along_axis(calculate_rms, -1, emg)
         emg = np.concatenate(emg_rms)  # Resulting shape will be (SAMPLES, 16, 5)
         width = rms_windows
         emg = emg.reshape(len(emg), length*width)
@@ -487,20 +506,24 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
 
     # Parameters that don't change can be set once
     resize_length_factor = 1
+    if turn_on_magnitude:
+        resize_length_factor = 1
     native_resnet_size = 224
     
-    # Using process_map instead of multiprocessing.Pool directly
-    # images = process_map(process_optimized_makeOneImage, args, chunksize=1, max_workers=4)
-    if not turn_on_magnitude and not turn_on_spectrogram and not turn_on_cwt and not turn_on_hht:
-        args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-        images_list = []
-        for i in tqdm(range(len(emg)), desc="Creating Images"):
-            images_list.append(optimized_makeOneImage(*args[i]))
-        images = images_list
+    args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size, i) for i in range(len(emg))]
+    chunk_size = len(args) // (multiprocessing.cpu_count() // 2)
+    arg_chunks = [args[i:i + chunk_size] for i in range(0, len(args), chunk_size)]
+    images = []
+    for i in tqdm(range(len(arg_chunks)), desc="Creating Images in Chunks"):
+        images.extend(process_optimized_makeOneImageChunk(arg_chunks[i]))
 
     if turn_on_magnitude:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
-        images_magnitude = process_map(process_optimized_makeOneMagnitudeImage, args, chunksize=1, max_workers=32)
+        chunk_size = len(args) // (multiprocessing.cpu_count() // 2)
+        arg_chunks = [args[i:i + chunk_size] for i in range(0, len(args), chunk_size)]
+        images_magnitude = []
+        for i in tqdm(range(len(arg_chunks)), desc="Creating Magnitude Images in Chunks"):
+            images_magnitude.extend(process_optimized_makeOneMagnitudeImageChunk(arg_chunks[i]))
         images = np.concatenate((images, images_magnitude), axis=2)
     
     elif turn_on_spectrogram:
@@ -513,15 +536,38 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
     elif turn_on_cwt:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
         images_cwt_list = []
-        # with multiprocessing.Pool(processes=5) as pool:
         for i in tqdm(range(len(emg)), desc="Creating CWT Images"):
             images_cwt_list.append(optimized_makeOneCWTImage(*args[i]))
         images = images_cwt_list
-        
-    elif turn_on_hht:
-        raise NotImplementedError("HHT is not implemented yet")
+    
+    if turn_on_hht:
+        raise NotImplementedError("HHT is not implemented yet.")
     
     return images
+        
+
+    # with multiprocessing.Pool(processes=32) as pool:
+    #     args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+    #     images_async = pool.starmap_async(optimized_makeOneImage, args)
+    #     images = images_async.get()
+
+    # if turn_on_magnitude:
+    #     with multiprocessing.Pool(processes=32) as pool:
+    #         args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
+    #         images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
+    #         images_magnitude = images_async.get()
+    #     images = np.concatenate((images, images_magnitude), axis=2)
+        
+    # if turn_on_cwt:
+    #     NotImplementedError("CWT is not implemented yet.")
+        
+    # if turn_on_spectrogram:
+    #     NotImplementedError("Spectrogram is not implemented yet.")
+        
+    # if turn_on_hht:
+    #     NotImplementedError("HHT is not implemented yet.")
+    
+    # return images
 
 def periodLengthForAnnealing(num_epochs, annealing_multiplier, cycles):
     periodLength = 0
@@ -543,7 +589,7 @@ class Data(Dataset):
 
 def plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
     # Calculate confusion matrix
-    cf_matrix = confusion_matrix(true, pred, labels=range(numGestures))
+    cf_matrix = confusion_matrix(true, pred)
     df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
                         columns=gesture_labels)
@@ -571,7 +617,6 @@ def denormalize(images):
     
     return images
 
-
 def plot_average_images(image_data, true, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
     # Convert true to numpy for quick indexing
     true_np = np.array(true)        
@@ -579,6 +624,8 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     # Calculate average image of each gesture
     average_images = []
     print(f"Plotting average {partition_name} images...")
+    numGestures = len(gesture_labels)
+
     for i in range(numGestures):
         # Find indices
         gesture_indices = np.where(true_np == i)[0]
@@ -588,14 +635,15 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
         average_images.append(np.mean(gesture_images, axis=0))
 
     average_images = np.array(average_images)
-    
-    resize_transform = transforms.Resize((224, 224))
+
+    # resize average images to 224 x 224
+    resize = transforms.Resize([224, 224], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    average_images = np.array([resize(torch.from_numpy(img)).numpy() for img in average_images])
 
     # Plot average image of each gesture
-    fig, axs = plt.subplots(2, 9, figsize=(10, 5))
+    fig, axs = plt.subplots(2, 9, figsize=(15, 5))
     for i in range(numGestures):
-        current_image = resize_transform(torch.from_numpy(average_images[i])).numpy()
-        axs[i//9, i%9].imshow(current_image.transpose(1,2,0))
+        axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])
         axs[i//9, i%9].axis('off')
     fig.suptitle('Average Image of Each Gesture')
@@ -613,26 +661,23 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
 
     # Parameters for plotting
     rows_per_gesture = 15
-    total_gestures = numGestures  # Replace with the actual number of gestures
+    total_gestures = len(gesture_labels)  # Replace with the actual number of gestures
 
     # Create subplots
     fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))
-    
-    resize_transform = transforms.Resize((224, 224))
 
     print(f"Plotting first fifteen {partition_name} images...")
     for i in range(total_gestures):
         # Find indices of the first 15 images for gesture i
         gesture_indices = np.where(true_np == i)[0][:rows_per_gesture]
-        
+
         # Select and denormalize only the required images
-        gesture_images = denormalize(image_data[gesture_indices]).cpu().detach().numpy()
+        gesture_images = denormalize(transforms.Resize((224,224))(image_data[gesture_indices])).cpu().detach().numpy()
 
         for j in range(len(gesture_images)):  # len(gesture_images) is no more than rows_per_gesture
             ax = axs[j, i]
             # Transpose the image data to match the expected shape (H, W, C) for imshow
-            current_image = resize_transform(torch.from_numpy(gesture_images[j])).numpy()
-            ax.imshow(current_image.transpose(1, 2, 0))
+            ax.imshow(gesture_images[j].transpose(1, 2, 0))
             if j == 0:
                 ax.set_title(gesture_labels[i])
             ax.axis('off')
@@ -644,4 +689,6 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     firstThreeImages_filename = f'{testrun_foldername}firstFifteenImages_seed{args.seed}_{partition_name}_{formatted_datetime}.png'
     plt.savefig(firstThreeImages_filename, dpi=300)
     wandb.log({f"First Fifteen {partition_name.capitalize()} Images of Each Gesture": wandb.Image(firstThreeImages_filename)})
+
+
 
