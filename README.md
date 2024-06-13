@@ -38,7 +38,7 @@ This is the official repo for the paper:
 ## Installation and Setup
 Install a version of Miniforge distribution `>= Miniforge3-22.3.1-0`, which will give you access to `mamba`. This is a faster and more verbose version of `conda`. 
 
-It is recommended to run on a Linux x86_64 (amd64) architecture. The following instructions are tested on an Ubuntu distro. 
+It is recommended to run on a Linux x86_64 (amd64) architecture. The following instructions are tested on an Ubuntu 20.04 distro. 
 
 Install the necessary packages:
 ```console
