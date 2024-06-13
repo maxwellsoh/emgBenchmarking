@@ -44,13 +44,13 @@ Install the necessary packages:
 ```console
 $ sudo apt update
 $ sudo apt install git jq git-lfs
-$ git lfs install
 ```
 
 Create and activate the virtual environment:
 ```console
 $ git clone https://github.com/maxwellsoh/emgBenchmarking.git
 $ cd emgBenchmarking/
+$ git lfs install
 $ mamba env create -n emgbench -f environment.yml
 $ conda activate emgbench
 ```
