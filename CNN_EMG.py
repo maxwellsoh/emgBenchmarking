@@ -31,6 +31,8 @@ from sklearn.ensemble import RandomForestClassifier
 from joblib import dump
 from sklearn.metrics import accuracy_score, log_loss
 import torch.nn.functional as F
+import subprocess
+import get_datasets
 from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 from semilearn.core.utils import send_model_cuda
 import torchmetrics
@@ -38,6 +40,7 @@ import ml_metrics_utils as ml_utils
 from sklearn.metrics import confusion_matrix, classification_report
 import VisualTransformer
 
+# TODO: get it to automatically call the right programs if it is missing them... should be just a straight call. need to work on actually running it 
 
 # Define a custom argument type for a list of integers
 def list_of_ints(arg):
@@ -154,12 +157,18 @@ if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
         NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
 
 if (args.dataset.lower() == "uciemg" or args.dataset.lower() == "uci"):
+    if (not os.path.exists("./uciEMG")):
+        print("uciEMG dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--UCI'])
     import utils_UCI as utils
     print(f"The dataset being tested is uciEMG")
     project_name = 'emg_benchmarking_uci'
     args.dataset = "uciemg"
 
 elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_db2"):
+    if (not os.path.exists("./NinaproDB2")):
+        print("NinaproDB2 dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--NinaproDB2'])
     import utils_NinaproDB2 as utils
     print(f"The dataset being tested is ninapro-db2")
     project_name = 'emg_benchmarking_ninapro-db2'
@@ -169,6 +178,10 @@ elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_
     args.dataset = 'ninapro-db2'
 
 elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_db5"):
+    if (not os.path.exists("./NinaproDB5")):
+        print("NinaproDB5 dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--NinaproDB5'])
+        subprocess.run(['python', './process_NinaproDB5.py'])
     import utils_NinaproDB5 as utils
     print(f"The dataset being tested is ninapro-db5")
     project_name = 'emg_benchmarking_ninapro-db5'
@@ -187,6 +200,9 @@ elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_
         ValueError("leave-one-session-out not implemented for ninapro-db3; only one session exists")
 
 elif (args.dataset.lower() == "m-dataset" or args.dataset.lower() == "m_dataset"):
+    if (not os.path.exists("./M_dataset")):
+        print("M_dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--M_Dataset'])
     import utils_M_dataset as utils
     print(f"The dataset being tested is M_dataset")
     project_name = 'emg_benchmarking_M_dataset'
@@ -195,20 +211,29 @@ elif (args.dataset.lower() == "m-dataset" or args.dataset.lower() == "m_dataset"
     args.dataset = 'm-dataset'
 
 elif (args.dataset.lower() == "hyser"):
+    if (not os.path.exists("./hyser")):
+        print("Hyser dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--Hyser'])
     import utils_Hyser as utils
     print(f"The dataset being tested is hyser")
     project_name = 'emg_benchmarking_hyser'
     args.dataset = 'hyser'
 
 elif (args.dataset.lower() == "capgmyo"):
+    if (not os.path.exists("./CapgMyo_B")):
+        print("CapgMyo_B dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--CapgMyo_B'])
     import utils_CapgMyo as utils
     print(f"The dataset being tested is CapgMyo")
     project_name = 'emg_benchmarking_capgmyo'
     if args.leave_one_session_out:
-        utils.num_subjects = 10
+      utils.num_subjects = 10
     args.dataset = 'capgmyo'
 
 elif (args.dataset.lower() == "jehan"):
+    if (not os.path.exists("./Jehan_Dataset")):
+        print("Jehan dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--Jehan_Dataset'])
     import utils_JehanData as utils
     print(f"The dataset being tested is JehanDataset")
     project_name = 'emg_benchmarking_jehandataset'
@@ -223,9 +248,12 @@ elif (args.dataset.lower() == "sci"):
     args.dataset = 'sci'
     assert not args.transfer_learning, "Transfer learning not implemented for SCI dataset"
     assert not args.leave_one_subject_out, "Leave one subject out not implemented for SCI dataset"
-    
 
-elif (args.dataset.lower() == "ozdemiremg" or args.dataset.lower() == "ozdemir_emg"):
+elif (args.dataset.lower() == "ozdemir" or args.dataset.lower() == "ozdemiremg"):
+    if (not os.path.exists("./OzdemirEMG")):
+        print("Ozdemir dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--OzdemirEMG'])
+
     print(f"The dataset being tested is OzdemirEMG")
     project_name = 'emg_benchmarking_ozdemir'
     if args.full_dataset_ozdemir:
@@ -246,6 +274,9 @@ else:
     
 if args.turn_off_scaler_normalization:
     assert args.target_normalize == 0.0, "Cannot turn off scaler normalization and turn on target normalize at the same time"
+
+else: 
+    raise ValueError("Dataset not recognized. Please choose from 'uciEMG', 'ninapro-db2', 'ninapro-db5', 'M_dataset', 'hyser', 'capgmyo', 'jehan', or 'ozdemir'")
 
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")

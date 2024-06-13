@@ -88,9 +88,9 @@ def target_normalize (data, target_min, target_max, gesture):
 def getData(n, gesture, target_min=None, target_max=None, leftout=None, session_number=1):
     session_number_mapping = {1: 'initial', 2: 'recalibration'}
     if (n<10):
-        file = h5py.File('./FlexWear-HD_Dataset/p00' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
+        file = h5py.File('./FlexWear-HD/FlexWear-HD_Dataset/p00' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
     else:
-        file = h5py.File('./FlexWear-HD_Dataset/p0' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
+        file = h5py.File('./FlexWear-HD/FlexWear-HD_Dataset/p0' + str(n) + f'/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
     # initially [# repetitions, # channels, # timesteps]
     data = np.array(file[gesture])
     
@@ -153,14 +153,14 @@ def getExtrema (n, p, lastSessionOnly=False):
 
     if lastSessionOnly:
         if (n < 10):
-            file = h5py.File('./FlexWear-HD_Dataset/p00' + str(n) +'/data_allchannels_recalibration.h5', 'r')
+            file = h5py.File('./FlexWear-HD/FlexWear-HD_Dataset/p00' + str(n) +'/data_allchannels_recalibration.h5', 'r')
         else:
-            file = h5py.File('./FlexWear-HD_Dataset/p0' + str(n) +'/data_allchannels_recalibration.h5', 'r')
+            file = h5py.File('./FlexWear-HD/FlexWear-HD_Dataset/p0' + str(n) +'/data_allchannels_recalibration.h5', 'r')
     else:
         if (n < 10):
-            file = h5py.File('./FlexWear-HD_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
+            file = h5py.File('./FlexWear-HD/FlexWear-HD_Dataset/p00' + str(n) +'/data_allchannels_initial.h5', 'r')
         else:
-            file = h5py.File('./FlexWear-HD_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
+            file = h5py.File('./FlexWear-HD/FlexWear-HD_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
     
     for i in range(numGestures):
         data = np.array(file[gesture_labels[i]])
@@ -198,7 +198,7 @@ def getGestures_separateSessions(args):
     subject_number, session_number = args
     subject_number = participants[int(subject_number)-1]
     session_number_mapping = {1: 'initial', 2: 'recalibration'}
-    file = h5py.File(f'./FlexWear-HD_Dataset/p{subject_number:03}/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
+    file = h5py.File(f'./FlexWear-HD/FlexWear-HD_Dataset/p{subject_number:03}/data_allchannels_{session_number_mapping[session_number]}.h5', 'r')
     gesture_count = []
     for gesture in gesture_labels: 
         data = np.array(file[gesture])
