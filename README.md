@@ -27,8 +27,9 @@ This is the official repo for the paper:
 - [Usage](#usage)
   - [Installation and Setup](#installation-and-setup)
   - [Benchmarking Datasets](#benchmarking-datasets)
-  - [Adding Datasets](#adding-datasets)
   - [Replicating Tables](#replicating-tables)
+- [Customization](#customization)
+  - [Adding Datasets](#adding-datasets)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 
@@ -57,11 +58,6 @@ $ conda activate emgbench
 ## Benchmarking Datasets
 CNN_EMG.py will automatically download the necessary datasets for each run. Note that the Hyser dataset can take hours to download. 
 
-## Adding Datasets
-New datasets can be benchmarked with `CNN_EMG.py` after being processed into HDF5 files by saving them to the following directory: `DatasetsProcessed_hdf5/[DATASET-NAME]/p[N]/participant_[N].hdf5` where `N` is the participant's number ranging from 1 to the number of subjects. The keys of each HDF5 file should be the the names of each gesture and the data for each gesture should be stored with shape `[# TRIALS, # ELECTRODES, # TIMESTEPS]`. Also, create a file `DatasetsProcessed_hdf5/[DATASET-NAME]/frequency.txt` just containing the frequency of the dataset in Hz. 
-
-To run the new dataset, input the dataset name to the dataset argument of `CNN_EMG.py`. Every subject must have data for all of the gestures in order for the dataset to be processed by `utils_generic.py`.
-
 ## Replicating Tables
 To replicate the first table, run the following shell script for each of the 6 datasets (capgmyo, hyser, m-dataset, ninapro-db5, uciemg, jehan). The parameters that will need to be changed across runs are at the top
 ```
@@ -80,7 +76,7 @@ do
 done
 ```
 
-To replicate the second table, run the following shell script for each of the 6 datasets
+To replicate the second table, run the following shell script for each of the 6 datasets:
 ```
 starting_index=1
 ending_index=10 # set to the maximum number of participants for the dataset
@@ -132,6 +128,12 @@ do
     wait
 done
 ```
+
+# Customization
+## Adding Datasets
+New datasets can be benchmarked with `CNN_EMG.py` after being processed into HDF5 files by saving them to the following directory: `DatasetsProcessed_hdf5/[DATASET-NAME]/p[N]/participant_[N].hdf5` where `N` is the participant's number ranging from 1 to the number of subjects. The keys of each HDF5 file should be the the names of each gesture and the data for each gesture should be stored with shape `[# TRIALS, # ELECTRODES, # TIMESTEPS]`. Also, create a file `DatasetsProcessed_hdf5/[DATASET-NAME]/frequency.txt` just containing the frequency of the dataset in Hz. 
+
+To run the new dataset, input the dataset name to the dataset argument of `CNN_EMG.py`. Every subject must have data for all of the gestures in order for the dataset to be processed by `utils_generic.py`.
 
 # Troubleshooting
 If you run into an error, `OSError: [Errno 24] Too many open files`
