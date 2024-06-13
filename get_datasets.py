@@ -13,6 +13,7 @@ def run():
     parser.add_argument("--Jehan_Dataset", action="store_true")
     parser.add_argument("--M_Dataset", action="store_true")
     parser.add_argument("--NinaproDB2", action="store_true")
+    parser.add_argument("--NinaproDB3", action="store_true")
     parser.add_argument("--NinaproDB5", action="store_true")
     parser.add_argument("--OzdemirEMG", action="store_true")
     parser.add_argument("--UCI", action="store_true")

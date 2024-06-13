@@ -157,7 +157,7 @@ if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
         NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
 
 if (args.dataset.lower() == "uciemg" or args.dataset.lower() == "uci"):
-  if (not os.path.exists("./uciEMG")):
+    if (not os.path.exists("./uciEMG")):
         print("uciEMG dataset does not exist yet. Downloading now...")
         subprocess.run(['python', './get_datasets.py', '--UCI'])
     import utils_UCI as utils
