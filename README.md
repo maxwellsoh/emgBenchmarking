@@ -142,6 +142,19 @@ Run the command
 $ ulimit -n 65536
 ```
 
+If you run into the error, 
+```
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/jehan/emgBenchmarking/CNN_EMG.py", line 486, in <module>
+    emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+  File "/home/jehan/miniforge3/envs/emgbench/lib/python3.9/multiprocessing/pool.py", line 771, in get
+    raise self._value
+OSError: Unable to synchronously open file (file signature not found)
+```
+You may not have install `sudo apt install git-lfs` and `git lfs install`.
+
 # Development
 
 To update the virtual environment, run
