@@ -153,7 +153,7 @@ Traceback (most recent call last):
     raise self._value
 OSError: Unable to synchronously open file (file signature not found)
 ```
-You may not have install `sudo apt install git-lfs` and `git lfs install`.
+You may not have installed `sudo apt install git-lfs` and `git lfs install`. Remove FlexWear-HD/, install git-lfs, and try again. 
 
 # Development
 
