@@ -115,9 +115,9 @@ def getEMG (args):
     emg = []
     for i in range(numGestures * 4):
         if (n < 3):
-            data = np.fromfile(f'M_dataset/Female{n-1}/Test1/classe_{i}.dat', dtype=np.int16)
+            data = np.fromfile(f'myoarmbanddataset/Female{n-1}/Test1/classe_{i}.dat', dtype=np.int16)
         else:
-            data = np.fromfile(f'M_dataset/Male{n-3}/Test1/classe_{i}.dat', dtype=np.int16)
+            data = np.fromfile(f'myoarmbanddataset/Male{n-3}/Test1/classe_{i}.dat', dtype=np.int16)
         data = format_emg(np.array(data, dtype=np.float32))
         if (type(args) != int and leftout != n):
             data = normalize(data, target_min, target_max, i % numGestures)
@@ -134,9 +134,9 @@ def getExtrema (n, p):
 
         for j in range(4):
             if (n < 3):
-                emg = np.fromfile(f'M_dataset/Female{n-1}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
+                emg = np.fromfile(f'myoarmbanddataset/Female{n-1}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
             else:
-                emg = np.fromfile(f'M_dataset/Male{n-3}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
+                emg = np.fromfile(f'myoarmbanddataset/Male{n-3}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
             data.append(format_emg(np.array(emg, dtype=np.float32)).transpose())
 
         data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
@@ -151,9 +151,9 @@ def getLabels (n):
     labels = []
     for i in range(numGestures * 4):
         if (n < 3):
-            data = np.fromfile(f'M_dataset/Female{n-1}/Test1/classe_{i}.dat', dtype=np.int16)
+            data = np.fromfile(f'myoarmbanddataset/Female{n-1}/Test1/classe_{i}.dat', dtype=np.int16)
         else:
-            data = np.fromfile(f'M_dataset/Male{n-3}/Test1/classe_{i}.dat', dtype=np.int16)
+            data = np.fromfile(f'myoarmbanddataset/Male{n-3}/Test1/classe_{i}.dat', dtype=np.int16)
         labels.append(torch.from_numpy((i % numGestures) + np.zeros(torch.from_numpy(format_emg(np.array(data, dtype=np.float32))).unfold(dimension=0, size=wLenTimesteps, step=stepLen).shape[0])))
     labels = contract(torch.cat(labels, dim=0))
     return labels
@@ -396,11 +396,12 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         images = images_async.get()
 
     if turn_on_magnitude:
-        with multiprocessing.Pool(processes=5) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
-            images_magnitude = images_async.get()
-        images = np.concatenate((images, images_magnitude), axis=2)
+        # with multiprocessing.Pool(processes=5) as pool:
+        #     args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
+        #     images_async = pool.starmap_async(optimized_makeOneMagnitudeImage, args)
+        #     images_magnitude = images_async.get()
+        # images = np.concatenate((images, images_magnitude), axis=2)
+        raise NotImplementedError("Magnitude is not implemented")
 
     elif turn_on_spectrogram:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]

@@ -152,9 +152,9 @@ exercises = False
 if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
     print("Warning: not using pytorch, many arguments will be ignored")
     if args.turn_on_unlabeled_domain_adaptation:
-        NotImplementedError("Cannot use unlabeled domain adaptation with MLP, SVC, or RF")
+        raise NotImplementedError("Cannot use unlabeled domain adaptation with MLP, SVC, or RF")
     if args.pretrain_and_finetune:
-        NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
+        raise NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
 
 if (args.dataset.lower() == "uciemg" or args.dataset.lower() == "uci"):
     if (not os.path.exists("./uciEMG")):
@@ -174,7 +174,7 @@ elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_
     project_name = 'emg_benchmarking_ninapro-db2'
     exercises = True
     if args.leave_one_session_out:
-        ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
+        raise ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
     args.dataset = 'ninapro-db2'
 
 elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_db5"):
@@ -187,7 +187,7 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
     project_name = 'emg_benchmarking_ninapro-db5'
     exercises = True
     if args.leave_one_session_out:
-        ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
+        raise ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
     args.dataset = 'ninapro-db5'
 
 elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
@@ -197,18 +197,18 @@ elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_
     project_name = 'emg_benchmarking_ninapro-db3'
     exercises = True
     if args.leave_one_session_out:
-        ValueError("leave-one-session-out not implemented for ninapro-db3; only one session exists")
+        raise ValueError("leave-one-session-out not implemented for ninapro-db3; only one session exists")
 
-elif (args.dataset.lower() == "m-dataset" or args.dataset.lower() == "m_dataset"):
-    if (not os.path.exists("./M_dataset")):
-        print("M_dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--M_Dataset'])
-    import utils_M_dataset as utils
-    print(f"The dataset being tested is M_dataset")
-    project_name = 'emg_benchmarking_M_dataset'
+elif (args.dataset.lower() == "myoarmbanddataset"):
+    if (not os.path.exists("./myoarmbanddataset")):
+        print("myoarmbanddataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--MyoArmbandDataset'])
+    import utils_MyoArmbandDataset as utils
+    print(f"The dataset being tested is myoarmbanddataset")
+    project_name = 'emg_benchmarking_myoarmbanddataset'
     if args.leave_one_session_out:
-        ValueError("leave-one-session-out not implemented for M_dataset; only one session exists")
-    args.dataset = 'm-dataset'
+        raise ValueError("leave-one-session-out not implemented for myoarmbanddataset; only one session exists")
+    args.dataset = 'myoarmbanddataset'
 
 elif (args.dataset.lower() == "hyser"):
     if (not os.path.exists("./hyser")):
@@ -238,7 +238,7 @@ elif (args.dataset.lower() == "flexwear-hd"):
     print(f"The dataset being tested is FlexWear-HD Dataset")
     project_name = 'emg_benchmarking_flexwear-hd_dataset'
     if args.leave_one_session_out:
-        ValueError("leave-one-session-out not implemented for FlexWear-HDDataset; only one session exists")
+        raise ValueError("leave-one-session-out not implemented for FlexWear-HDDataset; only one session exists")
     args.dataset = 'flexwear-hd'
 
 elif (args.dataset.lower() == "sci"):
@@ -265,11 +265,11 @@ elif (args.dataset.lower() == "ozdemir" or args.dataset.lower() == "ozdemiremg")
         utils.gesture_labels = utils.gesture_labels_partial
         utils.numGestures = len(utils.gesture_labels)
     if args.leave_one_session_out:
-        ValueError("leave-one-session-out not implemented for OzdemirEMG; only one session exists")
+        raise ValueError("leave-one-session-out not implemented for OzdemirEMG; only one session exists")
     args.dataset = 'ozdemiremg'
     
 else: 
-    raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'm-dataset', 'hyser'," +
+    raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," +
                     "'capgmyo', 'flexwear-hd', 'sci', or 'ozdemiremg'")
     
 if args.turn_off_scaler_normalization:
@@ -738,24 +738,27 @@ if args.save_images:
 for x in tqdm(range(len(emg)), desc="Number of Subjects "):
     if args.held_out_test:
         subject_folder = f'subject{x}/'
+    elif args.leave_one_session_out:
+        subject_folder = f'session{x}/'
     else:
         subject_folder = f'LOSO_subject{x}/'
     foldername_zarr = base_foldername_zarr + subject_folder
     
-    print("Attempting to load dataset for subject", x, "from", foldername_zarr)
+    subject_or_session = "session" if args.leave_one_session_out else "subject"
+    print(f"Attempting to load dataset for {subject_or_session}", x, "from", foldername_zarr)
 
     print("Looking in folder: ", foldername_zarr)
     # Check if the folder (dataset) exists, load if yes, else create and save
     if os.path.exists(foldername_zarr):
         # Load the dataset
         dataset = zarr.open(foldername_zarr, mode='r')
-        print(f"Loaded dataset for subject {x} from {foldername_zarr}")
+        print(f"Loaded dataset for {subject_or_session} {x} from {foldername_zarr}")
         if args.load_few_images:
             data += [dataset[:10]]
         else: 
             data += [dataset[:]]
     else:
-        print(f"Could not find dataset for subject {x} at {foldername_zarr}")
+        print(f"Could not find dataset for {subject_or_session} {x} at {foldername_zarr}")
         # Get images and create the dataset
         if (args.target_normalize > 0):
             scaler = None
@@ -1731,7 +1734,7 @@ else:
                         train_micro_top5_acc(output, Y_batch)
 
                         outputs_all.append(output)
-                        ground_truth_train_all.append(Y_batch)
+                        ground_truth_train_all.append(torch.argmax(Y_batch, dim=1))
 
                         # train_macro_auroc(output, Y_batch)
                         # train_macro_auprc(output, Y_batch)
