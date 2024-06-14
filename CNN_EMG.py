@@ -1483,7 +1483,7 @@ if args.leave_n_subjects_out_randomly != 0:
 if args.turn_off_scaler_normalization:
     wandb_runname += '_no-scal-norm'
 if args.target_normalize > 0:
-    wandb_runname += '_targ-norm'
+    wandb_runname += '_targ-norm-' + str(args.target_normalize)
 if args.load_few_images:
     wandb_runname += '_load-few'
 if args.transfer_learning:
