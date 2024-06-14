@@ -237,8 +237,8 @@ elif (args.dataset.lower() == "flexwear-hd"):
     import utils_FlexWearHD as utils
     print(f"The dataset being tested is FlexWear-HD Dataset")
     project_name = 'emg_benchmarking_flexwear-hd_dataset'
-    if args.leave_one_session_out:
-        raise ValueError("leave-one-session-out not implemented for FlexWear-HDDataset; only one session exists")
+    # if args.leave_one_session_out:
+        # raise ValueError("leave-one-session-out not implemented for FlexWear-HDDataset; only one session exists")
     args.dataset = 'flexwear-hd'
 
 elif (args.dataset.lower() == "sci"):
