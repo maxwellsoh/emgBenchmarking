@@ -141,8 +141,8 @@ parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by def
 parser.add_argument('--proportion_unlabeled_data_from_training_subjects', type=float, help='proportion of data from training subjects to use as unlabeled data. Set to 0.0 by default.', default=0.0)
 # Add argument for cutting down amount of total data for training subjects
 parser.add_argument('--proportion_data_from_training_subjects', type=float, help='proportion of data from training subjects to use. Set to 1.0 by default.', default=1.0)
-# Add argument for loading unlabeled data from jehan dataset
-parser.add_argument('--load_unlabeled_data_jehan', type=utils.str2bool, help='whether or not to load unlabeled data from Jehan dataset. Set to False by default.', default=False)
+# Add argument for loading unlabeled data from flexwear-hd dataset
+parser.add_argument('--load_unlabeled_data_flexwearhd', type=utils.str2bool, help='whether or not to load unlabeled data from FlexWear-HD dataset. Set to False by default.', default=False)
 
 # Parse the arguments
 args = parser.parse_args()
@@ -230,16 +230,16 @@ elif (args.dataset.lower() == "capgmyo"):
       utils.num_subjects = 10
     args.dataset = 'capgmyo'
 
-elif (args.dataset.lower() == "jehan"):
-    if (not os.path.exists("./Jehan_Dataset")):
-        print("Jehan dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--Jehan_Dataset'])
-    import utils_JehanData as utils
-    print(f"The dataset being tested is JehanDataset")
-    project_name = 'emg_benchmarking_jehandataset'
+elif (args.dataset.lower() == "flexwear-hd"):
+    if (not os.path.exists("./FlexWear-HD")):
+        print("FlexWear-HD dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--FlexWearHD_Dataset'])
+    import utils_FlexWearHD as utils
+    print(f"The dataset being tested is FlexWear-HD Dataset")
+    project_name = 'emg_benchmarking_flexwear-hd_dataset'
     if args.leave_one_session_out:
-        ValueError("leave-one-session-out not implemented for JehanDataset; only one session exists")
-    args.dataset = 'jehan'
+        ValueError("leave-one-session-out not implemented for FlexWear-HDDataset; only one session exists")
+    args.dataset = 'flexwear-hd'
 
 elif (args.dataset.lower() == "sci"):
     import utils_SCI as utils
@@ -270,14 +270,11 @@ elif (args.dataset.lower() == "ozdemir" or args.dataset.lower() == "ozdemiremg")
     
 else: 
     raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'm-dataset', 'hyser'," +
-                    "'capgmyo', 'jehan', 'sci', or 'ozdemiremg'")
+                    "'capgmyo', 'flexwear-hd', 'sci', or 'ozdemiremg'")
     
 if args.turn_off_scaler_normalization:
     assert args.target_normalize == 0.0, "Cannot turn off scaler normalization and turn on target normalize at the same time"
-
-else: 
-    raise ValueError("Dataset not recognized. Please choose from 'uciEMG', 'ninapro-db2', 'ninapro-db5', 'M_dataset', 'hyser', 'capgmyo', 'jehan', or 'ozdemir'")
-
+    
 # Use the arguments
 print(f"The value of --leftout_subject is {args.leftout_subject}")
 print(f"The value of --seed is {args.seed}")
@@ -336,7 +333,7 @@ print(f"The value of --batch_size is {args.batch_size}")
 
 print(f"The value of --proportion_unlabeled_data_from_training_subjects is {args.proportion_unlabeled_data_from_training_subjects}")
 print(f"The value of --proportion_data_from_training_subjects is {args.proportion_data_from_training_subjects}")
-print(f"The value of --load_unlabeled_data_jehan is {args.load_unlabeled_data_jehan}")
+print(f"The value of --load_unlabeled_data_flexwearhd is {args.load_unlabeled_data_flexwearhd}")
 
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -491,9 +488,9 @@ else: # Not exercises
     print("subject 1 mean", torch.mean(emg[0]))
     numGestures = utils.numGestures
     
-if args.load_unlabeled_data_jehan:
-    assert args.dataset == "jehan", "Can only load unlabeled online data from Jehan dataset"
-    print("Loading unlabeled online data from Jehan dataset")
+if args.load_unlabeled_data_flexwearhd:
+    assert args.dataset == "flexwear-hd", "Can only load unlabeled online data from FlexWear-HD dataset"
+    print("Loading unlabeled online data from FlexWear-HD dataset")
     unlabeled_online_data = utils.getOnlineUnlabeledData(args.leftout_subject)
 
 length = emg[0].shape[1]
@@ -779,7 +776,7 @@ for x in tqdm(range(len(emg)), desc="Number of Subjects "):
             print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
         data += [images]
         
-if args.load_unlabeled_data_jehan:
+if args.load_unlabeled_data_flexwearhd:
     unlabeled_images = utils.getImages(unlabeled_online_data, scaler, length, width,
                                                 turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize,
                                                 turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value,
@@ -887,7 +884,7 @@ else:
                 else:
                     X_finetune.append(np.array(X_train_temp))
                     Y_finetune.append(np.array(Y_train_temp))
-        if args.load_unlabeled_data_jehan:
+        if args.load_unlabeled_data_flexwearhd:
             X_finetune_unlabeled_list.append(unlabeled_data)
             Y_finetune_unlabeled_list.append(np.zeros(unlabeled_data.shape[0]))
 
@@ -905,7 +902,7 @@ else:
         if args.proportion_unlabeled_data_from_training_subjects>0:
             X_pretrain_unlabeled = np.concatenate(X_pretrain_unlabeled_list, axis=0, dtype=np.float16)
             Y_pretrain_unlabeled = np.concatenate(Y_pretrain_unlabeled_list, axis=0, dtype=np.float16)
-        if args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_jehan:
+        if args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_flexwearhd:
             X_finetune_unlabeled = np.concatenate(X_finetune_unlabeled_list, axis=0, dtype=np.float16)
             Y_finetune_unlabeled = np.concatenate(Y_finetune_unlabeled_list, axis=0, dtype=np.float16)
         
@@ -919,7 +916,7 @@ else:
         if args.proportion_unlabeled_data_from_training_subjects>0:
             X_train_unlabeled = torch.from_numpy(X_pretrain_unlabeled).to(torch.float16)
             Y_train_unlabeled = torch.from_numpy(Y_pretrain_unlabeled).to(torch.float16)
-        if args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_jehan:
+        if args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_flexwearhd:
             X_train_finetuning_unlabeled = torch.from_numpy(X_finetune_unlabeled).to(torch.float16)
             Y_train_finetuning_unlabeled = torch.from_numpy(Y_finetune_unlabeled).to(torch.float16)
 
@@ -1068,7 +1065,7 @@ else:
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject = tts.train_test_split(
                         X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=Y_train_partial_leftout_subject, random_state=args.seed, shuffle=True)
             
-            if args.load_unlabeled_data_jehan:
+            if args.load_unlabeled_data_flexwearhd:
                 if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
                     X_train_unlabeled_partial_leftout_subject = np.concatenate([X_train_unlabeled_partial_leftout_subject, unlabeled_data], axis=0)
                     Y_train_unlabeled_partial_leftout_subject = np.concatenate([Y_train_unlabeled_partial_leftout_subject, np.zeros((unlabeled_data.shape[0], utils.numGestures))], axis=0)
@@ -1096,7 +1093,7 @@ else:
                     X_train_unlabeled = torch.tensor(X_train_unlabeled)
                     Y_train_unlabeled = torch.tensor(Y_train_unlabeled)
 
-                if proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_jehan:
+                if proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_flexwearhd:
                     if proportion_unlabeled_of_proportion_to_keep_of_leftout==0:
                         X_train_labeled_partial_leftout_subject = X_train_partial_leftout_subject
                         Y_train_labeled_partial_leftout_subject = Y_train_partial_leftout_subject
@@ -1255,7 +1252,7 @@ if args.turn_on_unlabeled_domain_adaptation: # set up datasets and config for un
         unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                         is_ulb=True, strong_transform=semilearn_transform)
         # proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_training_subjects
-    elif proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_jehan:
+    elif proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_flexwearhd:
         unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
                                         is_ulb=True, strong_transform=semilearn_transform)
         # proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_leftout_subject
@@ -1280,7 +1277,7 @@ if args.turn_on_unlabeled_domain_adaptation: # set up datasets and config for un
     iters_for_loader = max(labeled_iters, unlabeled_iters)
     train_labeled_loader = get_data_loader(semilearn_config, labeled_dataset, labeled_batch_size, num_workers=multiprocessing.cpu_count()//8, 
                                            num_epochs=args.epochs, num_iters=iters_for_loader)
-    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_jehan:
+    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_flexwearhd:
         train_unlabeled_loader = get_data_loader(semilearn_config, unlabeled_dataset, unlabeled_batch_size, num_workers=multiprocessing.cpu_count()//8,
                                                  num_epochs=args.epochs, num_iters=iters_for_loader)
         
@@ -1511,8 +1508,8 @@ if args.proportion_data_from_training_subjects<1.0:
     wandb_runname += '_train-subj-prop-' + str(args.proportion_data_from_training_subjects)
 if args.proportion_unlabeled_data_from_training_subjects>0:
     wandb_runname += '_unlabel-subj-prop-' + str(args.proportion_unlabeled_data_from_training_subjects)
-if args.load_unlabeled_data_jehan:
-    wandb_runname += '_load-unlabel-data-jehan'
+if args.load_unlabeled_data_flexwearhd:
+    wandb_runname += '_load-unlabel-data-flexwearhd'
 
 if (args.held_out_test):
     if args.turn_on_kfold:
@@ -1599,7 +1596,7 @@ if args.turn_on_unlabeled_domain_adaptation:
     print("Pretraining the model...")
     semilearn_algorithm.loader_dict = {}
     semilearn_algorithm.loader_dict['train_lb'] = train_labeled_loader
-    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_jehan:
+    if proportion_unlabeled_of_training_subjects>0 or proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_flexwearhd:
         semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
     semilearn_algorithm.loader_dict['eval'] = validation_loader
     semilearn_algorithm.scheduler = None
@@ -1640,7 +1637,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         
         if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
             semilearn_algorithm.loader_dict['train_ulb'] = train_finetuning_unlabeled_loader
-        elif proportion_unlabeled_of_training_subjects>0 or args.load_unlabeled_data_jehan:
+        elif proportion_unlabeled_of_training_subjects>0 or args.load_unlabeled_data_flexwearhd:
             semilearn_algorithm.loader_dict['train_ulb'] = train_unlabeled_loader
 
         semilearn_algorithm.loader_dict['eval'] = validation_loader
@@ -1713,6 +1710,7 @@ else:
                 train_loss = 0.0
                 with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
                     outputs_all = []
+                    ground_truth_train_all = []
                     for X_batch, Y_batch in t:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
                         Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
@@ -1733,6 +1731,7 @@ else:
                         train_micro_top5_acc(output, Y_batch)
 
                         outputs_all.append(output)
+                        ground_truth_train_all.append(Y_batch)
 
                         # train_macro_auroc(output, Y_batch)
                         # train_macro_auprc(output, Y_batch)
@@ -1744,9 +1743,9 @@ else:
                         torch.cuda.empty_cache()
                     
                     outputs_all = torch.cat(outputs_all, dim=0).to(device)
-                    Y_train_long = torch.argmax(Y_train, dim=1).to(device).to(torch.int64)
-                    train_macro_auroc(outputs_all, Y_train_long)
-                    train_macro_auprc(outputs_all, Y_train_long)
+                    ground_truth_train_all = torch.cat(ground_truth_train_all, dim=0).to(device)
+                    train_macro_auroc(outputs_all, ground_truth_train_all)
+                    train_macro_auprc(outputs_all, ground_truth_train_all)
 
 
                 # Validation
@@ -1930,6 +1929,7 @@ else:
             train_macro_auprc_metric.reset()
 
             outputs_train_all = []
+            ground_truth_train_all = []
 
             with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
                 for X_batch, Y_batch in t:
@@ -1946,6 +1946,7 @@ else:
                     optimizer.step()
 
                     outputs_train_all.append(output)
+                    ground_truth_train_all.append(torch.argmax(Y_batch, dim=1))
 
                     train_loss += loss.item()
                     train_macro_acc_metric(output, Y_batch_long)
@@ -1955,8 +1956,6 @@ else:
                     train_macro_top5_acc_metric(output, Y_batch_long)
                     train_micro_acc_metric(output, Y_batch_long)
                     train_micro_top5_acc_metric(output, Y_batch_long)
-                    # train_macro_auroc_metric(output, Y_batch_long)
-                    # train_macro_auprc_metric(output, Y_batch_long)
 
                     if t.n % 10 == 0:
                         t.set_postfix({
@@ -1965,9 +1964,10 @@ else:
                         })
 
                 outputs_train_all = torch.cat(outputs_train_all, dim=0).to(device)
+                ground_truth_train_all = torch.cat(ground_truth_train_all, dim=0).to(device)
 
-            train_macro_auroc_metric(outputs_train_all, torch.argmax(Y_train, dim=1).to(device))
-            train_macro_auprc_metric(outputs_train_all, torch.argmax(Y_train, dim=1).to(device))
+            train_macro_auroc_metric(outputs_train_all, ground_truth_train_all)
+            train_macro_auprc_metric(outputs_train_all, ground_truth_train_all)
 
             # Validation phase
             model.eval()

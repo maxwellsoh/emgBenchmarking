@@ -10,7 +10,7 @@ def run():
     parser.add_argument("--all", action="store_true", help="downloads all datasets")
     parser.add_argument("--CapgMyo_B", action="store_true")
     parser.add_argument("--Hyser", action="store_true")
-    parser.add_argument("--Jehan_Dataset", action="store_true")
+    parser.add_argument("--FlexWearHD_Dataset", action="store_true")
     parser.add_argument("--M_Dataset", action="store_true")
     parser.add_argument("--NinaproDB2", action="store_true")
     parser.add_argument("--NinaproDB3", action="store_true")
@@ -30,8 +30,8 @@ def run():
     if args.Hyser or args.all:
         subprocess.run(['sh', './get_datasets/get_Hyser.sh'])
 
-    if args.Jehan_Dataset or args.all:
-        subprocess.run(['sh', './get_datasets/get_Jehan_Dataset.sh'])
+    if args.FlexWearHD_Dataset or args.all:
+        subprocess.run(['sh', './get_datasets/get_FlexWearHD_Dataset.sh'])
 
     if args.M_Dataset or args.all:
         subprocess.run(['sh', './get_datasets/get_M_dataset.sh'])
