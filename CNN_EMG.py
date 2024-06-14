@@ -849,13 +849,13 @@ else:
 
         X_pretrain = []
         Y_pretrain = []
-        if args.proportion_unlabeled_data_from_training_subjects>0:
+        if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
             X_pretrain_unlabeled_list = []
             Y_pretrain_unlabeled_list = []
 
         X_finetune = []
         Y_finetune = []
-        if args.proportion_unlabeled_data_from_leftout_subject>0:
+        if args.proportion_unlabeled_data_from_leftout_subject>0 and args.turn_on_unlabeled_domain_adaptation:
             X_finetune_unlabeled_list = []
             Y_finetune_unlabeled_list = []
 
@@ -866,7 +866,7 @@ else:
                 if args.proportion_data_from_training_subjects<1.0:
                     X_train_temp, _, Y_train_temp, _ = tts.train_test_split(
                         X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=Y_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
-                if args.proportion_unlabeled_data_from_training_subjects>0:
+                if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
                     X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled = tts.train_test_split(
                         X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                     X_pretrain.append(np.array(X_pretrain_labeled))
@@ -877,7 +877,7 @@ else:
                     X_pretrain.append(np.array(X_train_temp))
                     Y_pretrain.append(np.array(Y_train_temp))
             elif i in left_out_subject_first_n_sessions_indices:
-                if args.proportion_unlabeled_data_from_leftout_subject>0:
+                if args.proportion_unlabeled_data_from_leftout_subject>0 and args.turn_on_unlabeled_domain_adaptation:
                     X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled = tts.train_test_split(
                         X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                     X_finetune.append(np.array(X_finetune_labeled))
@@ -902,10 +902,10 @@ else:
         X_validation = np.array(data[left_out_subject_last_session_index])
         Y_validation = np.array(labels[left_out_subject_last_session_index])
 
-        if args.proportion_unlabeled_data_from_training_subjects>0:
+        if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
             X_pretrain_unlabeled = np.concatenate(X_pretrain_unlabeled_list, axis=0, dtype=np.float16)
             Y_pretrain_unlabeled = np.concatenate(Y_pretrain_unlabeled_list, axis=0, dtype=np.float16)
-        if args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_flexwearhd:
+        if (args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_flexwearhd) and args.turn_on_unlabeled_domain_adaptation:
             X_finetune_unlabeled = np.concatenate(X_finetune_unlabeled_list, axis=0, dtype=np.float16)
             Y_finetune_unlabeled = np.concatenate(Y_finetune_unlabeled_list, axis=0, dtype=np.float16)
         
@@ -916,10 +916,10 @@ else:
         Y_train_finetuning = torch.from_numpy(Y_finetune).to(torch.float16)
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-        if args.proportion_unlabeled_data_from_training_subjects>0:
+        if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
             X_train_unlabeled = torch.from_numpy(X_pretrain_unlabeled).to(torch.float16)
             Y_train_unlabeled = torch.from_numpy(Y_pretrain_unlabeled).to(torch.float16)
-        if args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_flexwearhd:
+        if (args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_flexwearhd) and args.turn_on_unlabeled_domain_adaptation:
             X_train_finetuning_unlabeled = torch.from_numpy(X_finetune_unlabeled).to(torch.float16)
             Y_train_finetuning_unlabeled = torch.from_numpy(Y_finetune_unlabeled).to(torch.float16)
 
@@ -971,7 +971,7 @@ else:
                 X_train = torch.concat((X_train, X_train_finetuning), axis=0)
                 Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
                 
-        else: 
+        else: # not turn_on_unlabeled_domain_adaptation
             if utils.num_subjects == 1:
                 X_train = X_train_finetuning
                 Y_train = Y_train_finetuning
