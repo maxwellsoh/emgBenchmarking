@@ -59,7 +59,7 @@ $ conda activate emgbench
 CNN_EMG.py will automatically download the necessary datasets for each run. Note that the Hyser dataset can take hours to download. 
 
 ## Replicating Tables
-To replicate the first table, run the following shell script for each of the 6 datasets (capgmyo, hyser, m-dataset, ninapro-db5, uciemg, flexwear-hd). The parameters that will need to be changed across runs are at the top
+To replicate the first table, run the following shell script for each of the 6 datasets (capgmyo, hyser, myoarmbanddataset, ninapro-db5, uciemg, flexwear-hd). The parameters that will need to be changed across runs are at the top
 ```
 starting_index=1
 ending_index=10 # set to the maximum number of participants for the dataset
