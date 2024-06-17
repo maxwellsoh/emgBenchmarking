@@ -865,8 +865,7 @@ else:
         del data
         del emg
         if args.force_regression:
-        
-        del forces
+            del forces
         
         X_train = torch.from_numpy(X_train).to(torch.float16)
         Y_train = torch.from_numpy(Y_train).to(torch.float16)
@@ -1182,7 +1181,7 @@ else:
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
                 if args.cross_validation_for_time_series:
                     X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject,label_validation_partial_leftout_subject= tts.train_test_split(
-                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
+                        X_validation, Y_validation, label_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
     
                 else:
                     # assert False, "entering not cross_validation_for_time_series"
