@@ -2405,8 +2405,8 @@ else:
                 for ft_val_metric in ft_validation_metrics:
                     ft_val_metric.reset()
 
-                all_val_outputs = []
                 if not args.force_regression:
+                    all_val_outputs = []
                     all_val_labels = []
     
                 with torch.no_grad():
@@ -2424,38 +2424,42 @@ else:
                         val_loss += criterion(output, Y_batch).item()
 
                         for ft_val_metric in ft_validation_metrics:
-                            ft_val_metric(output, Y_batch_long)
+                            if ft_val_metric.name != "Macro_AUROC" and ft_val_metric.name != "Macro_AUPRC":
+                                ft_val_metric(output, Y_batch_long)
 
-                        all_val_outputs.append(output)
                         if not args.force_regression:
+                            all_val_outputs.append(output)
                             all_val_labels.append(Y_batch_long)
 
-                all_val_outputs = torch.cat(all_val_outputs, dim=0)
-    
-
+                
                 if not args.force_regression:
+                    all_val_outputs = torch.cat(all_val_outputs, dim=0)
                     all_val_labels = torch.cat(all_val_labels, dim=0)  
                     Y_validation_long = torch.argmax(Y_validation, dim=1).to(device)
-                    # TODO: uncomment and add more metrics for classification
-                    # true_labels = Y_validation_long.cpu().detach().numpy()
-                    # test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
-                    # conf_matrix = confusion_matrix(true_labels, test_predictions)
-                    # print("Confusion Matrix:")
-                    # print(conf_matrix)
 
-                    # finetune_val_macro_auroc_metric(all_val_outputs, Y_validation_long)
-                    # finetune_val_macro_auprc_metric(all_val_outputs, Y_validation_long)
+                    true_labels = Y_validation_long.cpu().detach().numpy()
+                    test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+                    conf_matrix = confusion_matrix(true_labels, test_predictions)
+                    print("Confusion Matrix:")
+                    print(conf_matrix)
+
+                    finetune_val_macro_auroc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_AUROC")
+                    finetune_val_macro_auprc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_AUPRC")
+
+                    finetune_val_macro_auroc_metric(all_val_outputs, Y_validation_long)
+                    finetune_val_macro_auprc_metric(all_val_outputs, Y_validation_long)
 
                 # Calculate average loss and metrics
                 train_loss /= len(finetune_loader)
                 val_loss /= len(val_loader)
+                if not args.force_regression: 
+                    tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                    fpr_results = ml_utils.evaluate_model_fpr_at_tpr(model, val_loader, device, numGestures)
+                    confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
 
                 # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
                 ft_training_metrics_values = {ft_metric.name: ft_metric.compute() for ft_metric in ft_training_metrics}
                 ft_validation_metrics_values = {ft_metric.name: ft_metric.compute() for ft_metric in ft_validation_metrics}
-                if not args.force_regression:
-                    tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, num_classes)
-                    confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
 
                 # Print metric values
                 print(f"Finetuning Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
@@ -2465,12 +2469,6 @@ else:
 
                 ft_val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in ft_validation_metrics_values.items())
                 print(f"Val Metrics | {ft_val_metrics_str}")
-
-                if not args.force_regression: 
-                    for fpr, tprs in tpr_results.items():
-                        print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
-                    for confidence_level, acc in confidence_levels.items():
-                        print(f"Val Accuracy at {confidence_level} confidence level: {acc:.4f}")
 
                 wandb.log({
                     "train/Loss": train_loss,
@@ -2499,94 +2497,57 @@ else:
                         if name == 'R2Score_RawValues'
                         for i, v in enumerate(value)
                     },
+
                     **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
+                    **({f"fpr_at_fixed_tpr/Average Val FPR at {tpr} TPR": np.mean(fprs) for tpr, fprs in fpr_results.items()} if not args.force_regression else {}),
                     **({f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not args.force_regression else {}),
-                    **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {}),
+                    **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {})
                 })
+            
+        # HERE'S WHERE THE DIFFERENCE STARTS
 
-        # TODO: add testing to get_metrics         
-        # Testing
-        # Initialize metrics for testing
-        test_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device)
-        test_precision_metric = torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device)
-        test_recall_metric = torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device)
-        test_f1_score_metric = torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device)
-        test_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
+            torch.save(model.state_dict(), model_filename)
+            wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
+            # Evaluate the model on the test set
+            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime)
 
-        # Assuming model, criterion, device, and test_loader are defined
-        if args.held_out_test:
-            model.eval()
-            test_loss = 0.0
+        torch.cuda.empty_cache()  # Clear cache if needed
 
-            # Reset test metrics
-            for test_metric in testing_metrics:
-                test_metric.reset()
+        assert args.force_regression == False, "Attempting to plot confusion matrix for regression model"
+        model.eval()
+        with torch.no_grad():
+            assert args.force_regression == False"
+            test_predictions = []
+            for X_batch, Y_batch in tqdm(test_loader, desc="Test Batch Loading for Confusion Matrix"):
+                X_batch = X_batch.to(device).to(torch.float32)
+                outputs = model(X_batch)
+                if isinstance(outputs, dict):
+                    outputs = outputs['logits']
+                preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+                test_predictions.extend(preds)
 
-            pred = []
-            true = []
+        # Print confusion matrix before plotting
+        # Convert lists to numpy arrays
+        true_labels = np.argmax(Y_test.cpu().detach().numpy(), axis=1)
+        test_predictions = np.array(test_predictions)
 
-            with torch.no_grad():
-                for X_batch, Y_batch in test_loader:
-                    X_batch = X_batch.to(device).to(torch.float32)
-                    Y_batch = Y_batch.to(device).to(torch.float32)
-                    Y_batch_long = torch.argmax(Y_batch, dim=1)
+        # Calculate and print the confusion matrix
+        conf_matrix = confusion_matrix(true_labels, test_predictions)
+        print("Confusion Matrix:")
+        print(conf_matrix)
 
-                    output = model(X_batch)
-                    if isinstance(output, dict):
-                        output = output['logits']
-                    pred.extend(torch.argmax(output, dim=1).cpu().detach().numpy())
-                    true.extend(Y_batch_long.cpu().detach().numpy())
+        print("Classification Report:")
+        print(classification_report(true_labels, test_predictions))
+            
+        utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
 
-                    test_loss += criterion(output, Y_batch).item()
-                    test_acc_metric(output, Y_batch_long)
-                    test_precision_metric(output, Y_batch_long)
-                    test_recall_metric(output, Y_batch_long)
-                    test_f1_score_metric(output, Y_batch_long)
-                    test_top5_acc_metric(output, Y_batch_long)
-
-            # Calculate average loss and metrics
-            test_loss /= len(test_loader)
-            test_acc = test_acc_metric.compute()
-            test_precision = test_precision_metric.compute()
-            test_recall = test_recall_metric.compute()
-            test_f1_score = test_f1_score_metric.compute()
-            test_top5_acc = test_top5_acc_metric.compute()
-            tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, test_loader, device, numGestures)
-            confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, test_loader, device)
-
-            print(f"Test Loss: {test_loss:.4f} | Test Accuracy: {test_acc:.4f} | Test Precision: {test_precision:.4f} | Test Recall: {test_recall:.4f} | Test F1 Score: {test_f1_score:.4f} | Test Top-5 Accuracy: {test_top5_acc:.4f}")
-            for fpr, tprs in tpr_results.items():
-                print(f"TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
-            for confidence_level, acc in confidence_levels.items():
-                print(f"Accuracy at {confidence_level} confidence level: {acc:.4f}")
-
-            wandb.log({
-                "test/Test Loss": test_loss,
-                "test/Test Acc": test_acc,  
-                "test/Test Precision": test_precision,
-                "test/Test Recall": test_recall,
-                "test/Test F1": test_f1_score,
-                "test/Test Top-5 Acc": test_top5_acc,
-
-                # **{f"tpr_at_fixed_fpr/Test TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
-                **{f"tpr_at_fixed_fpr/Average Test TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
-                **{f"confidence_level_accuracies/Test Accuracy at {confidence_level} confidence level": acc for confidence_level, acc in confidence_levels.items()},
-                **{f"proportion_above_confidence_threshold/Test Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
-
-            })
-
-            # %% Confusion Matrix
-            # Plot and log confusion matrix in wandb
-            utils.plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
-
-        # Load validation in smaller batches for memory purposes
         torch.cuda.empty_cache()  # Clear cache if needed
 
         model.eval()
         with torch.no_grad():
             validation_predictions = []
-            for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading"):
+            for X_batch, Y_batch in tqdm(val_loader, desc="Validation Batch Loading for Confusion Matrix"):
                 X_batch = X_batch.to(device).to(torch.float32)
                 outputs = model(X_batch)
                 if isinstance(outputs, dict):
@@ -2594,8 +2555,7 @@ else:
                 preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
                 validation_predictions.extend(preds)
 
-        if not args.force_regression: 
-            utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+        utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
 
         # Load training in smaller batches for memory purposes
         torch.cuda.empty_cache()  # Clear cache if needed
@@ -2604,15 +2564,14 @@ else:
         train_loader_unshuffled = DataLoader(train_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
         with torch.no_grad():
             train_predictions = []
-            for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading"):
+            for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading for Confusion Matrix"):
                 X_batch = X_batch.to(device).to(torch.float32)
                 outputs = model(X_batch)
                 if isinstance(outputs, dict):
                         outputs = outputs['logits']
                 preds = torch.argmax(outputs, dim=1)
                 train_predictions.extend(preds.cpu().detach().numpy())
-        
-        if not args.force_regression: 
-            utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+
+        utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
             
     run.finish()
