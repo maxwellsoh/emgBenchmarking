@@ -1462,7 +1462,7 @@ if args.leftout_subject != 0:
 wandb_runname += '_' + model_name
 if (exercises and not args.partial_dataset_ninapro):
     wandb_runname += '_exer-' + ''.join(character for character in str(args.exercises) if character.isalnum())
-if args.dataset == "MCS_EMG":
+if args.dataset == "mcs":
     if args.full_dataset_mcs:
         wandb_runname += '_full'
     else:
