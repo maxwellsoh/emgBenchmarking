@@ -168,7 +168,6 @@ def balance(restimulus):
 
 def contract(R):
     numGestures = R.max() + 1 # account for rest
-    assert numGestures == 50 # recognizes that it's just B, C, and D 
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
     for x in range(len(R)):

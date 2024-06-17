@@ -30,7 +30,8 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from joblib import dump
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score, log_loss # branch
+from sklearn.metrics import confusion_matrix, classification_report # main
 import torch.nn.functional as F
 from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 from semilearn.core.utils import send_model_cuda
@@ -1593,10 +1594,24 @@ if not args.turn_on_unlabeled_domain_adaptation:
 
     batch_size = args.batch_size
 
+ 
+    from torchvision import transforms
+    from PIL import Image
+
+    class ToVector:
+    
+        def __call__(self, img):
+            # Convert image to a tensor and flatten it
+            return img.flatten()
+
     if args.model == 'vit_tiny_patch2_32':
         resize_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
     else:
+        
+
         resize_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
+        if args.model == "MLP":
+            resize_transform = transforms.Compose([resize_transform, ToVector()])
 
     train_dataset = CustomDataset(X_train, Y_train, transform=resize_transform)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
@@ -1609,7 +1624,6 @@ if not args.turn_on_unlabeled_domain_adaptation:
         test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
 
     # Define the loss function and optimizer
-    
     if args.force_regression:
         criterion = nn.MSELoss()
     else:
@@ -1811,13 +1825,19 @@ def get_metrics(return_testing=args.held_out_test):
 
     def get_classification_metrics():
         classification_metrics = [
-            torchmetrics.Accuracy(task="multiclass", num_classes=num_classes).to(device), 
-            torchmetrics.Precision(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.Recall(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.F1Score(task="multiclass", num_classes=num_classes).to(device),
-            torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=num_classes).to(device)
+
+            torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="macro").to(device),
+            torchmetrics.Precision(task="multiclass", num_classes=numGestures, average="macro").to(device),
+            torchmetrics.Recall(task="multiclass", num_classes=numGestures, average="macro").to(device),
+            torchmetrics.F1Score(task="multiclass", num_classes=numGestures, average="macro").to(device),
+            torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device),
+            torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device),
+            torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device),
+            torchmetrics.AUROC(task="multiclass", num_classes=numGestures, average="macro").to(device),
+            torchmetrics.AveragePrecision(task="multiclass", num_classes=numGestures, average="macro").to(device)
         ]
-        for metric, name in zip(classification_metrics, ["Accuracy", "Precision", "Recall", "F1Score", "Top5Accuracy"]):
+        print("Calling classification metrics...")
+        for metric, name in zip(classification_metrics, ["Macro_Acc", "Macro_Precision", "Macro_Recall", "Macro_F1Score", "Macro_Top5Accuracy", "Micro_Accuracy", "Micro_Top5Accuracy", "Macro_AUROC","Macro_AUPRC"]):
             metric.name = name
         
         return classification_metrics
@@ -1936,9 +1956,9 @@ else:
             Y = []
             for X_batch, Y_batch in tqdm(loader, desc="Batches convert to Numpy"):
                 # Flatten each image from [batch_size, 3, 224, 224] to [batch_size, 3*224*224]
-                X_batch_flat = X_batch.view(X_batch.size(0), -1).cpu().numpy().astype(np.float64)
+                # X_batch_flat = X_batch.view(X_batch.size(0), -1).cpu().numpy().astype(np.float64)
                 Y_batch_indices = torch.argmax(Y_batch, dim=1)  # Convert one-hot to class indices
-                X.append(X_batch_flat)
+                X.append(X_batch)
                 Y.append(Y_batch_indices.cpu().numpy().astype(np.int64))
             return np.vstack(X), np.hstack(Y)
         
@@ -1974,10 +1994,12 @@ else:
                     train_metric.reset()
 
                 train_loss = 0.0
-                with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
-                    
-                    # output_list = []
 
+                with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
+                    outputs_all = [] # NOTE: why is this inside the loop for MLP but outside in CNN
+                    if not args.force_regression:
+                        ground_truth_train_all = []
+                    
                     for X_batch, Y_batch in t:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
                         if args.force_regression:
@@ -1987,27 +2009,39 @@ else:
 
                         optimizer.zero_grad()
                         output = model(X_batch)
-
-                        # output_list.append(output)
                         loss = criterion(output, Y_batch)
                         loss.backward()
                         optimizer.step()
-                        train_loss += loss.item()
 
+                        train_loss += loss.item()
                         for train_metric in training_metrics:
-                            train_metric(output, Y_batch)
+                            if train_metric.name != "Macro_AUROC" and train_metric.name != "Macro_AUPRC":
+                                train_metric(output, Y_batch)
+                        
+                        outputs_all.append(output)
+                        if not args.force_regression:
+                            # ground_truth_train_all.append(torch.argmax(Y_batch, dim=1)) 
+                            # NOTE: This code was double flattening it raising dimension errors.
+                            ground_truth_train_all.append(Y_batch)
                         
                         if not args.force_regression:
                             if t.n % 10 == 0:
-                                accuracy_metric = next(metric for metric in training_metrics if metric.name == "Accuracy")
-                                t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": accuracy_metric.compute().item()})
+                                train_micro_acc = next(metric for metric in training_metrics if metric.name == "Micro_Accuracy")
+                                t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": train_micro_acc.compute().item()})
 
                         del X_batch, Y_batch, output
                         torch.cuda.empty_cache()
 
-                # output_list = torch.cat(output_list, dim=0).to(device)
-                # for train_metric in training_metrics:
-                #     train_metric(output_list, Y_train.to(device).to(torch.float32))
+                    outputs_all = torch.cat(outputs_all, dim=0).to(device)
+                    if not args.force_regression:
+                        ground_truth_train_all = torch.cat(ground_truth_train_all, dim=0).to(device)
+
+                        train_macro_auroc = next(metric for metric in training_metrics if metric.name == "Macro_AUROC")
+                        train_macro_auprc = next(metric for metric in training_metrics if metric.name == "Macro_AUPRC")
+
+                        train_macro_auroc(outputs_all, ground_truth_train_all)
+                        train_macro_auprc(outputs_all, ground_truth_train_all)
+
 
                 # Validation
                 model.eval()
@@ -2015,11 +2049,13 @@ else:
                 for val_metric in validation_metrics:
                     val_metric.reset()
                 
+                if not args.force_regression:
+                    all_val_outputs = []
+                    all_val_labels = []
+
                 val_loss = 0.0
                 with torch.no_grad():
-                    
-                    # validation_list = []
-
+        
                     for X_batch, Y_batch in val_loader:
                         X_batch = X_batch.view(X_batch.size(0), -1).to(device).to(torch.float32)
                         if args.force_regression:
@@ -2028,33 +2064,53 @@ else:
                             Y_batch = torch.argmax(Y_batch, dim=1).to(device).to(torch.int64)
 
                         output = model(X_batch)
-                        # validation_list.append(output)
                         for validation_metric in validation_metrics:
                             validation_metric(output, Y_batch)
 
                         val_loss += criterion(output, Y_batch).item()
 
+                        
+                        if not args.force_regression:
+                            all_val_outputs.append(output)
+                            all_val_labels.append(Y_batch)
+
                         del X_batch, Y_batch
                         torch.cuda.empty_cache()
 
-                        # [END] metrics to modify
+                if not args.force_regression:
+                    all_val_outputs = torch.cat(all_val_outputs, dim=0).to(device)
+                    all_val_labels = torch.cat(all_val_labels, dim=0)
 
-                # validation_list = torch.cat(validation_list, dim=0).to(device)
-                # for validation_metric in validation_metrics:  
-                #     validation_metric(validation_list, Y_validation.to(device).to(torch.float32))
+                    Y_validation_long = torch.argmax(Y_validation, dim=1).to(device).to(torch.int64)
+
+                    true_labels = Y_validation_long.cpu().detach().numpy()
+                    test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+                    conf_matrix = confusion_matrix(true_labels, test_predictions)
+                    print("Confusion Matrix:")
+                    print(conf_matrix)
+
+                    val_macro_auroc = next(metric for metric in validation_metrics if metric.name == "Macro_AUROC")
+                    val_macro_auprc = next(metric for metric in validation_metrics if metric.name == "Macro_AUPRC")
+
+                    val_macro_auroc(all_val_outputs, Y_validation_long)
+                    val_macro_auprc(all_val_outputs, Y_validation_long)
+                    
 
                 # Average the losses and print the metrics
                 train_loss /= len(train_loader)
                 val_loss /= len(val_loader)
 
+                if not args.force_regression:
+                    tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
+                    fpr_results = ml_utils.evaluate_model_fpr_at_tpr(model, val_loader, device, numGestures)
+                    confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device)
+
+
                 # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
                 training_metrics_values = {metric.name: metric.compute() for metric in training_metrics}
                 validation_metrics_values = {metric.name: metric.compute() for metric in validation_metrics}
 
-                if not args.force_regression:
-                    tpr_results = ml_utils.evaluate_model_tpr_at_fpr(model, val_loader, device, numGestures)
-                    confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(model, val_loader, device, numGestures)
-
+                
                 print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
 
                 training_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in training_metrics_values.items())
@@ -2068,6 +2124,9 @@ else:
                         print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
                     for confidence_level, accuracy in confidence_levels.items():
                         print(f"Val Accuracy at confidence level >{confidence_level}: {accuracy:.4f}")
+
+                training_metrics_values = {metric.name: metric.compute() for metric in training_metrics}
+                validation_metrics_values = {metric.name: metric.compute() for metric in validation_metrics}
 
                 # Log metrics to wandb or any other tracking tool
                 wandb.log({
@@ -2097,9 +2156,12 @@ else:
                     if name == 'R2Score_RawValues'
                     for i, v in enumerate(value)
                 },
+
+
                 **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
+                **({f"fpr_at_fixed_tpr/Average Val FPR at {tpr} TPR": np.mean(fprs) for tpr, fprs in fpr_results.items()}if not args.force_regression else {}),
                 **({f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not args.force_regression else {}),
-                **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {}),
+                **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {})
             })
                 
             torch.save(model.state_dict(), model_filename)
@@ -2160,10 +2222,11 @@ else:
             for train_metric in training_metrics:
                 train_metric.reset()
 
+            outputs_train_all = []
+            if not args.force_regression:
+                ground_truth_train_all = []
 
             with tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) as t:
-
-                # output_list = [] 
 
                 for X_batch, Y_batch in t:
                     X_batch = X_batch.to(device).to(torch.float32)
@@ -2178,27 +2241,40 @@ else:
                     output = model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
-                    # output_list.append(output)
                     loss = criterion(output, Y_batch)
                     loss.backward()
                     optimizer.step()
 
+                    outputs_train_all.append(output)
+                    if not args.force_regression:
+                        ground_truth_train_all.append(torch.argmax(Y_batch, dim=1))
+
                     train_loss += loss.item()
 
                     for train_metric in training_metrics:
-                        train_metric(output, Y_batch_long)
+                        if train_metric.name != "Macro_AUROC" and train_metric.name != "Macro_AUPRC":
+                            train_metric(output, Y_batch_long)
 
                     if not args.force_regression:
-                        accuracy_metric = next(metric for metric in training_metrics if metric.name == "Accuracy")
+                        micro_accuracy_metric = next(metric for metric in training_metrics if metric.name == "Micro_Accuracy")
                         if t.n % 10 == 0:
                             t.set_postfix({
                                 "Batch Loss": loss.item(), 
-                                "Batch Acc": accuracy_metric.compute().item()
+                                "Batch Acc": micro_accuracy_metric.compute().item()
                             })
-            # loop through and apply train_metric(output[i], Y_batch_long)
-            # output_list = torch.concat(output_list, dim=0).to(device)
-            # for train_metric in training_metrics:
-            #     train_metric(output_list, Y_train.to(device).to(torch.float32))            
+
+                outputs_train_all = torch.cat(outputs_train_all, dim=0).to(device)
+                if not args.force_regression:
+                    ground_truth_train_all = torch.cat(ground_truth_train_all, dim=0).to(device)
+
+            if not args.force_regression:
+                
+                train_macro_auroc_metric = next(metric for metric in training_metrics if metric.name == "Macro_AUROC")
+                train_macro_auprc_metric = next(metric for metric in training_metrics if metric.name == "Macro_AUPRC")
+
+                train_macro_auroc_metric(outputs_train_all, ground_truth_train_all)
+                train_macro_auprc_metric(outputs_train_all, ground_truth_train_all)
+                        
 
             # Validation phase
             model.eval()
@@ -2207,14 +2283,15 @@ else:
             for val_metric in validation_metrics:
                 val_metric.reset()
 
+            all_val_outputs = []
+            all_val_labels = []
+
             with torch.no_grad():
-                
-                # validation_list = []
+            
 
                 for X_batch, Y_batch in val_loader:
                     X_batch = X_batch.to(device).to(torch.float32)
                     Y_batch = Y_batch.to(device).to(torch.float32)
-                    
                     if args.force_regression:
                         Y_batch_long = Y_batch
                     else: 
@@ -2224,16 +2301,33 @@ else:
                     if isinstance(output, dict):
                         output = output['logits']
 
-                    # validation_list.append(output)
-                        
+                    all_val_outputs.append(output)
+                    if not args.force_regression:
+                        all_val_labels.append(Y_batch_long)
+                 
                     val_loss += criterion(output, Y_batch).item()
 
                     for val_metric in validation_metrics:
-                        val_metric(output, Y_batch_long)
+                        if val_metric.name != "Macro_AUROC" and val_metric.name != "Macro_AUPRC":
+                            val_metric(output, Y_batch_long)
 
-            # validation_list = torch.concat(validation_list, dim=0).to(device)
-            # for val_metric in validation_metrics:
-            #     val_metric(validation_list, Y_validation.to(device).to(torch.float32))
+            all_val_outputs = torch.cat(all_val_outputs, dim=0)
+            if not args.force_regression:
+                all_val_labels = torch.cat(all_val_labels, dim=0)
+                Y_validation_long = torch.argmax(Y_validation, dim=1).to(device)
+                true_labels = Y_validation_long.cpu().detach().numpy()
+                test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+
+
+                conf_matrix = confusion_matrix(true_labels, test_predictions)
+                print("Confusion Matrix:")
+                print(conf_matrix)
+
+                val_macro_auroc_metric = next(metric for metric in validation_metrics if metric.name == "Macro_AUROC")
+                val_macro_auprc_metric = next(metric for metric in validation_metrics if metric.name == "Macro_AUPRC")
+
+                val_macro_auroc_metric(all_val_outputs, Y_validation_long)
+                val_macro_auprc_metric(all_val_outputs, Y_validation_long)
 
             # Calculate average loss and metrics
             train_loss /= len(train_loader)
@@ -2352,6 +2446,10 @@ else:
 
                 for ft_val_metric in ft_validation_metrics:
                     ft_val_metric.reset()
+
+                all_val_outputs = []
+                if not args.force_regression:
+                    all_val_labels = []
     
                 with torch.no_grad():
                     for X_batch, Y_batch in val_loader:
@@ -2369,6 +2467,26 @@ else:
 
                         for ft_val_metric in ft_validation_metrics:
                             ft_val_metric(output, Y_batch_long)
+
+                        all_val_outputs.append(output)
+                        if not args.force_regression:
+                            all_val_labels.append(Y_batch_long)
+
+                all_val_outputs = torch.cat(all_val_outputs, dim=0)
+    
+
+                if not args.force_regression:
+                    all_val_labels = torch.cat(all_val_labels, dim=0)  
+                    Y_validation_long = torch.argmax(Y_validation, dim=1).to(device)
+                    # TODO: uncomment and add more metrics for classification
+                    # true_labels = Y_validation_long.cpu().detach().numpy()
+                    # test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+                    # conf_matrix = confusion_matrix(true_labels, test_predictions)
+                    # print("Confusion Matrix:")
+                    # print(conf_matrix)
+
+                    # finetune_val_macro_auroc_metric(all_val_outputs, Y_validation_long)
+                    # finetune_val_macro_auprc_metric(all_val_outputs, Y_validation_long)
 
                 # Calculate average loss and metrics
                 train_loss /= len(finetune_loader)
