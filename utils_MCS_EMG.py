@@ -112,7 +112,7 @@ def getEMG (args):
         leftout = args[3]
 
     assert n >= 1 and n <= num_subjects
-    file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
+    file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     emg = []
     for i, gesture in enumerate(gesture_labels):
         assert "Gesture" + gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
@@ -133,7 +133,7 @@ def getExtrema (n, p):
     maxes = np.zeros((numElectrodes, numGestures))
 
     assert n >= 1 and n <= num_subjects
-    file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
+    file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     for i, gesture in enumerate(gesture_labels):
         # get the first repetition for each gesture
         data = np.array(file["Gesture" + gesture])

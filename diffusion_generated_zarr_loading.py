@@ -129,7 +129,7 @@ def main():
     
     gesture_names = None
     if args.dataset == "OzdemirEMG":
-        import utils_OzdemirEMG as utils
+        import utils_MCS_EMG as utils
         gesture_names = utils.gesture_labels_partial
 
     if args.validation_or_training is not None:

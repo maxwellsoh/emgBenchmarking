@@ -15,7 +15,7 @@ def run():
     parser.add_argument("--NinaproDB2", action="store_true")
     parser.add_argument("--NinaproDB3", action="store_true")
     parser.add_argument("--NinaproDB5", action="store_true")
-    parser.add_argument("--OzdemirEMG", action="store_true")
+    parser.add_argument("--MCS_EMG", action="store_true")
     parser.add_argument("--UCI", action="store_true")
 
     args = parser.parse_args()
@@ -45,9 +45,9 @@ def run():
     if args.NinaproDB5 or args.all:
         subprocess.run(['sh', './get_datasets/get_NinaproDB5.sh'])
 
-    if args.OzdemirEMG or args.all:
-        subprocess.run(['sh', './get_datasets/get_OzdemirEMG.sh'])
-        subprocess.run(['python', './process_Ozdemir.py'])
+    if args.MCS_EMG or args.all:
+        subprocess.run(['sh', './get_datasets/get_MCS_EMG.sh'])
+        subprocess.run(['python', './process_MCS.py'])
         
     if args.UCI or args.all:
         subprocess.run(['sh', './get_datasets/get_UCI.sh'])

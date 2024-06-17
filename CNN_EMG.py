@@ -10,7 +10,7 @@ import multiprocessing
 from tqdm import tqdm
 import argparse
 import random 
-import utils_OzdemirEMG as utils
+import utils_MCS_EMG as utils
 from sklearn.model_selection import StratifiedKFold
 import os
 import datetime
@@ -52,7 +52,7 @@ def list_of_ints(arg):
 parser = argparse.ArgumentParser(description="Include arguments for running different trials")
 
 # Add argument for dataset
-parser.add_argument('--dataset', help='dataset to test. Set to OzdemirEMG by default', default="OzdemirEMG")
+parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
 # Add argument for doing leave-one-subject-out
 parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
 # Add argument for leftout subject
@@ -83,8 +83,8 @@ parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tin
 parser.add_argument('--exercises', type=list_of_ints, help='List the exercises of the 3 to load. The most popular for benchmarking seem to be 2 and 3. Can format as \'--exercises 1,2,3\'', default=[1, 2, 3])
 # Add argument for project suffix
 parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
-# Add argument for full or partial dataset for Ozdemir EMG dataset
-parser.add_argument('--full_dataset_ozdemir', type=utils.str2bool, help='whether or not to use the full dataset for Ozdemir EMG Dataset. Set to False by default.', default=False)
+# Add argument for full or partial dataset for MCS EMG dataset
+parser.add_argument('--full_dataset_mcs', type=utils.str2bool, help='whether or not to use the full dataset for MCS EMG Dataset. Set to False by default.', default=False)
 # Add argument for partial dataset for Ninapro DB2 and DB5
 parser.add_argument('--partial_dataset_ninapro', type=utils.str2bool, help='whether or not to use the partial dataset for Ninapro DB2 and DB5. Set to False by default.', default=False)
 # Add argument for using spectrogram transform
@@ -249,28 +249,28 @@ elif (args.dataset.lower() == "sci"):
     assert not args.transfer_learning, "Transfer learning not implemented for SCI dataset"
     assert not args.leave_one_subject_out, "Leave one subject out not implemented for SCI dataset"
 
-elif (args.dataset.lower() == "ozdemir" or args.dataset.lower() == "ozdemiremg"):
-    if (not os.path.exists("./OzdemirEMG")):
-        print("Ozdemir dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--OzdemirEMG'])
+elif (args.dataset.lower() == "mcs"):
+    if (not os.path.exists("./MCS_EMG")):
+        print("MCS dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--MCS_EMG'])
 
-    print(f"The dataset being tested is OzdemirEMG")
-    project_name = 'emg_benchmarking_ozdemir'
-    if args.full_dataset_ozdemir:
-        print(f"Using the full dataset for Ozdemir EMG")
+    print(f"The dataset being tested is MCS_EMG")
+    project_name = 'emg_benchmarking_mcs'
+    if args.full_dataset_mcs:
+        print(f"Using the full dataset for MCS EMG")
         utils.gesture_labels = utils.gesture_labels_full
         utils.numGestures = len(utils.gesture_labels)
     else: 
-        print(f"Using the partial dataset for Ozdemir EMG")
+        print(f"Using the partial dataset for MCS EMG")
         utils.gesture_labels = utils.gesture_labels_partial
         utils.numGestures = len(utils.gesture_labels)
     if args.leave_one_session_out:
-        raise ValueError("leave-one-session-out not implemented for OzdemirEMG; only one session exists")
-    args.dataset = 'ozdemiremg'
+        raise ValueError("leave-one-session-out not implemented for MCS_EMG; only one session exists")
+    args.dataset = 'mcs'
     
 else: 
     raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," +
-                    "'capgmyo', 'flexwear-hd', 'sci', or 'ozdemiremg'")
+                    "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
     
 if args.turn_off_scaler_normalization:
     assert args.target_normalize == 0.0, "Cannot turn off scaler normalization and turn on target normalize at the same time"
@@ -1462,8 +1462,8 @@ if args.leftout_subject != 0:
 wandb_runname += '_' + model_name
 if (exercises and not args.partial_dataset_ninapro):
     wandb_runname += '_exer-' + ''.join(character for character in str(args.exercises) if character.isalnum())
-if args.dataset == "OzdemirEMG":
-    if args.full_dataset_ozdemir:
+if args.dataset == "MCS_EMG":
+    if args.full_dataset_mcs:
         wandb_runname += '_full'
     else:
         wandb_runname += '_partial'
