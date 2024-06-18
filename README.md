@@ -2,7 +2,6 @@
   <img width="500px" src="imgs/logo.png"/>
   
   # Benchmarking Out-of-Distribution Generalization and Adaptation for Electromyography
-  ### Under Review at NeurIPS 2024
 </div>
 
 <div align="center">
