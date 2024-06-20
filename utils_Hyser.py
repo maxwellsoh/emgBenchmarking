@@ -99,7 +99,7 @@ def target_normalize (data, target_min, target_max, gesture):
         - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
     return data
 
-def getEMG_help (sub, session, target_max=None, target_min=None, leftout=None, unfold=True):
+def getEMG_help (sub, session, target_min=None, target_max=None, leftout=None, unfold=True):
     emg = []
 
     currFile = 1
@@ -148,16 +148,16 @@ def getEMG_help (sub, session, target_max=None, target_min=None, leftout=None, u
         
     return emg
 
-def getEMG (args):
+def getEMG (args, session_number=1):
     if (type(args) == int):
         n = args
-        target_max = None
         target_min = None
+        target_max = None
         leftout = None
     else:
         n = args[0]
-        target_max = args[1]
-        target_min = args[2]
+        target_min = args[1]
+        target_max = args[2]
         leftout = args[3]
     
     if (n < 10):
@@ -165,22 +165,23 @@ def getEMG (args):
     else:
         sub = f'{n}'
 
-    emg = getEMG_help(sub, "1", target_max, target_min, leftout) + getEMG_help(sub, "2", target_max, target_min, leftout)
+    # emg = getEMG_help(sub, "1", target_max, target_min, leftout) + getEMG_help(sub, "2", target_max, target_min, leftout)
+    emg = getEMG_help(sub, str(session_number), target_max, target_min, leftout)
+    
     return filter(torch.cat(emg, dim=0))
 
 def getEMG_separateSessions(args):
     if (len(args) == 2):
         subject_number = args[0]
         session_number = args[1]
-        target_max = None
         target_min = None
+        target_max = None
         leftout = None
-        
     else:
         subject_number = args[0]
         session_number = args[1]
-        target_max = args[2]
-        target_min = args[3]
+        target_min = args[2]
+        target_max = args[3]
         leftout = args[4]
     
     if (subject_number < 10):
@@ -188,12 +189,12 @@ def getEMG_separateSessions(args):
     else:
         sub = f'{subject_number}'
 
-    emg = getEMG_help(sub, str(session_number), target_max, target_min, leftout)
+    emg = getEMG_help(sub, str(session_number), target_min, target_max, leftout)
     emg = filter(torch.cat(emg, dim=0))
     return emg
         
     
-def getExtrema (n, p):
+def getExtrema (n, p, lastSessionOnly=False):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
@@ -202,8 +203,12 @@ def getExtrema (n, p):
     else:
         sub = f'{n}'
 
-    emg = getEMG_help(sub, "1", unfold=False) + getEMG_help(sub, "2", unfold=False)
-    labels = getLabels(n, unfold=False)
+    if lastSessionOnly:
+        emg = getEMG_help(sub, "2", unfold=False)
+        labels = getLabels_separateSessions((n, 2), unfold=False)
+    else:
+        emg = getEMG_help(sub, "1", unfold=False)
+        labels = getLabels_separateSessions((n, 1), unfold=False)
 
     for i in range(numGestures):
         subEMG = [emg[j] for j in range(len(emg)) if labels[j, i] == 1.0]
@@ -224,7 +229,7 @@ def contract(R):
     return labels
 
 # returns [# samples, # gestures]
-def getLabels (n, unfold=True):
+def getLabels (n, unfold=True, session_number=1):
     labels = []
 
     if (n < 10):
@@ -232,27 +237,22 @@ def getLabels (n, unfold=True):
     else:
         sub = f'{n}'
 
-    for i in range(1, 3):
-        file = open(f'hyser/subject{sub}_session{i}/label_dynamic.txt', 'r')
-        vals = file.readline().strip().split(',')
-        for v in vals:
-            if (v in gesture_nums):
-                if (unfold):
-                    for i in range(7):
-                        labels.append(v)
-                else:
+    file = open(f'hyser/subject{sub}_session{session_number}/label_dynamic.txt', 'r')
+    vals = file.readline().strip().split(',')
+    for v in vals:
+        if (v in gesture_nums):
+            if (unfold):
+                for i in range(7):
                     labels.append(v)
-        file.close()
+            else:
+                labels.append(v)
+    file.close()
 
     return contract(labels)
 
-def getLabels_separateSessions(args):
-    if (len(args) == 2):
-        subject_number = args[0]
-        session_number = args[1]
-    else:
-        subject_number = args[0]
-        session_number = args[1]
+def getLabels_separateSessions(args, unfold=True):
+    subject_number = args[0]
+    session_number = args[1]
     
     if (subject_number < 10):
         sub = f'0{subject_number}'
@@ -264,8 +264,12 @@ def getLabels_separateSessions(args):
     vals = file.readline().strip().split(',')
     for v in vals:
         if (v in gesture_nums):
-            for i in range(7):
+            if unfold:
+                for i in range(7):
+                    labels.append(v)
+            else:
                 labels.append(v)
+                
     file.close()
     return contract(labels)
 
@@ -539,7 +543,7 @@ class Data(Dataset):
 
 def plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
     # Calculate confusion matrix
-    cf_matrix = confusion_matrix(true, pred)
+    cf_matrix = confusion_matrix(true, pred, labels=range(numGestures))
     df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
     df_cm = pd.DataFrame(cf_matrix / np.sum(cf_matrix, axis=1)[:, None], index=gesture_labels,
                         columns=gesture_labels)

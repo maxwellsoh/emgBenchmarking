@@ -58,6 +58,8 @@ def train_test_split(
         else:
             label_train_set = label_train_set_og
 
+        # (gestures, number of window per gesture)
+        # each window is one gesture
         unique, counts = np.unique(stratify, return_counts=True)
         # split data for each class
         X_train = []
@@ -67,8 +69,12 @@ def train_test_split(
         label_train = []
         label_test = []
 
+        # for a gesture
+        # split by proportion of windows
+
+        # takes proportion of windows for each gesture  
         train_size_for_each_class = np.round(train_size * counts).astype(int)
-        class_amount = dict(zip(unique, train_size_for_each_class))
+        class_amount = dict(zip(unique, train_size_for_each_class)) # (GESTURE, NUMBER OF WINDOWS)
 
         for key in class_amount.keys():
             train_size_for_current_class = class_amount[key]
