@@ -1906,7 +1906,6 @@ if args.force_regression:
     assert num_classes == 6
 else: 
     num_classes = numGestures
-    assert num_classes == 10 
 
 # def get_metrrics  
 if args.pretrain_and_finetune:
