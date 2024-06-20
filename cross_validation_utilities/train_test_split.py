@@ -9,7 +9,7 @@ def train_test_split(
     shuffle=True,
     stratify=None,
 ): 
-    if shuffle==False and not stratify is None:
+    if shuffle==False and stratify is not None:
         X_train_set = arrays[0]
         Y_train_set = arrays[1]
 
@@ -62,10 +62,10 @@ def train_test_split(
         
         # if Y_train_set is one-hot-encoded, turn results into one-hot-encoded
         if Y_train_set.shape[1] != 1:
-            y_train = np.eye(len(np.unique(y_train)))[y_train]
-            y_test = np.eye(len(np.unique(y_test)))[y_test]
+            y_train = np.eye(Y_train_set.shape[1])[y_train]
+            y_test = np.eye(Y_train_set.shape[1])[y_test]
         
-    else:
+    else: # shuffle=True or stratify=None
         X_train, X_test, y_train, y_test = model_selection.train_test_split(
             *arrays,
             test_size=test_size,

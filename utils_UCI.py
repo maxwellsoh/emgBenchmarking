@@ -21,7 +21,7 @@ import pywt
 import fcwt
 
 numGestures = 6 # 7 total, but not all subjects have 7
-fs = 200 #Hz
+fs = 1000 #Hz (device sampling frequency is 200Hz but raw data is collected at 1000Hz)
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = 50 # 125 ms (increased from 50ms due to high number of subjects)
@@ -67,20 +67,21 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 def balance (restimulus):
-    numZero = 0
     indices = []
     for x in range (len(restimulus)):
-        L = torch.chunk(restimulus[x], 2, dim=0)
-        if torch.equal(L[0], L[1]):
-            if (L[0][0] > 0 and L[0][0] < 7):
-                indices.append(x)
+        if len(torch.unique(restimulus[x])) == 1 and restimulus[x][0] > 0 and restimulus[x][0] < 7:
+            indices.append(x)
     return indices
 
-def contract(R):
+def contract(R, unfold=True):
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
-    for x in range(len(R)):
-        labels[x][int(R[x][0]) - 1] = 1.0
+    if (unfold):
+        for x in range(len(R)):
+            labels[x][int(R[x][0]) - 1] = 1.0
+    else:
+        for x in range(len(R)):
+            labels[x][int(R[x]) - 1] = 1.0
     return labels
 
 def filter(emg):
@@ -92,94 +93,170 @@ def filter(emg):
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
-def getRestim (n):
+def getRestim (n, unfold=True, session_number=1):
     restim = []
     n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
         try:
-            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-            restim.append(data[:, -1][balance(data[:, -1])])
+            if file[0] == str(session_number):
+                print("Reading file", file, "Subject", n)
+            else:
+                continue
+            if (unfold):
+                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                restim.append(data[:, -1][balance(data[:, -1])])
+            else:
+                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:])
+                restim.append(data[:, -1])
         except:
             print("Error reading file", file, "Subject", n)
-    if numGestures == 6:
+    if numGestures == 6 and unfold:
         for i in range(len(restim)):
             restim[i] = restim[i][torch.all(restim[i] != 7, axis=1)]
-        return torch.cat(restim, dim=0)
     return torch.cat(restim, dim=0)
 
-def normalize (data, target_min, target_max, gesture):
-    source_min = np.zeros(len(data[0]), dtype=np.float32)
-    source_max = np.zeros(len(data[0]), dtype=np.float32)
-    for i in range(len(data[0])):
+def target_normalize (data, target_min, target_max):
+    source_min = np.zeros(numElectrodes, dtype=np.float32)
+    source_max = np.zeros(numElectrodes, dtype=np.float32)
+    
+    for i in range(numElectrodes):
         source_min[i] = np.min(data[:, i])
         source_max[i] = np.max(data[:, i])
 
-    for i in range(len(data[0])):
-        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
-        - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
-    return data
+    data_norm = np.zeros(data.shape, dtype=np.float32)
+    for gesture in range(numGestures):
+        for i in range(numElectrodes):
+            data_norm[:, i] = data_norm[:, i] + (data[:, -1] == (gesture+1)) * (((data[:, i] - source_min[i]) / (source_max[i] 
+            - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture])
+    data_norm[:, -1] = data[:, -1]
+    return data_norm
 
-def getEMG (n):
+def getEMG (args, unfold=True, session_number=1):
+    if (type(args) == int):
+        n = args
+        target_min = None
+        target_max = None
+        leftout = None
+    else:
+        n = args[0]
+        target_min = args[1]
+        target_max = args[2]
+        leftout = args[3]
+
     emg = []
     restim = []
     n = "{:02d}".format(n)
     for file in os.listdir(f"uciEMG/{n}/"):
         try: 
-            data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-            emg.append(data[:, :-1][balance(data[:, -1])])
-            restim.append(data[:, -1][balance(data[:, -1])])
+            # data = np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]
+            
+            if file[0] == str(session_number):
+                data = np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]
+
+                if (leftout != None and n != leftout):
+                    data = target_normalize(data, target_min, target_max)
+
+                data = torch.from_numpy(data)
+                if (unfold):
+                    data = data.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                    data = data[balance(data[:, -1])]
+
+                emg.append(data[:, :-1])
+                restim.append(data[:, -1])
         except Exception as e:
             print("Error reading file", file, "Subject", n)
             print(e)
-    if numGestures == 6:
+
+    if numGestures == 6 and unfold:
         for i in range(len(restim)):
             emg[i] = emg[i][torch.all(restim[i] != 7, axis=1)]
-        return torch.cat(emg, dim=0)
+
     return torch.cat(emg, dim=0)
 
-def getEMG_separateSessions(args):
-    subject_number, session_number = args
+def getEMG_separateSessions(args, unfold=True):
+    if (len(args) == 2):
+        subject_number, session_number = args
+        target_min = None
+        target_max = None
+        leftout = None
+    else:
+        subject_number, session_number, target_min, target_max, leftout = args
+    
     emg = [] 
     restim = []  
     n = "{:02d}".format(subject_number)
     for file in os.listdir(f"uciEMG/{n}/"):
         try: 
             if file[0] == str(session_number):
-                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-                emg.append(data[:, :-1][balance(data[:, -1])])
-                restim.append(data[:, -1][balance(data[:, -1])])
+                data = np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]
+                
+                if (leftout != None and n != leftout):
+                    data = target_normalize(data, target_min, target_max)
+
+                data = torch.from_numpy(data)
+                if (unfold):
+                    data = data.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                    data = data[balance(data[:, -1])]
+                
+                emg.append(data[:, :-1])
+                restim.append(data[:, -1])
         except Exception as e:
             print("Error reading file", file, "Subject", n)
             print(e)
-    if numGestures == 6:
+    if numGestures == 6 and unfold:
         for i in range(len(restim)):
             emg[i] = emg[i][torch.all(restim[i] != 7, axis=1)]
         return torch.cat(emg, dim=0)
     return torch.cat(emg, dim=0)
 
-def getRestim_separateSessions(args):
+def getExtrema (n, p, lastSessionOnly=False):
+    mins = np.zeros((numElectrodes, numGestures))
+    maxes = np.zeros((numElectrodes, numGestures))
+
+    if lastSessionOnly:
+        emg = getEMG_separateSessions((n, 2), unfold=False)
+        labels = getLabels_separateSessions((n, 2), unfold=False)
+    else:
+        emg = getEMG(n, unfold=False)
+        labels = getLabels(n, unfold=False)
+
+    for i in range(numGestures):
+        subEMG = emg[labels[:, i] == 1.0]
+        subEMG = np.array(subEMG[:int(len(subEMG)*p)])
+
+        # subEMG will be [# timesteps, # electrodes]
+        for j in range(numElectrodes):
+            mins[j][i] = np.min(subEMG[:, j])
+            maxes[j][i] = np.max(subEMG[:, j])
+    return mins, maxes
+
+def getRestim_separateSessions(args, unfold=True):
     subject_number, session_number = args
     restim = []
     n = "{:02d}".format(subject_number)
     for file in os.listdir(f"uciEMG/{n}/"):
         try:
             if file[0] == str(session_number):
-                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-                restim.append(data[:, -1][balance(data[:, -1])])
+                if unfold:
+                    data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                    restim.append(data[:, -1][balance(data[:, -1])])
+                else:
+                    data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:])
+                    restim.append(data[:, -1])
         except:
             print("Error reading file", file, "Subject", n)
-    if numGestures == 6:
+    if numGestures == 6 and unfold:
         for i in range(len(restim)):
             restim[i] = restim[i][torch.all(restim[i] != 7, axis=1)]
         return torch.cat(restim, dim=0)
     return torch.cat(restim, dim=0)
 
-def getLabels (n):
-    return contract(getRestim(n))
+def getLabels (n, unfold=True):
+    return contract(getRestim(n, unfold), unfold)
 
-def getLabels_separateSessions(args):
+def getLabels_separateSessions(args, unfold=True):
     subject_number, session_number = args
-    return contract(getRestim_separateSessions((subject_number, session_number)))
+    return contract(getRestim_separateSessions((subject_number, session_number), unfold), unfold)
 
 def closest_factors(num):
     # Find factors of the number

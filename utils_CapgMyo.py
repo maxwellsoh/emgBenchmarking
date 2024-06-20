@@ -113,7 +113,7 @@ def fft_plot(signal):
     plt.grid(True)
     plt.show()
 
-def getData (subject, gesture, trial, session=None):    
+def getData (subject, gesture, trial):    
     if (isinstance(subject, int)):  
         sub = str(subject)
         if subject < 10:
@@ -122,14 +122,15 @@ def getData (subject, gesture, trial, session=None):
         sub = str(subject[0])
         if subject[0] < 10:
             sub = '0' + sub
-        target_max = subject[1]
-        target_min = subject[2]
+        target_min = subject[1]
+        target_max = subject[2]
         leftout = subject[3]
 
     name = '0' + sub + '-00' + str(gesture) + '-00' +str(trial)
     if trial == 10:
         name = '0' + sub + '-00' + str(gesture) + '-010'
     mat_data = io.loadmat('./CapgMyo_B/dbb-preprocessed-0' + sub + '/' + name + '.mat')
+    # [# timesteps, # channels]
     mat_array = mat_data['data']
 
     if (not isinstance(subject, int) and leftout != subject[0]):
@@ -143,31 +144,57 @@ def getData (subject, gesture, trial, session=None):
     else:
         return window(tensor_data)
 
-def getEMG (x):
+def getEMG (x, session_number=1):
     #return torch.cat((getData(x-1,1,1), getData(x,1,1)), dim=0)
-    return filter(getData(x, 1, 1))
-
-def getEMG_separateSessions(args):
-    subject_number, session_number = args
+    subject_number = x[0] if isinstance(x, tuple) else x
     data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
+    if isinstance(x, tuple):
+        return filter(getData((data_index, x[1], x[2], x[3]), 1, 1))
     return filter(getData(data_index, 1, 1))
 
-def getExtrema (n):
+def getEMG_separateSessions(args):
+    if (len(args) == 2):
+        subject_number, session_number = args
+        mins = None
+        maxes = None
+        leftout = None
+    else:
+        subject_number, session_number, mins, maxes, leftout = args
+    data_index = participants_first_session_index[subject_number-1] if session_number == 1 else participants_second_session_index[subject_number-1]
+    if (len(args) == 2):
+        return filter(getData(data_index, 1, 1))
+    else:
+        return filter(getData((data_index, mins, maxes, leftout), 1, 1))
+
+def getExtrema (n, p, lastSessionOnly=False):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
+
+    if lastSessionOnly:
+        n = participants_second_session_index[n-1]
+    else:
+        n = participants_first_session_index[n-1]
     
     sub = str(n)
     if (n < 10):
         sub = '0' + sub
 
     for i in range(numGestures):
-        name = '0' + sub + '-00' + str(i+1) + '-001'
-        mat_data = io.loadmat('./CapgMyo_B/dbb-preprocessed-0' + sub + '/' + name + '.mat')
-        data = mat_data['data']
+        data = []
+
+        for trial in range(10):
+            name = '0' + sub + '-00' + str(i+1) + '-00' +str(trial+1)
+            if trial == 9:
+                name = '0' + sub + '-00' + str(i+1) + '-010'
+            mat_data = io.loadmat('./CapgMyo_B/dbb-preprocessed-0' + sub + '/' + name + '.mat')
+            data.append(mat_data['data'].transpose())
+
+        data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
+        data = data[:, :int(len(data[0])*p)]
 
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[:, j])
-            maxes[j][i] = np.max(data[:, j])
+            mins[j][i] = np.min(data[j])
+            maxes[j][i] = np.max(data[j])
     return mins, maxes
 
 def getLabels (n):
