@@ -297,9 +297,9 @@ def getExtrema (n, p, exercise):
     Used for target normalization.
 
     Args:
-        n (_type_): _description_
-        p (_type_): _description_
-        exercise (_type_): _description_
+        n: participant
+        p: proportion of windows to consider
+        exercise: exercise
     """
 
     # Windowed data (must be windowed and balanced so that it matches the splitting in train_test_split)

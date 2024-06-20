@@ -276,11 +276,10 @@ def getExtrema (n, p, exercise):
     Used for target normalization.
 
     Args:
-        n (_type_): _description_
-        p (_type_): _description_
-        exercise (_type_): _description_
+        n: participant
+        p: proportion of windows to consider
+        exercise: exercise
     """
-
     # Windowed data (must be windowed and balanced so that it matches the splitting in train_test_split)
     emg = getEMG((n, exercise), unfold=False)   # (TIME STEP, GESTURE)
     labels = getLabels((n, exercise))           # (TIME STEP, LABEL)
@@ -289,7 +288,6 @@ def getExtrema (n, p, exercise):
     # resize = min(len(emg), len(labels))
     # emg = emg[:resize]
     # labels = labels[:resize]
-
 
     # Create new arrays to hold data
     mins = np.zeros((numElectrodes, labels.shape[1]))
