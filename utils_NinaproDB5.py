@@ -203,21 +203,31 @@ def target_normalize (data, target_min, target_max, restim):
             - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture])
     return data_norm
 
-def getEMG(args, unfold=True):
-    """Returns EMG data that target normalized (if not a left out participant), filtered (butterworth), and unfolded across time steps.
+def getEMG(input, unfold=True):
+    """Returns EMG data for a given participant and exercise. 
+    
+    Data is normalized for non-leftout participants. If doing force regression, smissing subject is skipped.
 
     Args:
-        args (_type_): _description_
-        unfold (bool, optional): _description_. Defaults to True.
+        input (n, exercise, opt:targe_min, opt:target_max, args)
+        unfold (bool, optional): whether or not to unfold. Defaults to True.
 
     Returns:
-        (WINDOW, EMG): _description_
+        (TIME STEP, ELECTRODE): if unfold=False
     """
-    if (len(args) == 2):
-        n, exercise = args
+
+    # if (len(args) == 2):
+    #     n, exercise = args
+    #     leftout = None
+    # else:
+    #     n, exercise, target_min, target_max, leftout = args
+
+    if (len(input) == 3):
+        n, exercise, args = input
         leftout = None
     else:
-        n, exercise, target_min, target_max, leftout = args
+        n, exercise, target_min, target_max, args = input
+        leftout = args.leftout_subject + 1
 
     emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E{exercise}.hdf5')
     
@@ -228,6 +238,7 @@ def getEMG(args, unfold=True):
     restim = getRestim(n, exercise, unfold=True)
     emg = torch.tensor(emg.values)
     return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+    
 
 def get_decrements(args):
     """
@@ -280,24 +291,16 @@ def getExtrema (n, p, exercise):
         p: proportion of windows to consider
         exercise: exercise
     """
+
     # Windowed data (must be windowed and balanced so that it matches the splitting in train_test_split)
     emg = getEMG((n, exercise), unfold=False)   # (TIME STEP, GESTURE)
     labels = getLabels((n, exercise))           # (TIME STEP, LABEL)
-
-    # Make it so that emg and labels have the same number of windows. Should I be resizing this.....? If I'm going to use proportion anyways... 
-    # resize = min(len(emg), len(labels))
-    # emg = emg[:resize]
-    # labels = labels[:resize]
 
     # Create new arrays to hold data
     mins = np.zeros((numElectrodes, labels.shape[1]))
     maxes = np.zeros((numElectrodes, labels.shape[1]))
 
     # Get the proportion of the windows per gesture 
-
-
-    # take proportion of windows for each gesture 
-    # returns the label and the windows in which they occur
     unique_labels, counts = np.unique(labels, return_counts=True)
 
     size_per_gesture = np.round(p*counts).astype(int)
@@ -306,10 +309,9 @@ def getExtrema (n, p, exercise):
     for gesture in gesture_amount.keys():
         size_for_current_gesture = gesture_amount[gesture]
 
-        # indices for current label
-        all_windows = np.where(labels == gesture)[0] # all the corresponding windows
-        chosen_windows = all_windows[:size_for_current_gesture] # pick the proportion 
-
+        all_windows = np.where(labels == gesture)[0]
+        chosen_windows = all_windows[:size_for_current_gesture] 
+        
         # out of these indices, pick the min/max emg values
         for j in range(numElectrodes): 
             

@@ -27,6 +27,8 @@ stepLen = int(50.0 / 1000 * fs) # 50 ms
 numElectrodes = 12 # number of EMG columns
 num_subjects = 11
 
+MISSING_SUBJECT = 10 # Subject 10 is missing from exercise 3
+
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
 gesture_labels = {}
@@ -230,15 +232,30 @@ def target_normalize (data, target_min, target_max, restim):
             - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture])
     return data_norm
 
-def getEMG (args, unfold=True):
-    if (len(args) == 2):
-        n, exercise = args
+def getEMG (input, unfold=True):
+    """Returns EMG data for a given participant and exercise. 
+    
+    Data is normalized for non-leftout participants. If doing force regression, smissing subject is skipped.
+
+    Args:
+        input (n, exercise, opt:targe_min, opt:target_max, args)
+        unfold (bool, optional): whether or not to unfold. Defaults to True.
+
+    Returns:
+        (TIME STEP, ELECTRODE): if unfold=False
+    """
+
+    if (len(input) == 3):
+        n, exercise, args = input
         leftout = None
     else:
-        n, exercise, target_min, target_max, leftout = args
+        n, exercise, target_min, target_max, args = input
+        leftout = args.leftout_subject + 1
 
+    if args.force_regression and n == MISSING_SUBJECT: 
+        return None 
+    
     restim = getRestim(n, exercise)
-
     emg = io.loadmat(f'./NinaproDB3/DB3_s{n}/S{n}_E{exercise}_A1.mat')['emg']
 
     # normalize data for non leftout participants 
@@ -306,21 +323,12 @@ def getExtrema (n, p, exercise):
     emg = getEMG((n, exercise), unfold=False)   # (TIME STEP, GESTURE)
     labels = getLabels((n, exercise))           # (TIME STEP, LABEL)
 
-    # Make it so that emg and labels have the same number of windows. Should I be resizing this.....? If I'm going to use proportion anyways... 
-    # resize = min(len(emg), len(labels))
-    # emg = emg[:resize]
-    # labels = labels[:resize]
-
-
     # Create new arrays to hold data
     mins = np.zeros((numElectrodes, labels.shape[1]))
     maxes = np.zeros((numElectrodes, labels.shape[1]))
 
     # Get the proportion of the windows per gesture 
 
-
-    # take proportion of windows for each gesture 
-    # returns the label and the windows in which they occur
     unique_labels, counts = np.unique(labels, return_counts=True)
 
     size_per_gesture = np.round(p*counts).astype(int)
@@ -329,9 +337,8 @@ def getExtrema (n, p, exercise):
     for gesture in gesture_amount.keys():
         size_for_current_gesture = gesture_amount[gesture]
 
-        # indices for current label
-        all_windows = np.where(labels == gesture)[0] # all the corresponding windows
-        chosen_windows = all_windows[:size_for_current_gesture] # pick the proportion 
+        all_windows = np.where(labels == gesture)[0]
+        chosen_windows = all_windows[:size_for_current_gesture] 
 
         # out of these indices, pick the min/max emg values
         for j in range(numElectrodes): 
@@ -355,10 +362,37 @@ def getLabels (input, unfold=True):
     """
 
     n, exercise, args = input
+
+    if args.force_regression and n == MISSING_SUBJECT:
+        return None
+
     restim = getRestim(n, exercise)             
     balanced_restim = restim[balance(restim)]   
     ordered_restim = make_gestures_sequential(balanced_restim, args) 
     return contract(ordered_restim)
+
+def getForceData(n: int, exercise: int = 3):
+    """
+    Returns force data from exercise 3 for a given subject n unfolded. 
+
+    Args:
+        n (int): Subject number
+        exercise (int, optional): Exercise number. Must be 3.
+    """
+    assert exercise == 3, "Only exercise 3 has force data"
+    force = torch.from_numpy(io.loadmat(f'./NinaproDB3/DB3_s{n}/S{n}_E{exercise}_A1.mat')['force'])
+    return force.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+
+def getForces(args):
+    n, exercise = args
+
+    if n == MISSING_SUBJECT:
+        return None
+ 
+    force = getForceData(n, exercise)
+    restim = getRestim(n,exercise)
+    balanced_indices = balance(restim)
+    return force[balanced_indices]
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
@@ -670,6 +704,10 @@ class Data(Dataset):
         return len(self.data)
 
 def plot_confusion_matrix(true, pred, gesture_labels, testrun_foldername, args, formatted_datetime, partition_name):
+    
+    if args.force_regression:
+        return 
+    
     # Calculate confusion matrix
     cf_matrix = confusion_matrix(true, pred)
     df_cm_unnormalized = pd.DataFrame(cf_matrix, index=gesture_labels, columns=gesture_labels)
