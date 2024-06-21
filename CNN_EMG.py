@@ -39,6 +39,7 @@ import torchmetrics
 import ml_metrics_utils as ml_utils
 from sklearn.metrics import confusion_matrix, classification_report
 import VisualTransformer
+import preprocessing_utils
 
 # TODO: get it to automatically call the right programs if it is missing them... should be just a straight call. need to work on actually running it 
 
@@ -837,8 +838,8 @@ else:
         print("Size of Y_train:     ", Y_train.size()) # (SAMPLE, GESTURE)
         print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
-        print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
+        print("Size of X_test:      ", X_test.size())  # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_test:      ", Y_test.size())  # (SAMPLE, GESTURE)
     
     elif args.leave_one_session_out:
         total_number_of_sessions = 2 # all datasets used in our benchmark have at most 2 sessions but this can be changed using a variable from dataset-specific utils instead
@@ -1246,25 +1247,63 @@ if args.turn_on_unlabeled_domain_adaptation: # set up datasets and config for un
     semilearn_config = get_config(semilearn_config_dict)
 
     if args.model == 'vit_tiny_patch2_32':
-        semilearn_transform = transforms.Compose([transforms.Resize((32,32)), ToNumpy()])
+        size_to_resize_to = 32
     else: 
-        semilearn_transform = transforms.Compose([transforms.Resize((224,224)), ToNumpy()])
-    
-    labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
-    if proportion_unlabeled_of_training_subjects>0:
-        unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
-                                        is_ulb=True, strong_transform=semilearn_transform)
-        # proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_training_subjects
-    elif proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_flexwearhd:
-        unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), semilearn_config.num_classes, semilearn_transform, 
-                                        is_ulb=True, strong_transform=semilearn_transform)
-        # proportion_unlabeled_to_use = args.proportion_unlabeled_data_from_leftout_subject
-    if args.pretrain_and_finetune:
-        finetune_dataset = BasicDataset(semilearn_config, X_train_finetuning, torch.argmax(Y_train_finetuning, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
-        finetune_unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), 
-                                                  semilearn_config.num_classes, semilearn_transform, is_ulb=True, strong_transform=semilearn_transform)
+        size_to_resize_to = 224
+
+    class RandAugment:
+        def __init__(self, n):
+            self.n = n  # Number of augmentation transformations to apply
+
+            self.augment_list = [
+                transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomVerticalFlip(p=0.5),
+                transforms.RandomResizedCrop(size=size_to_resize_to, scale=(0.8, 1.0)),
+                transforms.RandomGrayscale(p=0.2),
+                transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+            ]
+
+        def __call__(self, img):
+            ops = random.sample(self.augment_list, self.n)
+            for op in ops:
+                img = op(img)
+            return img
         
-    validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, semilearn_transform, is_ulb=False)
+    rand_augment = RandAugment(n=2)  # Apply 2 random transformations
+    
+    # Define the weak and strong augmentations
+    weak_transform = transforms.Compose([
+        transforms.RandomResizedCrop(size=size_to_resize_to),
+        transforms.RandomHorizontalFlip(),
+        transforms.Lambda(lambda x: x.to(torch.float32))
+    ])
+
+    strong_transform = transforms.Compose([
+        transforms.RandomResizedCrop(size=size_to_resize_to),
+        transforms.RandomHorizontalFlip(),
+        transforms.Lambda(lambda x: x.to(torch.float32)),
+        rand_augment,  # Assuming you have RandAugment implemented or imported
+    ])
+
+    # Initialize the configuration
+    semilearn_config = get_config(semilearn_config_dict)
+    
+    labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, weak_transform, is_ulb=False)
+
+    if proportion_unlabeled_of_training_subjects > 0:
+        unlabeled_dataset = BasicDataset(semilearn_config, X_train_unlabeled, torch.argmax(Y_train_unlabeled, dim=1), semilearn_config.num_classes, weak_transform, 
+                                        is_ulb=True, strong_transform=strong_transform)
+    elif proportion_unlabeled_of_proportion_to_keep_of_leftout > 0 or args.load_unlabeled_data_jehan:
+        unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), semilearn_config.num_classes, weak_transform, 
+                                        is_ulb=True, strong_transform=strong_transform)
+        
+    if args.pretrain_and_finetune:
+        finetune_dataset = BasicDataset(semilearn_config, X_train_finetuning, torch.argmax(Y_train_finetuning, dim=1), semilearn_config.num_classes, weak_transform, is_ulb=False)
+        finetune_unlabeled_dataset = BasicDataset(semilearn_config, X_train_finetuning_unlabeled, torch.argmax(Y_train_finetuning_unlabeled, dim=1), 
+                                                semilearn_config.num_classes, weak_transform, is_ulb=True, strong_transform=strong_transform)
+
+    validation_dataset = BasicDataset(semilearn_config, X_validation, torch.argmax(Y_validation, dim=1), semilearn_config.num_classes, weak_transform, is_ulb=False)
 
     proportion_unlabeled_to_use = len(unlabeled_dataset) / (len(labeled_dataset) + len(unlabeled_dataset)) 
     labeled_batch_size = int(semilearn_config.batch_size * (1-proportion_unlabeled_to_use))
