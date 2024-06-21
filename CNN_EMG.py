@@ -39,6 +39,7 @@ import torchmetrics
 import ml_metrics_utils as ml_utils
 from sklearn.metrics import confusion_matrix, classification_report
 import VisualTransformer
+import preprocessing_utils
 
 # TODO: get it to automatically call the right programs if it is missing them... should be just a straight call. need to work on actually running it 
 
@@ -837,8 +838,8 @@ else:
         print("Size of Y_train:     ", Y_train.size()) # (SAMPLE, GESTURE)
         print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
         print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
-        print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
+        print("Size of X_test:      ", X_test.size())  # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_test:      ", Y_test.size())  # (SAMPLE, GESTURE)
     
     elif args.leave_one_session_out:
         total_number_of_sessions = 2 # all datasets used in our benchmark have at most 2 sessions but this can be changed using a variable from dataset-specific utils instead
@@ -1256,12 +1257,11 @@ if args.turn_on_unlabeled_domain_adaptation: # set up datasets and config for un
 
             self.augment_list = [
                 transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
-                transforms.RandomRotation(degrees=30),
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.RandomVerticalFlip(p=0.5),
-                transforms.RandomResizedCrop(size=224, scale=(0.8, 1.0)),
-                transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+                transforms.RandomResizedCrop(size=size_to_resize_to, scale=(0.8, 1.0)),
                 transforms.RandomGrayscale(p=0.2),
+                transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
             ]
 
         def __call__(self, img):
@@ -1276,20 +1276,19 @@ if args.turn_on_unlabeled_domain_adaptation: # set up datasets and config for un
     weak_transform = transforms.Compose([
         transforms.RandomResizedCrop(size=size_to_resize_to),
         transforms.RandomHorizontalFlip(),
-        transforms.ToTensor()
+        transforms.Lambda(lambda x: x.to(torch.float32))
     ])
 
     strong_transform = transforms.Compose([
         transforms.RandomResizedCrop(size=size_to_resize_to),
         transforms.RandomHorizontalFlip(),
+        transforms.Lambda(lambda x: x.to(torch.float32)),
         rand_augment,  # Assuming you have RandAugment implemented or imported
-        transforms.ToTensor()
     ])
 
     # Initialize the configuration
     semilearn_config = get_config(semilearn_config_dict)
-
-    # Create datasets
+    
     labeled_dataset = BasicDataset(semilearn_config, X_train, torch.argmax(Y_train, dim=1), semilearn_config.num_classes, weak_transform, is_ulb=False)
 
     if proportion_unlabeled_of_training_subjects > 0:
