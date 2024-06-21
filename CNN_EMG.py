@@ -197,12 +197,23 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
 
 elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
     import utils_NinaproDB3 as utils
-    assert args.exercises == [1] or args.partial_dataset_ninapro, "Exercises C and D are not implemented due to missing data."
+    assert args.exercises == [1] or args.partial_dataset_ninapro or args.exercises == [3], "Exercises C are not implemented due to missing data."
     print(f"The dataset being tested is ninapro-db3")
     project_name = 'emg_benchmarking_ninapro-db3'
     exercises = True
     if args.leave_one_session_out:
         raise ValueError("leave-one-session-out not implemented for ninapro-db3; only one session exists")
+    
+    if args.force_regression:
+        print("NOTE: Subject 10 is missing gesture data for exercise 3. Because of this, subject is ignored for regression and subject 11 is relabeled as subject 10.")
+        MISSING_SUBJECT = 10 # subject 10 missing most force data
+
+    assert not (args.force_regression and args.leftout_subject == 11), "Subject 11 is relabeled as participant 10 in regression "
+
+    if args.force_regression and args.leftout_subject == 10:
+        print("NOTE: This is equivalent to leaving out subject 11 from the dataset (since subject 10 is ignored for regression).")
+
+    args.dataset = 'ninapro-db3'
 
 elif (args.dataset.lower() == "myoarmbanddataset"):
     if (not os.path.exists("./myoarmbanddataset")):
@@ -364,6 +375,12 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
+
+
+
+# # NinaproDB3 is missing gesture data for participant 10 
+# if args.force_regression and args.dataset == "ninapro-db3":
+#     utils.num_subjects -= 1
     
 if exercises:
     emg = []
@@ -384,14 +401,13 @@ if exercises:
             if (args.target_normalize > 0):
                 mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, exercise)
                 emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
+
             else:
-                emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
+                emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
             
             emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
             
-            labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], 
-                                                        exercise*np.ones(utils.num_subjects).astype(int), 
-                                                        [args]*utils.num_subjects)))
+            labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
             labels.append(labels_async.get())
 
             if args.force_regression:
@@ -403,8 +419,20 @@ if exercises:
             if args.force_regression:
                 assert len(emg[-1]) == len(forces[-1]), "Number of trials for EMG and forces do not match"
             
-    # Append exercise sets together and add dimensions to labels if necessary
+    
+    # Delete subject 10s data for DB3 force_regression
+    if args.force_regression and args.dataset == "ninapro-db3": 
+        utils.num_subjects -= 1
 
+        assert emg[0][MISSING_SUBJECT-1] == None
+        assert labels[0][MISSING_SUBJECT-1] == None
+        assert forces[0][MISSING_SUBJECT-1] == None
+
+        del emg[0][MISSING_SUBJECT-1]
+        del labels[0][MISSING_SUBJECT-1]
+        del forces[0][MISSING_SUBJECT-1]
+
+    # Append exercise sets together and add dimensions to labels if necessary
     new_emg = []  # This will store the concatenated data for each subject
     new_labels = []  # This will store the concatenated labels for each subject
     numGestures = 0 # This will store the number of gestures for each subject
@@ -492,6 +520,7 @@ else: # Not exercises
                 labels = []
                 for i in range(1, total_number_of_sessions+1):
                     emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.leftout_subject + 1) for j in range(utils.num_subjects)])
+
                     emg.extend(emg_async.get())
                     
                     labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
@@ -500,6 +529,9 @@ else: # Not exercises
                 mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize)
                 
                 emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
+
+
+
                 emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
                 
                 labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
@@ -1116,8 +1148,6 @@ else:
         if args.reduce_training_data_size:
             reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
 
-     
-            
         X_validation = np.array(data[leaveOut-1])
         if args.force_regression: 
             Y_validation = np.array(forces[leaveOut-1])
@@ -1173,8 +1203,6 @@ else:
             X_train_list.append(current_data)
             Y_train_list.append(current_y)
             label_train_list.append(current_labels)
-            if not args.force_regression:
-                assert label_train_list == Y_train_list, "For classification, Y_ should equal label_ values."
             
         X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
         Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
@@ -1217,7 +1245,7 @@ else:
                 if args.train_test_split_for_time_series:
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
-                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
+                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, label_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
         
                 else:
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
@@ -1834,7 +1862,7 @@ else:
 utils.plot_average_images(X_test, np.argmax(test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
 utils.plot_first_fifteen_images(X_test, np.argmax(test.cpu().detach().numpy(), axis=1), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
     
-def get_metrics(return_testing=args.held_out_test):
+def get_metrics(testing=True):
     """
     Constructs training and validation metric arrays based on whether it is a regression or classification task. Also returns testing metrics if args.held_out_test.
     """
@@ -1872,20 +1900,16 @@ def get_metrics(return_testing=args.held_out_test):
     if args.force_regression:
         training_metrics = get_regression_metrics()
         validation_metrics = get_regression_metrics()
-        if return_testing:
-            testing_metrics = get_regression_metrics()
+        testing_metrics = get_regression_metrics()
 
     else: 
         training_metrics = get_classification_metrics()
         validation_metrics = get_classification_metrics()
-        if return_testing:
-            testing_metrics = get_classification_metrics()
+        testing_metrics = get_classification_metrics()
 
-    if return_testing:
-        return training_metrics, validation_metrics, testing_metrics
-    else: 
-        assert training_metrics is not None and validation_metrics is not None
+    if not testing:
         return training_metrics, validation_metrics
+    return training_metrics, validation_metrics, testing_metrics
        
 if args.force_regression: 
     validation = label_validation
@@ -2023,7 +2047,7 @@ else:
             
         if args.model == 'MLP':
             # PyTorch training loop for MLP
-            training_metrics, validation_metrics = get_metrics(return_testing=False)
+            training_metrics, validation_metrics = get_metrics(testing=False)
 
             for epoch in tqdm(range(num_epochs), desc="Epoch"):
                 model.train()
@@ -2244,10 +2268,10 @@ else:
     else: # CNN training
 
         # Initialize metrics
-        if args.held_out_test:
+        if args.held_out_test or args.pretrain_and_finetune:
             training_metrics, validation_metrics, testing_metrics = get_metrics()
         else: 
-            training_metrics, validation_metrics = get_metrics()
+            training_metrics, validation_metrics = get_metrics(testing=False)
 
         for metric in training_metrics:
             print("metric_name:", metric.name)
@@ -2428,7 +2452,9 @@ else:
 
         if args.pretrain_and_finetune:
             ### Finish the current run and start a new run for finetuning
-            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime)
+            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime, testing_metrics)
+
+            # just pass in the metrics 
 
             model.eval()
             with torch.no_grad():
@@ -2443,18 +2469,20 @@ else:
 
             # Print confusion matrix before plotting
             # Convert lists to numpy arrays
-            true_labels = np.argmax(Y_test.cpu().detach().numpy(), axis=1)
-            test_predictions = np.array(test_predictions)
-
-            # Calculate and print the confusion matrix
-            conf_matrix = confusion_matrix(true_labels, test_predictions)
-            print("Confusion Matrix:")
-            print(conf_matrix)
-
-            print("Classification Report:")
-            print(classification_report(true_labels, test_predictions))
             
-            utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
+            if not args.force_regression: 
+                true_labels = np.argmax(Y_test.cpu().detach().numpy(), axis=1)
+                test_predictions = np.array(test_predictions)
+
+                # Calculate and print the confusion matrix
+                conf_matrix = confusion_matrix(true_labels, test_predictions)
+                print("Confusion Matrix:")
+                print(conf_matrix)
+
+                print("Classification Report:")
+                print(classification_report(true_labels, test_predictions))
+                
+                utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
 
             torch.cuda.empty_cache()  # Clear cache if needed
 
@@ -2468,14 +2496,15 @@ else:
                         outputs = outputs['logits']
                     preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
                     validation_predictions.extend(preds)
-
-            utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+            if not args.force_regression: 
+                utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
 
             # Load training in smaller batches for memory purposes
             torch.cuda.empty_cache()  # Clear cache if needed
 
             model.eval()
             train_loader_unshuffled = DataLoader(train_dataset, batch_size=batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
+            
             with torch.no_grad():
                 train_predictions = []
                 for X_batch, Y_batch in tqdm(train_loader_unshuffled, desc="Training Batch Loading for Confusion Matrix"):
@@ -2485,9 +2514,10 @@ else:
                             outputs = outputs['logits']
                     preds = torch.argmax(outputs, dim=1)
                     train_predictions.extend(preds.cpu().detach().numpy())
-
-            utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
-            run.finish()
+            
+            if not args.force_regression:
+                utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+                run.finish()
 
             ### Initiate new logging of finetuning phase
             run = wandb.init(name=wandb_runname+"_finetune", project=project_name) 
@@ -2497,10 +2527,7 @@ else:
             finetune_loader = DataLoader(finetune_dataset, batch_size=batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
 
             # Initialize metrics for finetuning training and validation
-            if args.held_out_test:
-                ft_training_metrics, ft_validation_metrics, _, _= get_metrics()
-            else:
-                ft_training_metrics, ft_validation_metrics = get_metrics()
+            ft_training_metrics, ft_validation_metrics, testing_metrics = get_metrics()
     
             for epoch in tqdm(range(num_epochs), desc="Finetuning Epoch"):
                 model.train()
@@ -2652,11 +2679,10 @@ else:
             wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
             # Evaluate the model on the test set
-            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime)
+            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime, testing_metrics)
 
         torch.cuda.empty_cache()  # Clear cache if needed
 
-        assert args.force_regression == False, "Attempting to plot confusion matrix for regression model"
         model.eval()
         with torch.no_grad():
             assert args.force_regression == False
@@ -2671,18 +2697,19 @@ else:
 
         # Print confusion matrix before plotting
         # Convert lists to numpy arrays
-        true_labels = np.argmax(Y_test.cpu().detach().numpy(), axis=1)
-        test_predictions = np.array(test_predictions)
+        if not args.force_regression: 
+            true_labels = np.argmax(Y_test.cpu().detach().numpy(), axis=1)
+            test_predictions = np.array(test_predictions)
 
-        # Calculate and print the confusion matrix
-        conf_matrix = confusion_matrix(true_labels, test_predictions)
-        print("Confusion Matrix:")
-        print(conf_matrix)
+            # Calculate and print the confusion matrix
+            conf_matrix = confusion_matrix(true_labels, test_predictions)
+            print("Confusion Matrix:")
+            print(conf_matrix)
 
-        print("Classification Report:")
-        print(classification_report(true_labels, test_predictions))
-            
-        utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
+            print("Classification Report:")
+            print(classification_report(true_labels, test_predictions))
+                
+            utils.plot_confusion_matrix(np.argmax(Y_test.cpu().detach().numpy(), axis=1), np.array(test_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'test')   
 
         torch.cuda.empty_cache()  # Clear cache if needed
 
@@ -2697,7 +2724,8 @@ else:
                 preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
                 validation_predictions.extend(preds)
 
-        utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
+        if not args.force_regression:
+            utils.plot_confusion_matrix(np.argmax(Y_validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'validation')   
 
         # Load training in smaller batches for memory purposes
         torch.cuda.empty_cache()  # Clear cache if needed
@@ -2714,6 +2742,7 @@ else:
                 preds = torch.argmax(outputs, dim=1)
                 train_predictions.extend(preds.cpu().detach().numpy())
 
-        utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
+        if not args.force_regression: 
+            utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
             
     run.finish()
