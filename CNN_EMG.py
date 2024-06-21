@@ -197,7 +197,7 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
 
 elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
     import utils_NinaproDB3 as utils
-    assert args.exercises == [1] or args.partial_dataset_ninapro or args.exercises == [3], "Exercises C are not implemented due to missing data."
+    assert args.exercises == [1] or args.partial_dataset_ninapro or (args.exercises == [3] and args.force_regression), "Exercises C and D are not implemented for regression due to missing data."
     print(f"The dataset being tested is ninapro-db3")
     project_name = 'emg_benchmarking_ninapro-db3'
     exercises = True
