@@ -119,33 +119,16 @@ def evaluate_confidence_thresholding(model, loader, device, thresholds=[0.5, 0.9
 
     return confidence_accuracy, proportion_above_threshold
 
-def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime):
-    # Testing
-    # Initialize metrics for testing with macro and micro averaging
-    test_macro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="macro").to(device)
-    test_macro_precision_metric = torchmetrics.Precision(task="multiclass", num_classes=numGestures, average="macro").to(device)
-    test_macro_recall_metric = torchmetrics.Recall(task="multiclass", num_classes=numGestures, average="macro").to(device)
-    test_macro_f1_score_metric = torchmetrics.F1Score(task="multiclass", num_classes=numGestures, average="macro").to(device)
-    test_macro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="macro").to(device)
-    test_micro_acc_metric = torchmetrics.Accuracy(task="multiclass", num_classes=numGestures, average="micro").to(device)
-    test_micro_top5_acc_metric = torchmetrics.Accuracy(top_k=5, task="multiclass", num_classes=numGestures, average="micro").to(device)
-    test_macro_auroc = torchmetrics.AUROC(task="multiclass", num_classes=numGestures, average="macro").to(device)
-    test_macro_auprc = torchmetrics.AveragePrecision(task="multiclass", num_classes=numGestures, average="macro").to(device)
+def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime, testing_metrics):
+    
 
     # Assuming model, criterion, device, and test_loader are defined
     model.eval()
     test_loss = 0.0
 
     # Reset test metrics
-    test_macro_acc_metric.reset()
-    test_macro_precision_metric.reset()
-    test_macro_recall_metric.reset()
-    test_macro_f1_score_metric.reset()
-    test_macro_top5_acc_metric.reset()
-    test_micro_acc_metric.reset()
-    test_micro_top5_acc_metric.reset()
-    test_macro_auroc.reset()
-    test_macro_auprc.reset()
+    for test_metric in testing_metrics:
+        test_metric.reset()
 
     pred = []
     true = []
@@ -155,69 +138,72 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
         for X_batch, Y_batch in test_loader:
             X_batch = X_batch.to(device).to(torch.float32)
             Y_batch = Y_batch.to(device).to(torch.float32)
-            Y_batch_long = torch.argmax(Y_batch, dim=1)
+
+            if args.force_regression:
+                Y_batch_long = Y_batch
+            else: 
+                Y_batch_long = torch.argmax(Y_batch, dim=1) 
 
             output = model(X_batch)
             if isinstance(output, dict):
                 output = output['logits']
             pred.extend(torch.argmax(output, dim=1).cpu().detach().numpy())
             true.extend(Y_batch_long.cpu().detach().numpy())
-            outputs_all.append(output)
+
+            if not args.force_regression:
+                outputs_all.append(output)
+
 
             test_loss += criterion(output, Y_batch).item()
-            test_macro_acc_metric(output, Y_batch_long)
-            test_macro_precision_metric(output, Y_batch_long)
-            test_macro_recall_metric(output, Y_batch_long)
-            test_macro_f1_score_metric(output, Y_batch_long)
-            test_macro_top5_acc_metric(output, Y_batch_long)
-            test_micro_acc_metric(output, Y_batch_long)
-            test_micro_top5_acc_metric(output, Y_batch_long)
-            # test_macro_auroc(output, Y_batch_long)
-            # test_macro_auprc(output, Y_batch_long)
+            for test_metric in testing_metrics:
+                if test_metric.name != "Macro_AUROC" and test_metric.name != "Macro_AUPRC":
+                    test_metric(output, Y_batch_long)
 
-    outputs_all = torch.cat(outputs_all, dim=0).to(device)
-    true_torch = torch.tensor(true).to(device)
+            
 
-    test_macro_auroc(outputs_all, true_torch)
-    test_macro_auprc(outputs_all, true_torch)
+    if not args.force_regression: 
+        outputs_all = torch.cat(outputs_all, dim=0).to(device)
+        true_torch = torch.tensor(true).to(device)
+
+        test_macro_auroc = next(metric for metric in testing_metrics if metric.name == "Macro_AUROC")
+        test_macro_auprc = next(metric for metric in testing_metrics if metric.name == "Macro_AUPRC")
+
+        test_macro_auroc(outputs_all, true_torch)
+        test_macro_auprc(outputs_all, true_torch)
 
     # Calculate average loss and metrics
     test_loss /= len(test_loader)
-    test_macro_acc = test_macro_acc_metric.compute()
-    test_macro_precision = test_macro_precision_metric.compute()
-    test_macro_recall = test_macro_recall_metric.compute()
-    test_macro_f1_score = test_macro_f1_score_metric.compute()
-    test_macro_top5_acc = test_macro_top5_acc_metric.compute()
-    test_micro_acc = test_micro_acc_metric.compute()
-    test_micro_top5_acc = test_micro_top5_acc_metric.compute()
-    test_macro_auroc_score = test_macro_auroc.compute()
-    test_macro_auprc_score = test_macro_auprc.compute()
 
-    tpr_results = evaluate_model_tpr_at_fpr(model, test_loader, device, numGestures)
-    fpr_results = evaluate_model_fpr_at_tpr(model, test_loader, device, numGestures)
-    confidence_levels, proportions_above_confidence_threshold = evaluate_confidence_thresholding(model, test_loader, device)
+    testing_metrics_values = {metric.name: metric.compute() for metric in testing_metrics}
 
-    print(f"Test Loss: {test_loss:.4f} | Test Macro Accuracy: {test_macro_acc:.4f} | Test Micro Accuracy: {test_micro_acc:.4f}")
-    print(f"Test Macro Precision: {test_macro_precision:.4f} | Test Macro Recall: {test_macro_recall:.4f} | Test Macro F1 Score: {test_macro_f1_score:.4f} | Test Macro Top-5 Accuracy: {test_macro_top5_acc:.4f}")
-    print(f"Test Micro Top-5 Accuracy: {test_micro_top5_acc:.4f}")
-    print(f"Test Macro AUROC: {test_macro_auroc_score:.4f}")
-    print(f"Test Macro AUPRC: {test_macro_auprc_score:.4f}")
+    if not args.force_regression: 
+        tpr_results = evaluate_model_tpr_at_fpr(model, test_loader, device, numGestures)
+        fpr_results = evaluate_model_fpr_at_tpr(model, test_loader, device, numGestures)
+        confidence_levels, proportions_above_confidence_threshold = evaluate_confidence_thresholding(model, test_loader, device)
+
+
+    testing_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in testing_metrics_values.items())
+
+    print(f"Test Metrics: {testing_metrics_str}")
 
     wandb.log({
         "test/Loss": test_loss,
-        "test/Macro Accuracy": test_macro_acc,
-        "test/Micro Accuracy": test_micro_acc,
-        "test/Macro Precision": test_macro_precision,
-        "test/Macro Recall": test_macro_recall,
-        "test/Macro F1": test_macro_f1_score,
-        "test/Macro Top-5 Accuracy": test_macro_top5_acc,
-        "test/Micro Top-5 Accuracy": test_micro_top5_acc,
-        "test/Macro AUROC": test_macro_auroc_score,
-        "test/Macro AUPRC": test_macro_auprc_score,
+
+        **{
+            f"train/{name}": value.item() 
+            for name, value in testing_metrics_values.items() 
+            if name != 'R2Score_RawValues'
+        },
+        **{
+            f"train/R2Score_RawValues_{i+1}": v.item() 
+            for name, value in testing_metrics_values.items() 
+            if name == 'R2Score_RawValues'
+            for i, v in enumerate(value)
+        },
         # **{f"tpr_at_fixed_fpr/Test TPR at {fpr} FPR - Gesture {idx}": tpr for fpr, tprs in tpr_results.items() for idx, tpr in enumerate(tprs)},
-        **{f"tpr_at_fixed_fpr/Average Test TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()},
-        **{f"fpr_at_fixed_tpr/Average Test FPR at {tpr} TPR": np.mean(fprs) for tpr, fprs in fpr_results.items()},
-        **{f"confidence_level_accuracies/Test Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()},
-        **{f"proportion_above_confidence_threshold/Test Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()}
+        **({f"tpr_at_fixed_fpr/Average Test TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not args.force_regression else {}),
+        **({f"fpr_at_fixed_tpr/Average Test FPR at {tpr} TPR": np.mean(fprs) for tpr, fprs in fpr_results.items()} if not args.force_regression else {}),
+        **({f"confidence_level_accuracies/Test Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not args.force_regression else {}),
+        **({f"proportion_above_confidence_threshold/Test Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not args.force_regression else {})
     })
 
