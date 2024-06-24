@@ -197,7 +197,7 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
 
 elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
     import utils_NinaproDB3 as utils
-    assert args.exercises == [1] or args.partial_dataset_ninapro or (args.exercises == [3] and args.force_regression), "Exercises C and D are not implemented for regression due to missing data."
+    assert args.exercises == [1] or args.partial_dataset_ninapro or (args.exercises == [3] and args.force_regression), "Exercise C cannot be used for classification due to missing data."
     print(f"The dataset being tested is ninapro-db3")
     project_name = 'emg_benchmarking_ninapro-db3'
     exercises = True
@@ -205,13 +205,14 @@ elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_
         raise ValueError("leave-one-session-out not implemented for ninapro-db3; only one session exists")
     
     if args.force_regression:
-        print("NOTE: Subject 10 is missing gesture data for exercise 3. Because of this, subject is ignored for regression and subject 11 is relabeled as subject 10.")
+        print("NOTE: Subject 10 is missing gesture data for exercise 3 and cannot be used for regression. This is done automatically.")
         MISSING_SUBJECT = 10 # subject 10 missing most force data
+    
+    assert not(args.force_regression and args.leftout_subject == 10), "Subject 10 is missing gesture data for exercise 3 and cannot be used. Please choose another subject."
 
-    assert not (args.force_regression and args.leftout_subject == 11), "Subject 11 is relabeled as participant 10 in regression "
-
-    if args.force_regression and args.leftout_subject == 10:
-        print("NOTE: This is equivalent to leaving out subject 11 from the dataset (since subject 10 is ignored for regression).")
+    if args.force_regression and args.leftout_subject == 11: 
+        args.leftout_subject == 10
+        # subject 10 is missing force data and is deleted internally 
 
     args.dataset = 'ninapro-db3'
 
@@ -375,12 +376,6 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
-
-
-# # NinaproDB3 is missing gesture data for participant 10 
-# if args.force_regression and args.dataset == "ninapro-db3":
-#     utils.num_subjects -= 1
     
 if exercises:
     emg = []
@@ -399,15 +394,16 @@ if exercises:
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
             if (args.target_normalize > 0):
-                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, exercise)
+                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, exercise, args.exercises)
                 emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
 
             else:
-                emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
+                emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
             
             emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
             
-            labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
+            labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args.exercises]*utils.num_subjects)))
+
             labels.append(labels_async.get())
 
             if args.force_regression:
@@ -505,9 +501,6 @@ if exercises:
     labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
     if args.force_regression:
         forces = [torch.from_numpy(forces_np) for forces_np in new_forces]
-
-
-    # 
 
 else: # Not exercises
 
@@ -986,11 +979,11 @@ else:
 
             if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices:
                 if args.proportion_data_from_training_subjects<1.0:
-                    X_train_temp, _, Y_train_temp, _, label_train_temp, _ = tts.train_test_split(X_train_temp, Y_train_temp, label_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                    X_train_temp, _, Y_train_temp, _, label_train_temp, _ = tts.train_test_split(X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                         
                 if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
                     X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled, label_pretrain_labeled, label_pretrain_unlabeled  = tts.train_test_split(
-                        X_train_temp, Y_train_temp, label_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                     X_pretrain.append(np.array(X_pretrain_labeled))
                     Y_pretrain.append(np.array(Y_pretrain_labeled))
                     label_pretrain.append(np.array(label_pretrain_labeled))
@@ -1004,7 +997,7 @@ else:
             elif i in left_out_subject_first_n_sessions_indices:
                 if args.proportion_unlabeled_data_from_leftout_subject>0 and args.turn_on_unlabeled_domain_adaptation:
                     X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled, label_finetune_labeled, label_finetune_unlabeled = tts.train_test_split(
-                        X_train_temp, Y_train_temp, label_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                     X_finetune.append(np.array(X_finetune_labeled))
                     Y_finetune.append(np.array(Y_finetune_labeled))
                     label_finetune.append(np.array(label_finetune_labeled))
@@ -1185,11 +1178,11 @@ else:
                 current_data, _, current_y, _, current_labels, _ = model_selection.train_test_split(current_data, current_y, current_labels, train_size=proportion_to_keep, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                     
             if args.proportion_data_from_training_subjects<1.0:
-                current_data, _, current_y, _, current_labels, _ = tts.train_test_split(current_data, current_y, current_labels, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                current_data, _, current_y, _, current_labels, _ = tts.train_test_split(current_data, current_y, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
 
             if args.proportion_unlabeled_data_from_training_subjects>0:
                 X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled, label_train_labeled, label_train_unlabeled = tts.train_test_split(
-                    current_data, current_y, current_labels, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                    current_data, current_y, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                 
                 current_data = X_train_labeled
                 current_labels = label_train_labeled
@@ -1225,7 +1218,7 @@ else:
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
                 if args.train_test_split_for_time_series:
                     X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject,label_validation_partial_leftout_subject= tts.train_test_split(
-                        X_validation, Y_validation, label_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
+                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
     
                 else:
                     X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject, label_validation_partial_leftout_subject = tts.train_test_split(
@@ -1245,7 +1238,7 @@ else:
                 if args.train_test_split_for_time_series:
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
                     Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
-                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, label_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
+                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
         
                 else:
                     X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
@@ -1366,9 +1359,9 @@ else:
             Y_train = labels[0]
 
         if args.train_test_split_for_time_series:
-            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, label_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=False)
+            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=False)
         else:
-            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, label_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=True)
+            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=True)
 
         X_train = torch.tensor(X_train).to(torch.float16)
         Y_train = torch.tensor(Y_train).to(torch.float16)
@@ -1387,9 +1380,9 @@ else:
     
 # get X_test and Y_test from splitting validation 50-50 with stratify
 if args.train_test_split_for_time_series:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, label_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False)
+    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False)
 else:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, label_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True)
+    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True)
 
 X_test = torch.from_numpy(X_test).to(torch.float16)
 Y_test = torch.from_numpy(Y_test).to(torch.float16)
@@ -1404,9 +1397,9 @@ print("Size of Y_test:      ", Y_test.shape) # (SAMPLE, GESTURE/FORCE)
 
 # get X_test and Y_test from splitting validation 50-50 with stratify
 if args.train_test_split_for_time_series:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, label_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False)
+    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False)
 else:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, label_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True)
+    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True)
 
 X_test = torch.from_numpy(X_test).to(torch.float16)
 Y_test = torch.from_numpy(Y_test).to(torch.float16)
@@ -1864,7 +1857,9 @@ utils.plot_first_fifteen_images(X_test, np.argmax(test.cpu().detach().numpy(), a
     
 def get_metrics(testing=True):
     """
-    Constructs training and validation metric arrays based on whether it is a regression or classification task. Also returns testing metrics if args.held_out_test.
+    Constructs training and validation metric arrays based on whether it is a regression or classification task. Also returns testing metrics based on testing flag.
+
+    All changes to metrics should be done here. 
     """
     def get_regression_metrics():
         regression_metrics = [
@@ -1960,8 +1955,11 @@ if args.turn_on_unlabeled_domain_adaptation:
     test_dataset = CustomDataset(X_test, Y_test, transform=resize_transform)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=utils.seed_worker, pin_memory=True)
     criterion = nn.CrossEntropyLoss()
+
+    _, _, testing_metrics = get_metrics()
+
     wandb.init(name=wandb_runname+"_unlab_test", project=project_name)
-    ml_utils.evaluate_model_on_test_set(semilearn_algorithm.model, test_loader, device, numGestures, criterion, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+    ml_utils.evaluate_model_on_test_set(semilearn_algorithm.model, test_loader, device, numGestures, criterion, args, testing_metrics)
     wandb.finish()
 
     if args.pretrain_and_finetune:
@@ -1994,7 +1992,7 @@ if args.turn_on_unlabeled_domain_adaptation:
         semilearn_algorithm.train()
 
         wandb.init(name=wandb_runname+"_unlab_finetune_test", project=project_name)
-        ml_utils.evaluate_model_on_test_set(semilearn_algorithm.model, test_loader, device, numGestures, criterion, gesture_labels, testrun_foldername, args, formatted_datetime, 'test')
+        ml_utils.evaluate_model_on_test_set(semilearn_algorithm.model, test_loader, device, numGestures, criterion, args, testing_metrics)
         wandb.finish()
 
 else: 
@@ -2452,9 +2450,7 @@ else:
 
         if args.pretrain_and_finetune:
             ### Finish the current run and start a new run for finetuning
-            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime, testing_metrics)
-
-            # just pass in the metrics 
+            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, args, testing_metrics)
 
             model.eval()
             with torch.no_grad():
@@ -2679,7 +2675,7 @@ else:
             wandb.save(f'model/modelParameters_{formatted_datetime}.pth')
 
             # Evaluate the model on the test set
-            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime, testing_metrics)
+            ml_utils.evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, args, testing_metrics)
 
         torch.cuda.empty_cache()  # Clear cache if needed
 

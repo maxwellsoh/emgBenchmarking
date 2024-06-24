@@ -119,8 +119,7 @@ def evaluate_confidence_thresholding(model, loader, device, thresholds=[0.5, 0.9
 
     return confidence_accuracy, proportion_above_threshold
 
-def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, utils, gesture_labels, testrun_foldername, args, formatted_datetime, testing_metrics):
-    
+def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterion, args, testing_metrics):
 
     # Assuming model, criterion, device, and test_loader are defined
     model.eval()
@@ -188,6 +187,7 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
 
     wandb.log({
         "test/Loss": test_loss,
+
 
         **{
             f"train/{name}": value.item() 

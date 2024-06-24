@@ -23,7 +23,7 @@ def train_test_split(
         train_size: Proportion to take from train. Defaults to None.
         random_state: Argument passed to skl. Defaults to None.
         shuffle: Argument passed to skl. Defaults to True.
-        stratify: Set used to . Defaults to None.
+        stratify: Set used to stratify. Assumed to be labels.
         force_regression (bool, optional): _description_. Defaults to False.
 
     Returns:
@@ -33,7 +33,6 @@ def train_test_split(
     if shuffle==False and stratify is not None:
         X_train_set = arrays[0]
         Y_train_set_og = arrays[1]
-        label_train_set_og = arrays[2]
 
         if train_size is None and test_size is None:
             train_size = 0.75
@@ -41,26 +40,25 @@ def train_test_split(
         assert (test_size is None) != (train_size is None), "Either test_size or train_size should be None"
 
         train_size = train_size or 1 - test_size
-        force_regression = (Y_train_set_og.shape[1] == 6)
 
-        # Assumes using labels for stratification
+        stratify_one_hot = False
+        y_one_hot = False
+        NUM_GESTURES = stratify.shape[1]
+
+        # If labels are one-hot-encoded, convert to 1D array      
         if stratify.shape[1] != 1:
+            stratify_one_hot = True
             stratify = np.argmax(stratify, axis=1)
-
         if not force_regression and Y_train_set_og.shape[1] != 1:
-            # if classification, convert labels to 1D array 
+            y_one_hot = True
             Y_train_set = np.argmax(Y_train_set_og, axis=1)
         else:
             Y_train_set = Y_train_set_og
 
-        if label_train_set_og.shape[1] != 1:
-            label_train_set = np.argmax(label_train_set_og, axis=1)
-        else:
-            label_train_set = label_train_set_og
+        label_train_set = stratify.clone()
 
-        # (gestures, number of window per gesture)
-        # each window is one gesture
-        unique, counts = np.unique(stratify, return_counts=True)
+        unique, counts = np.unique(stratify, return_counts=True) # (GESTURE, ITS WINDOWS)
+
         # split data for each class
         X_train = []
         X_test = []
@@ -68,9 +66,6 @@ def train_test_split(
         y_test = []
         label_train = []
         label_test = []
-
-        # for a gesture
-        # split by proportion of windows
 
         # takes proportion of windows for each gesture  
         train_size_for_each_class = np.round(train_size * counts).astype(int)
@@ -81,7 +76,7 @@ def train_test_split(
             # get indices for current class
             indices = np.where(stratify == key)[0]
             indices_train = indices[:train_size_for_current_class]
-            # get all data for current class
+            # get data for current class
             X_train_class = X_train_set[indices_train]
             y_train_class = Y_train_set[indices_train]
             label_train_class = label_train_set[indices_train]
@@ -105,17 +100,17 @@ def train_test_split(
         label_train = np.concatenate(label_train)
         label_test = np.concatenate(label_test)
         
-        # if Y_train_set is one-hot-encoded, turn results into one-hot-encoded
-        if not force_regression and Y_train_set_og.shape[1] != 1:
-            y_train = np.eye(len(np.unique(y_train)))[y_train]
-            y_test = np.eye(len(np.unique(y_test)))[y_test]
-
-        # if stratify (labels) is one-hot-encoded, turn results into one-hot-encoded
-        if label_train_set_og.shape[1] != 1:
-            label_train = np.eye(len(np.unique(label_train)))[label_train]
-            label_test = np.eye(len(np.unique(label_test)))[label_test]
+        # if input labels are one-hot-encoded, output labels are one-hot-encoded
+        if not force_regression and y_one_hot:
+            NUM_GESTURES = Y_train_set_og.shape[1] 
+            y_train = np.eye(NUM_GESTURES)[y_train]
+            y_test = np.eye(NUM_GESTURES)[y_test]
+        if stratify_one_hot:
+            label_train = np.eye(NUM_GESTURES)[label_train]
+            label_test = np.eye(NUM_GESTURES)[label_test]
         
     else: # shuffle=True or stratify=None
+        arrays = list(arrays) + [stratify]
         X_train, X_test, y_train, y_test, label_train, label_test = model_selection.train_test_split(
             *arrays,
             test_size=test_size,
