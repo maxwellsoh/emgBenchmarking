@@ -24,7 +24,7 @@ numGestures = 8
 fs = 1000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 50 #50 ms
+stepLen = int(50/1000*fs) #50 ms
 numElectrodes = 128
 num_subjects = 10 # 10 subjects with 2 sessions each
 cmap = mpl.colormaps['viridis']
@@ -80,7 +80,7 @@ def target_normalize (data, target_min, target_max, gesture):
     return data
 
 def window (e):
-    return e.unfold(dimension=0, size=wLen, step=50)
+    return e.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
 def filter(emg):
     # Butterworth bandpass filter
@@ -176,10 +176,10 @@ def getExtrema (n, proportion, lastSessionOnly=False):
     Args:
         n (int): subject number
         proportion: proportion of the windows to consider
-        lastSessionOnly (bool, optional): _description_. Defaults to False.
+        lastSessionOnly (bool, optional):. Defaults to False.
 
     Returns:
-        _type_: _description_
+        mins, maxes: mins[electrode][gesture] is min value of electrode for gesture across proportion of windows
     """
 
     mins = np.zeros((numElectrodes, numGestures))
