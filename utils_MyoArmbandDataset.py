@@ -83,6 +83,14 @@ def filter(emg):
 
 # partition data by channel; returns [# samples, # channels]
 def format_emg (data):
+    """Partition data by channel
+
+    Args:
+        data (_type_): _description_
+
+    Returns:
+        emg: (SAMPLES, CHANNELS)
+    """
     emg = np.zeros((len(data) // numElectrodes, numElectrodes))
     for i in range(len(data) // numElectrodes):
         for j in range(numElectrodes):
@@ -125,7 +133,18 @@ def getEMG (args):
     emg = filter(torch.cat(emg, dim=0))
     return emg
 
-def getExtrema (n, p):
+def getExtrema (n, proportion):
+    """Returns the min/max EMG values for each electrode per gesture over a proportion of the windows of data. 
+
+    Per gesture, accumulates data across each of its repetitions and windows this data. Then takes a proportion of the windows and calculates the min/max values for each electrode over these windows across all trials and time steps. 
+
+    Args:
+        n (int): subject number
+        proportion: proportion of the windows to consider
+
+    Returns:
+        mins, maxes: mins[electrode][gesture] is min value of electrode for gesture across proportion of windows
+    """
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
@@ -137,14 +156,22 @@ def getExtrema (n, p):
                 emg = np.fromfile(f'myoarmbanddataset/Female{n-1}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
             else:
                 emg = np.fromfile(f'myoarmbanddataset/Male{n-3}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
-            data.append(format_emg(np.array(emg, dtype=np.float32)).transpose())
 
-        data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
-        data = data[:, :int(len(data[0])*p)]
+            data.append(format_emg(np.array(emg, dtype=np.float32)).transpose()) # (4, CHANNEL, SAMPLE)
+
+        # concatenate acros repetitions 
+        data = np.concatenate([data[i] for i in range(len(data))], axis=-1) # (ELECTRODE, SAMPLE * 4)
+        data = data.transpose() # (TOTAL TIME STEPS, ELECTRODE)
+        tensor_data = torch.from_numpy(data)
+        windowed_data = tensor_data.unfold(dimension=0, size=wLenTimesteps, step=stepLen) # (WINDOW, CHANNEL, TIME STEP)
+
+        num_windows = np.round(len(windowed_data)*proportion).astype(int)
+        selected_windows = windowed_data[:num_windows]
 
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[j])
-            maxes[j][i] = np.max(data[j])
+            mins[j][i] = torch.min(selected_windows[:, j, :])
+            maxes[j][i] = torch.max(selected_windows[:, j, :])
+
     return mins, maxes
 
 def getLabels (n):
