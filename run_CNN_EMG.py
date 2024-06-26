@@ -1,43 +1,24 @@
-"""
-File: get_config.py
-Description: Parses either command line arguments (argparse) or a given yaml file (yaml) to configure a given run.  
-"""
+#!/usr/bin/env python
 import argparse
 import yaml
-import utils_OzdemirEMG as utils # needed for parser
+import subprocess
+import utils_MCS_EMG as utils # needed for parser
+import CNN_EMG
 
 def list_of_ints(arg):
-    """
-    Define a custom argument type for a list of integers.
-    """
-    return list(map(int, arg.split(',')))
+        """Define a custom argument type for a list of integers"""
+        return list(map(int, arg.split(',')))
 
-def override_with_config(args):
-    """
-    Overrides the default and manually passed in arguments with config file value passed in --config
-    """
-
-    print("passed in args.config:", args.config)
-    with open(args.config, "r") as file: 
-        data = yaml.safe_load(file)
-
-    delattr(args, "config")
-    arg_dict = args.__dict__
-    
-    for key in data:
-        arg_dict[key] = data[key]
-
-def initialize_parser():
-    """
-    Sets up the arg parser for CNN_EMG
+def parse_args():
+    """Defines argsparse and its arguments
     """
     # Create the parser
     parser = argparse.ArgumentParser(description="Include arguments for running different trials")
 
-    # Add argument for taking in config file
-    parser.add_argument("--config", type=str, required=False)
+    parser.add_argument('--config', type=str, help="Path to the config file.")
+    parser.add_argument('--table', type=int, help="Specify which table to replicate.")
     # Add argument for dataset
-    parser.add_argument('--dataset', help='dataset to test. Set to OzdemirEMG by default', default="OzdemirEMG")
+    parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
     # Add argument for doing leave-one-subject-out
     parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
     # Add argument for leftout subject
@@ -68,8 +49,8 @@ def initialize_parser():
     parser.add_argument('--exercises', type=list_of_ints, help='List the exercises of the 3 to load. The most popular for benchmarking seem to be 2 and 3. Can format as \'--exercises 1,2,3\'', default=[1, 2, 3])
     # Add argument for project suffix
     parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
-    # Add argument for full or partial dataset for Ozdemir EMG dataset
-    parser.add_argument('--full_dataset_ozdemir', type=utils.str2bool, help='whether or not to use the full dataset for Ozdemir EMG Dataset. Set to False by default.', default=False)
+    # Add argument for full or partial dataset for MCS EMG dataset
+    parser.add_argument('--full_dataset_mcs', type=utils.str2bool, help='whether or not to use the full dataset for MCS EMG Dataset. Set to False by default.', default=False)
     # Add argument for partial dataset for Ninapro DB2 and DB5
     parser.add_argument('--partial_dataset_ninapro', type=utils.str2bool, help='whether or not to use the partial dataset for Ninapro DB2 and DB5. Set to False by default.', default=False)
     # Add argument for using spectrogram transform
@@ -95,11 +76,11 @@ def initialize_parser():
     # Add argument to leve n subjects out randomly
     parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
     # use target domain for normalization
-    parser.add_argument('--target_normalize', type=utils.str2bool, help='use a leftout window for normalization. Set to False by default.', default=False)
+    parser.add_argument('--target_normalize', type=float, help='use a poportion of leftout data for normalization. Set to 0 by default.', default=0.0)
     # Test with transfer learning by using some data from the validation dataset
     parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
     # Add argument for cross validation for time series
-    parser.add_argument('--cross_validation_for_time_series', type=utils.str2bool, help='whether or not to use cross validation for time series. Set to False by default.', default=False)
+    parser.add_argument('--train_test_split_for_time_series', type=utils.str2bool, help='whether or not to use data split for time series. Set to False by default.', default=False)
     # Add argument for proportion of left-out-subject data to use for transfer learning
     parser.add_argument('--proportion_transfer_learning_from_leftout_subject', type=float, help='proportion of left-out-subject data to use for transfer learning. Set to 0.25 by default.', default=0.25)
     # Add argument for amount for reducing number of data to generate for transfer learning
@@ -119,33 +100,97 @@ def initialize_parser():
     # Add argument to specify algorithm to use for unlabeled domain adaptation
     parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "fixmatch" by default.', default="fixmatch")
     # Add argument to specify proportion from left-out-subject to keep as unlabeled data
-    parser.add_argument('--proportion_unlabeled_data_from_leftout_subject', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75)
+    parser.add_argument('--proportion_unlabeled_data_from_leftout_subject', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75) # TODO: fix, we note that this affects leave-one-session-out even when fully supervised
     # Add argument to specify batch size
     parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by default.', default=64)
     # Add argument for whether to use unlabeled data for subjects used for training as well
     parser.add_argument('--proportion_unlabeled_data_from_training_subjects', type=float, help='proportion of data from training subjects to use as unlabeled data. Set to 0.0 by default.', default=0.0)
     # Add argument for cutting down amount of total data for training subjects
     parser.add_argument('--proportion_data_from_training_subjects', type=float, help='proportion of data from training subjects to use. Set to 1.0 by default.', default=1.0)
+    # Add argument for loading unlabeled data from flexwear-hd dataset
+    parser.add_argument('--load_unlabeled_data_flexwearhd', type=utils.str2bool, help='whether or not to load unlabeled data from FlexWear-HD dataset. Set to False by default.', default=False)
 
     # Parse the arguments
     args = parser.parse_args()
     return args
 
-def get():
-    """
-    Parses either command line arguments (argparse) or a given yaml file (yaml) to configure a given run.  
+def load_config(args, config_path, return_extra=False):
+    # return_config because sometimes you want to preserve the original yaml files (in particular when making tables your config passes more values (start and end) that aren't needed to actually pass to CNN_EMG.py)
 
-    Returns:
-        args: Final list of args and their values. 
-    """
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
 
-    args = initialize_parser()
-    if args.config:
-        override_with_config(args)
+    # override args values with config values
+    if 'current_dataset' in config:
+        config['dataset'] = config['current_dataset']
+        del config['current_dataset']
+
+    args_dict = vars(args)
+    extra_args = {}
+
+    for key in config:
+        if key in args_dict:
+            args_dict[key] = config[key]
+        else:
+            extra_args[key] = config[key]
+
+    if return_extra:
+        return args, extra_args
     return args
 
+
+
+def run_command(args):
     
-
+    CNN_EMG.main(args)
     
+    
+    # new_string = [f"--{key}={value}" for key, value in params.items()]
+    # print(new_string)
 
+    # cmd = ["python", "CNN_EMG.py"] + new_string
+    # subprocess.run(cmd)
 
+def replicate_table(args, extra_args, table_num):
+
+    if table_num == 1:
+        
+        NUM_LINES = 1
+        
+        starting_index = extra_args['starting_index'] 
+        ending_index = extra_args['ending_index'] 
+        number_windows = extra_args['number_windows']   
+        
+        for subj in range(starting_index, ending_index + 1):
+
+            for line in range(NUM_LINES): 
+                # preset parameters for the given line
+                line_args = parse_args()
+                line_args = load_config(args, f'config/table{table_num}_{line+1}.yaml')
+
+                # override the variable parameters
+                line_args.leftout_subject = subj  
+                run_command(line_args)
+
+def main():
+    args = parse_args()
+
+    print("args.config", args.config)
+    print("args.table", args.table)
+
+    if args.config:
+        args, extra_args = load_config(args, args.config, return_extra=True)
+
+        # but then the problelm is that I need to return the new values
+        if args.table:
+            replicate_table(args, extra_args, args.table)
+        
+        else:
+            assert extra_args == {}, "ERROR: Passing in extra arguments."
+            run_command(args)
+
+    else: # command line arguments
+        run_command(args)
+
+if __name__ == "__main__":
+    main()

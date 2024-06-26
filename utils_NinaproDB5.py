@@ -15,11 +15,15 @@ import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
+from scipy.signal import spectrogram, stft
+import pywt
+import fcwt
 
 fs = 200 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 10 #50 ms
+stepLen = 50 #50 ms
+stepLen = int(stepLen / 1000 * fs)
 numElectrodes = 16
 num_subjects = 10
 cmap = mpl.colormaps['viridis']
@@ -95,30 +99,51 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance (restimulus):
+def balance(restimulus):
     numZero = 0
     indices = []
-    # indices indicates the indices to keep
-    # this function will keep the first 380 zeros samples and all other restimulus indices that are not zero
-    for x in range (len(restimulus)):
-        # torch.chunk attempts to split a tensor into the specified number of chunks
-        L = torch.chunk(restimulus[x], 2, dim=1) # L : (CHUNK, 1, VALUE)
-        if torch.equal(L[0], L[1]): # Checks if first half of sample is equal to second half
-            if L[0][0][0] == 0:
-                if (numZero < 380):
-                    #print("working")
-                    indices += [x]
+    count_dict = {}
+    
+    # First pass: count the occurrences of each unique tensor
+    for x in range(len(restimulus)):
+        unique_elements = torch.unique(restimulus[x])
+        if len(unique_elements) == 1:
+            element = unique_elements.item()
+            if element in count_dict:
+                count_dict[element] += 1
+            else:
+                count_dict[element] = 1
+    
+    # Calculate average count of non-zero elements
+    non_zero_counts = [count for key, count in count_dict.items() if key != 0]
+    if non_zero_counts:
+        avg_count = sum(non_zero_counts) / len(non_zero_counts)
+    else:
+        avg_count = 0  # Handle case where there are no non-zero unique elements
+
+    # Second pass: apply the threshold logic
+    for x in range(len(restimulus)):
+        unique_elements = torch.unique(restimulus[x])
+        if len(unique_elements) == 1:
+            if unique_elements.item() == 0:
+                if numZero < avg_count:
+                    indices.append(x)
                 numZero += 1
             else:
-                indices += [x]
+                indices.append(x)
+                
     return indices
 
-def contract(R):
+def contract(R, unfold=True):
     numGestures = R.max() + 1
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
-    for x in range(len(R)):
-        labels[x][int(R[x][0][0])] = 1.0
+    if unfold:
+        for x in range(len(R)):
+            labels[x][int(R[x][0][0])] = 1.0
+    else:
+        for x in range(len(R)):
+            labels[x][int(R[x][0])] = 1.0
     return labels
 
 def filter(emg):
@@ -130,24 +155,86 @@ def filter(emg):
     b, a = iirnotch(w0=50.0, Q=0.0001, fs=200.0)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
-def getRestim (n: int, exercise: int = 2):
+def getRestim (n: int, exercise: int = 2, unfold=True):
     # read hdf5 file 
     restim = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/restimulusS{n}_E{exercise}.hdf5')
     restim = torch.tensor(restim.values)
     # unfold extrcts sliding local blocks from a batched input tensor
-    return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+    if (unfold):
+        return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+    return restim
 
-def getEMG(args):
-    n, exercise = args
-    restim = getRestim(n, exercise)
+def target_normalize (data, target_min, target_max, restim):
+    source_min = np.zeros(numElectrodes, dtype=np.float32)
+    source_max = np.zeros(numElectrodes, dtype=np.float32)
+
+    resize = min(len(data), len(restim))
+    data = data[:resize]
+    restim = restim[:resize]
+    
+    for i in range(numElectrodes):
+        source_min[i] = np.min(data[:, i])
+        source_max[i] = np.max(data[:, i])
+
+    data_norm = np.zeros(data.shape, dtype=np.float32)
+    for gesture in range(target_min.shape[1]):
+        if target_min[0][gesture] == 0 and target_max[0][gesture] == 0:
+            continue
+        for i in range(numElectrodes):
+            data_norm[:, i] = data_norm[:, i] + (restim[:, 0] == gesture) * (((data[:, i] - source_min[i]) / (source_max[i] 
+            - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture])
+    return data_norm
+
+def getEMG(args, unfold=True):
+    if (len(args) == 2):
+        n, exercise = args
+        leftout = None
+    else:
+        n, exercise, target_min, target_max, leftout = args
+
+    
     emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E{exercise}.hdf5')
+    if not(unfold):
+        return np.array(emg.values)
+    
+    if (leftout != None and n != leftout):
+        emg = target_normalize(emg, target_min, target_max, np.array(getRestim(n, exercise, unfold=False)))
+
+    restim = getRestim(n, exercise, unfold=True)
     emg = torch.tensor(emg.values)
     return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
 
-def getLabels (args):
+def getExtrema (n, p, exercise):
+    emg = getEMG((n, exercise), unfold=False)
+    labels = getLabels((n, exercise), unfold=False)
+    
+    resize = min(len(emg), len(labels))
+    emg = emg[:resize]
+    labels = labels[:resize]
+
+    mins = np.zeros((numElectrodes, labels.shape[1]))
+    maxes = np.zeros((numElectrodes, labels.shape[1]))
+
+    for i in range(labels.shape[1]):
+        subEMG = emg[labels[:, i] == 1.0]
+        subEMG = subEMG[:int(len(subEMG)*p)]
+
+        # set the min and max for all electrodes to 0
+        if len(subEMG) == 0:
+            continue
+        
+        # subEMG will be [# timesteps, # electrodes]
+        for j in range(numElectrodes):
+            mins[j][i] = np.min(subEMG[:, j])
+            maxes[j][i] = np.max(subEMG[:, j])
+    return mins, maxes
+
+def getLabels (args, unfold=True):
     n, exercise = args
-    restim = getRestim(n, exercise)
-    return contract(restim[balance(restim)])
+    restim = getRestim(n, exercise, unfold)
+    if unfold:
+        return contract(restim[balance(restim)])
+    return contract(restim, False)
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
@@ -181,24 +268,24 @@ def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, nati
     image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
     image = np.transpose(image_data, (2, 0, 1))
     
-    # Split image and resize
-    imageL, imageR = np.split(image, 2, axis=2)
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
+    # Resize image
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
                                interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    image = resize(torch.from_numpy(image))
     
     # Get max and min values after interpolation
-    max_val = max(imageL.max(), imageR.max())
-    min_val = min(imageL.min(), imageR.min())
+    max_val = image.max()
+    min_val = image.min()
     
     # Contrast normalize again after interpolation
-    imageL, imageR = map(lambda img: (img - min_val) / (max_val - min_val), (imageL, imageR))
+    image = (image - min_val) / (max_val - min_val)
     
     # Normalize with standard ImageNet normalization
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    imageL, imageR = map(normalize, (imageL, imageR))
+    image = normalize(image)
     
-    return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
+    return image.numpy().astype(np.float32)
+
 
 def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
@@ -225,6 +312,131 @@ def process_optimized_makeOneMagnitudeImageChunk(args_tuple):
         images[i] = optimized_makeOneMagnitudeImage(*args_tuple[i])
     return images
 
+def closest_factors(num):
+    # Find factors of the number
+    factors = [(i, num // i) for i in range(1, int(np.sqrt(num)) + 1) if num % i == 0]
+    # Sort factors by their difference, so the closest pair is first
+    factors.sort(key=lambda x: abs(x[0] - x[1]))
+    return factors[0]
+
+def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
+    # Reshape and preprocess EMG data
+    data = data.reshape(length, width).astype(np.float16)
+    highest_cwt_scale = wLenTimesteps
+    scales = np.arange(1, highest_cwt_scale)
+
+    # Pre-allocate the array for the CWT coefficients
+    grid_width, grid_length = closest_factors(numElectrodes)
+
+    length_to_resize_to = min(native_resnet_size, grid_width * highest_cwt_scale)
+    width_to_transform_to = min(native_resnet_size, grid_length * width)
+
+    time_frequency_emg = np.zeros((length * (highest_cwt_scale), width))
+
+    # Perform Continuous Wavelet Transform (CWT)
+    for i in range(length):
+        frequencies, coefficients = fcwt.cwt(data[i, :], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
+        coefficients_abs = np.abs(coefficients) 
+        # coefficients_dB = 10 * np.log10(coefficients_abs + 1e-12)  # Avoid log(0)
+        time_frequency_emg[i * (highest_cwt_scale):(i + 1) * (highest_cwt_scale), :] = coefficients_abs
+
+    # Convert to PyTorch tensor and normalize
+    emg_sample = torch.tensor(time_frequency_emg).float()
+    emg_sample = emg_sample.view(numElectrodes, wLenTimesteps, -1)
+
+    # Reshape into blocks
+    
+    blocks = emg_sample.view(grid_width, grid_length, wLenTimesteps, -1)
+
+    # Combine the blocks into the final image
+    rows = [torch.cat([blocks[i, j] for j in range(grid_length)], dim=1) for i in range(grid_width)]
+    combined_image = torch.cat(rows, dim=0)
+
+    # Normalize combined image
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
+
+    # Convert to RGB and resize
+    data_converted = cmap(combined_image)
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+
+    resize = transforms.Resize([length_to_resize_to, width_to_transform_to],
+                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp and normalize
+    image_clamped = torch.clamp(image_resized, 0, 1)
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    # Return final image as a NumPy array
+    final_image = image_normalized.numpy().astype(np.float16)
+    return final_image
+
+def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
+    spectrogram_window_size = wLenTimesteps // 4
+    emg_sample_unflattened = data.reshape(numElectrodes, -1)
+    number_of_frequencies = wLenTimesteps 
+
+    # Pre-allocate the array for the CWT coefficients
+    grid_width, grid_length = closest_factors(numElectrodes)
+
+    length_to_resize_to = min(native_resnet_size, grid_width * number_of_frequencies)
+    width_to_transform_to = min(native_resnet_size, grid_length * width)
+    
+    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size - 1, noverlap=spectrogram_window_size-2, nfft=number_of_frequencies - 1) # defaults to hann window
+    Sxx_abs = np.abs(Sxx) # small constant added to avoid log(0)
+    # Sxx_dB = 10 * np.log10(np.abs(Sxx_abs) + 1e-12)
+    emg_sample = torch.from_numpy(Sxx_abs)
+    emg_sample -= torch.min(emg_sample)
+    emg_sample /= torch.max(emg_sample)
+    emg_sample = emg_sample.reshape(emg_sample.shape[0]*emg_sample.shape[1], emg_sample.shape[2])
+    # flip spectrogram vertically for each electrode
+    for i in range(numElectrodes):
+        num_frequencies = len(frequencies)
+        emg_sample[i*num_frequencies:(i+1)*num_frequencies, :] = torch.flip(emg_sample[i*num_frequencies:(i+1)*num_frequencies, :], dims=[0])
+
+    # Convert to PyTorch tensor and normalize
+    emg_sample = torch.tensor(emg_sample).float()
+    emg_sample = emg_sample.view(numElectrodes, len(frequencies), -1)
+
+    # Reshape into blocks
+    
+    blocks = emg_sample.view(grid_width, grid_length, len(frequencies), -1)
+
+    # Combine the blocks into the final image
+    rows = [torch.cat([blocks[i, j] for j in range(grid_length)], dim=1) for i in range(grid_width)]
+    combined_image = torch.cat(rows, dim=0)
+
+    # Normalize combined image
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
+
+    data = combined_image.numpy()
+
+    data_converted = cmap(data)
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+
+    width_to_transform_to = min(native_resnet_size, image.shape[-1])
+    
+    resize = transforms.Resize([length_to_resize_to, width_to_transform_to],
+                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp between 0 and 1 using torch.clamp
+    image_clamped = torch.clamp(image_resized, 0, 1)
+
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    final_image = image_normalized.numpy().astype(np.float32)
+
+    return final_image
+
+
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None,
               turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
 
@@ -232,6 +444,7 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
     else:
         emg = np.array(emg.view(len(emg), length*width))    # Use RMS preprocessing
+        
     if turn_on_rms:
         emg = emg.reshape(len(emg), length, width)
         # Reshape data for RMS calculation: (SAMPLES, 16, 5, 10)
@@ -272,8 +485,10 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
     chunk_size = len(args) // (multiprocessing.cpu_count() // 2)
     arg_chunks = [args[i:i + chunk_size] for i in range(0, len(args), chunk_size)]
     images = []
-    for i in tqdm(range(len(arg_chunks)), desc="Creating Images in Chunks"):
-        images.extend(process_optimized_makeOneImageChunk(arg_chunks[i]))
+
+    if not turn_on_magnitude and not turn_on_spectrogram and not turn_on_cwt and not turn_on_hht:
+        for i in tqdm(range(len(arg_chunks)), desc="Creating Images in Chunks"):
+            images.extend(process_optimized_makeOneImageChunk(arg_chunks[i]))
 
     if turn_on_magnitude:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size, global_min, global_max) for i in range(len(emg))]
@@ -284,14 +499,23 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
             images_magnitude.extend(process_optimized_makeOneMagnitudeImageChunk(arg_chunks[i]))
         images = np.concatenate((images, images_magnitude), axis=2)
 
-    if turn_on_cwt:
-        raise NotImplementedError("CWT is not implemented yet.")
+    elif turn_on_spectrogram:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_spectrogram = []
+        for i in tqdm(range(len(emg)), desc="Creating Spectrogram Images"):
+            images_spectrogram.append(optimized_makeOneSpectrogramImage(*args[i]))
+        images = images_spectrogram
     
-    if turn_on_spectrogram:
-        raise NotImplementedError("Spectrogram is not implemented yet.")
-    
-    if turn_on_hht:
-        raise NotImplementedError("HHT is not implemented yet.")
+    elif turn_on_cwt:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_cwt_list = []
+        # with multiprocessing.Pool(processes=5) as pool:
+        for i in tqdm(range(len(emg)), desc="Creating CWT Images"):
+            images_cwt_list.append(optimized_makeOneCWTImage(*args[i]))
+        images = images_cwt_list
+        
+    elif turn_on_hht:
+        raise NotImplementedError("HHT is not implemented yet")
     
     return images
 
@@ -392,18 +616,13 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     # Create subplots
     fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 15))
 
-    # resize average images to 224 x 224
-    resize = transforms.Resize([224, 224], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-
     print(f"Plotting first fifteen {partition_name} images...")
     for i in range(total_gestures):
         # Find indices of the first 15 images for gesture i
         gesture_indices = np.where(true_np == i)[0][:rows_per_gesture]
 
-        current_images = torch.tensor(np.array([resize(img) for img in image_data[gesture_indices]]))
-        
         # Select and denormalize only the required images
-        gesture_images = denormalize(current_images).cpu().detach().numpy()
+        gesture_images = denormalize(transforms.Resize((224,224))(image_data[gesture_indices])).cpu().detach().numpy()
 
         for j in range(len(gesture_images)):  # len(gesture_images) is no more than rows_per_gesture
             ax = axs[j, i]

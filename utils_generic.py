@@ -20,20 +20,45 @@ import pywt
 import scipy
 import emd
 import fcwt
+import os
 
-fs = 2000 #Hz
+# image mapping
+cmap = mpl.colormaps['jet']
+normalize_for_colormap_benchmark = mpl.colors.Normalize(vmin=-60, vmax=-20)
+
+# frequency
+fs = 1000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 100 #50 ms
-numElectrodes = 4
-num_subjects = 40
-normalize_for_colormap_benchmark = mpl.colors.Normalize(vmin=-60, vmax=-20)
-cmap = mpl.colormaps['jet']
-# Gesture Labels
-gesture_labels_partial = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction'] 
-gesture_labels_full = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
-gesture_labels = gesture_labels_full
-numGestures = len(gesture_labels)
+stepLen = 50 # ms; increase to reduce data size for large dataset
+stepLen = int(stepLen / 1000 * fs)
+
+# dataset attributes
+dataset_name = ""
+num_subjects = 0
+numElectrodes = 0
+numGestures = 0
+gesture_labels = []
+
+
+def initialize(name):
+    global fs, wLenTimesteps, stepLen, dataset_name, num_subjects, numElectrodes, numGestures, gesture_labels
+    dataset_name = name
+    root = f'DatasetsProcessed_hdf5/{dataset_name}/'
+
+    fs = float(open(root + 'frequency.txt', 'r').read())
+    wLenTimesteps = int(wLen / 1000 * fs)
+    stepLen = int(stepLen / 1000 * fs)
+
+    files = os.listdir(f'DatasetsProcessed_hdf5/{dataset_name}')
+    files.remove('frequency.txt')
+    num_subjects = len(files)
+
+    f = h5py.File(f'DatasetsProcessed_hdf5/{dataset_name}/p{1}/participant_{1}.hdf5', 'r')
+    gesture_labels = list(f.keys())
+    numGestures = len(gesture_labels)
+    numElectrodes = f[gesture_labels[0]].shape[1]
+
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -77,22 +102,30 @@ def contract(R):
 
 def filter(emg):
     # sixth-order Butterworth bandpass filter
-    b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=2000.0)
+    if fs > 500.0:
+        b, a = butter(N=3, Wn=[5.0, 500.0], btype='bandpass', analog=False, fs=fs)
+    else:
+        b, a = butter(N=3, Wn=5, btype='highpass', analog=False, fs=fs)
     emgButter = torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 
     #second-order notch filter at 50 Hz
-    b, a = iirnotch(w0=50.0, Q=0.0001, fs=2000.0)
+    b, a = iirnotch(w0=50.0, Q=0.0001, fs=fs)
     return torch.from_numpy(np.flip(filtfilt(b, a, emgButter),axis=0).copy())
 
+# data is [# channels, # timesteps]
+# target min/max is [# channels, # gestures]
 def target_normalize (data, target_min, target_max, gesture):
-    source_min = np.zeros(len(data[0]), dtype=np.float32)
-    source_max = np.zeros(len(data[0]), dtype=np.float32)
-    for i in range(len(data[0])):
-        source_min[i] = np.min(data[:, i])
-        source_max[i] = np.max(data[:, i])
+    source_min = np.zeros(numElectrodes, dtype=np.float32)
+    source_max = np.zeros(numElectrodes, dtype=np.float32)
+    for i in range(numElectrodes):
+        source_min[i] = np.min(data[i])
+        source_max[i] = np.max(data[i])
+        # prevents 1 divide by 0 error
+        if (source_max[i] == source_min[i]):
+            source_max[i] += 1
 
-    for i in range(len(data[0])):
-        data[:, i] = ((data[:, i] - source_min[i]) / (source_max[i] 
+    for i in range(numElectrodes):
+        data[i] = ((data[i] - source_min[i]) / (source_max[i] 
         - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture]
     return data
 
@@ -101,41 +134,46 @@ def getEMG (args):
         n = args
     else:
         n = args[0]
-        target_max = args[1]
-        target_min = args[2]
+        target_min = args[1]
+        target_max = args[2]
         leftout = args[3]
 
     assert n >= 1 and n <= num_subjects
-    file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
+    file = h5py.File(f'DatasetsProcessed_hdf5/{dataset_name}/p{n}/participant_{n}.hdf5', 'r')
     emg = []
     for i, gesture in enumerate(gesture_labels):
         assert "Gesture" + gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
-        data = np.array(file["Gesture" + gesture])
+        # [# repetitions, # electrodes, # timesteps]
+        data = np.array(file[gesture])
+        
         if (type(args) != int and n != leftout):
-            data = target_normalize(data, target_min, target_max, i)
+            for j in range(len(data)):
+                data[j] = target_normalize(data[j], target_min, target_max, i)
+        
         data = filter(torch.from_numpy(data)).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
         emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)).to(torch.float16))
     return torch.cat(emg, dim=0)
 
-# assumes first of the 4 repetitions accessed
-def getExtrema (n):
+def getExtrema (n, p):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
     assert n >= 1 and n <= num_subjects
-    file = h5py.File(f'DatasetsProcessed_hdf5/OzdemirEMG/p{n}/flattened_participant_{n}.hdf5', 'r')
+    file = h5py.File(f'DatasetsProcessed_hdf5/{dataset_name}/p{n}/participant_{n}.hdf5', 'r')
     for i, gesture in enumerate(gesture_labels):
-        data = np.array(file["Gesture" + gesture])
-        print(data.shape)
+        data = np.array(file[gesture])
+        data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
+        data = data[:, :int(len(data[0])*p)]
 
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[j, 0])
-            maxes[j][i] = np.max(data[j, 0])
+            mins[j][i] = np.min(data[j])
+            maxes[j][i] = np.max(data[j])
     return mins, maxes
 
-# size of 4800 assumes 250 ms window
 def getLabels (n):
-    timesteps_for_one_gesture = 480
+    file = h5py.File(f'DatasetsProcessed_hdf5/{dataset_name}/p{n}/participant_{n}.hdf5', 'r')
+    data = torch.from_numpy(np.array(file[gesture_labels[0]])).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
+    timesteps_for_one_gesture = data.size(0) * data.size(2)
     labels = np.zeros((timesteps_for_one_gesture*numGestures, numGestures))
     for i in range(timesteps_for_one_gesture):
         for j in range(numGestures):
@@ -211,22 +249,29 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
     normalize_for_colormap_benchmark_cwt = mpl.colors.Normalize(vmin=-50, vmax=5)
     emg_sample = data
+    data = data.reshape(length, width)
     # Convert EMG sample to numpy array for CWT computation
-    emg_sample_np = emg_sample.astype(np.float16).flatten()
-    highest_cwt_scale = 1024
+    emg_sample_np = data.astype(np.float16)
+    highest_cwt_scale = wLenTimesteps
     downsample_factor_for_cwt_preprocessing = 1 # used to make image processing tractable
     scales = np.arange(1, highest_cwt_scale)
-    wavelet = 'morl'
+    # wavelet = 'morl'
     # Perform Continuous Wavelet Transform (CWT)
     # Note: PyWavelets returns scales and coeffs (coefficients)
-    coefficients, frequencies = pywt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
-    frequencies, coefficients = fcwt.cwt(emg_sample_np[::downsample_factor_for_cwt_preprocessing], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
-    coefficients_dB = 10 * np.log10(np.abs(coefficients)+1e-6) # Adding a small constant to avoid log(0)
+    # for i in range(numElectrodes):
+    for i in range(length):
+        # coefficients, frequencies = pywt.cwt(emg_sample_np[i, ::downsample_factor_for_cwt_preprocessing], scales, wavelet, sampling_period=1/fs*downsample_factor_for_cwt_preprocessing)
+        frequencies, coefficients = fcwt.cwt(emg_sample_np[i, ::downsample_factor_for_cwt_preprocessing], int(fs), int(scales[0]), int(scales[-1]), int(highest_cwt_scale))
+        # note fcwt.cwt returns frequencies and coefficients with frequencies from most to least
+        coefficients_dB = 10 * np.log10(np.abs(coefficients)+1e-12) # Adding a small constant to avoid log(0)
+        if i == 0:
+            time_frequency_emg = np.zeros((length * coefficients_dB.shape[0], coefficients_dB.shape[1]))
+        time_frequency_emg[i*coefficients_dB.shape[0]:(i+1)*coefficients_dB.shape[0], :] = coefficients_dB # flip for low frequency to be at bottom
     # Convert back to PyTorch tensor and reshape
-    emg_sample = torch.tensor(coefficients_dB).float().reshape(-1, coefficients_dB.shape[-1])
-    blocks = emg_sample.reshape(highest_cwt_scale, numElectrodes, -1)
+    emg_sample = torch.tensor(time_frequency_emg).float().reshape(-1, time_frequency_emg.shape[-1])
+    blocks = emg_sample.reshape(numElectrodes, wLenTimesteps, wLenTimesteps)
 
-    e1, e2, e3, e4 = blocks.transpose(1,0)
+    e1, e2, e3, e4 = blocks
 
     # emg_sample = blocks.transpose(1,0).reshape(numElectrodes*(highest_cwt_scale-1), -1)
         
@@ -239,8 +284,11 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     data_converted = cmap(normalize_for_colormap_benchmark_cwt(combined_image))
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
+
+    resize_length_factor = len(frequencies)
+    width_to_rescale_to = min(native_resnet_size, width)
     
-    resize = transforms.Resize([native_resnet_size, native_resnet_size],
+    resize = transforms.Resize([min(native_resnet_size, length * resize_length_factor), width_to_rescale_to],
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
@@ -257,14 +305,13 @@ def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_
     return final_image
 
 def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
-    spectrogram_window_size = 128 
-
+    spectrogram_window_size = wLenTimesteps // 16
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
-    
+        
     benchmarking_window = scipy.signal.windows.hamming(spectrogram_window_size, sym=False) # https://www.sciencedirect.com/science/article/pii/S1746809422003093?via%3Dihub#f0020
-    benchmarking_number_fft_points = 1024
+    benchmarking_number_fft_points = wLenTimesteps
     frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, window=benchmarking_window, nfft=benchmarking_number_fft_points)
-    Sxx_dB = 10 * np.log10(Sxx + 1e-6) # small constant added to avoid log(0)
+    Sxx_dB = 10 * np.log10(Sxx + 1e-12) # small constant added to avoid log(0)
     # print("Min and max of Sxx_dB: ", np.min(Sxx_dB), np.max(Sxx_dB))
     # emg_sample = torch.from_numpy(Sxx_dB)
     # emg_sample -= torch.min(emg_sample)
@@ -288,8 +335,11 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     data_converted = cmap(normalize_for_colormap_benchmark(combined_image))
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
+
+    resize_length_factor = len(frequencies)
+    width_to_rescale_to = min(native_resnet_size, width)
     
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size],
+    resize = transforms.Resize([min(native_resnet_size, length * resize_length_factor), width_to_rescale_to],
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
@@ -329,31 +379,28 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
 
 def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size):
     # Contrast normalize and convert data
-    # NOTE: Should this be contrast normalized? Then only patterns of data will be visible, not absolute values
     data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
-    image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
+    image_data = np.reshape(rgb_data, (length, width, 3))
     image = np.transpose(image_data, (2, 0, 1))
     
-    # Split image and resize
-    imageL, imageR = np.split(image, 2, axis=2)
-    resize = transforms.Resize([length * resize_length_factor, native_resnet_size // 2],
-                               interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
-    imageL, imageR = map(lambda img: resize(torch.from_numpy(img)), (imageL, imageR))
+    # Resize the image
+    resize = transforms.Resize([length * resize_length_factor, native_resnet_size], interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image = resize(torch.from_numpy(image))
     
     # Get max and min values after interpolation
-    max_val = max(imageL.max(), imageR.max())
-    min_val = min(imageL.min(), imageR.min())
+    max_val = image.max()
+    min_val = image.min()
     
     # Contrast normalize again after interpolation
-    imageL, imageR = map(lambda img: (img - min_val) / (max_val - min_val), (imageL, imageR))
+    image = (image - min_val) / (max_val - min_val)
     
     # Normalize with standard ImageNet normalization
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    imageL, imageR = map(normalize, (imageL, imageR))
+    image = normalize(image)
     
-    return torch.cat([imageL, imageR], dim=2).numpy().astype(np.float32)
+    return image.numpy().astype(np.float32)
 
 def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
@@ -380,15 +427,14 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         emg = emg.reshape(len(emg), length*width)
 
     # Parameters that don't change can be set once
-    resize_length_factor = 6
-    if turn_on_magnitude:
-        resize_length_factor = 3
+    resize_length_factor = 1
     native_resnet_size = 224
 
-    with multiprocessing.Pool(processes=16) as pool:
-        args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-        images_async = pool.starmap_async(optimized_makeOneImage, args)
-        images = images_async.get()
+    if not turn_on_magnitude and not turn_on_spectrogram and not turn_on_cwt and not turn_on_hht:
+        with multiprocessing.Pool(processes=16) as pool:
+            args = [(emg[i], cmap, length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+            images_async = pool.starmap_async(optimized_makeOneImage, args)
+            images = images_async.get()
 
     if turn_on_magnitude:
         with multiprocessing.Pool(processes=16) as pool:
@@ -398,25 +444,19 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         images = np.concatenate((images, images_magnitude), axis=2)
 
     elif turn_on_spectrogram:
-        with multiprocessing.Pool(processes=16) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneSpectrogramImage, args)
-            images_spectrogram = images_async.get()
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_spectrogram = []
+        for i in tqdm(range(len(emg)), desc="Creating Spectrogram Images"):
+            images_spectrogram.append(optimized_makeOneSpectrogramImage(*args[i]))
         images = images_spectrogram
-
-    elif turn_on_cwt:
-        with multiprocessing.Pool(processes=16) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneCWTImage, args)
-            images_cwt = images_async.get()
-        images = images_cwt
     
-    elif turn_on_hht:
-        with multiprocessing.Pool(processes=16) as pool:
-            args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
-            images_async = pool.starmap_async(optimized_makeOneHilbertHuangImage, args)
-            images_hilbert_huang = images_async.get()
-        images = images_hilbert_huang
+    elif turn_on_cwt:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_cwt_list = []
+        # with multiprocessing.Pool(processes=5) as pool:
+        for i in tqdm(range(len(emg)), desc="Creating CWT Images"):
+            images_cwt_list.append(optimized_makeOneCWTImage(*args[i]))
+        images = images_cwt_list
         
     return images
 

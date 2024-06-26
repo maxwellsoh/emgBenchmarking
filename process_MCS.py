@@ -8,6 +8,7 @@ import pandas as pd
 import h5py
 import os
 from glob import glob
+import torch
 
 # %%
 # Sampling rate "Hz"
@@ -20,7 +21,7 @@ signal_segment_starting = 1 # amount of time delay after cue
 signal_segment_ending = 6 # amount of time after signal. 6 seconds is the end of the cue, so 5 or 6 are good numbers
 
 # Get sEMG Records directory
-current_folder = './OzdemirEMG/'  # Change with current folder
+current_folder = './MCS_EMG/'  # Change with current folder
 Base = os.path.join(current_folder, 'sEMG-dataset/raw/mat')  # Change raw or filtered as needed
 Files = glob(os.path.join(Base, '**/*.mat'), recursive=True)
 # Files.sort()  # Sort files if needed
@@ -28,7 +29,7 @@ Files = glob(os.path.join(Base, '**/*.mat'), recursive=True)
                     
 # Automated segmentation and saving of all participant sEMG data to sEMG gesture segment in HDF5
 for file_path in Files:
-    foldername = 'DatasetsProcessed_hdf5/OzdemirEMG/'
+    foldername = 'DatasetsProcessed_hdf5/MCS_EMG/'
     mat_data = scipy.io.loadmat(file_path)
     data = mat_data['data']
     participant_id = mat_data['iD'][0][0]  # Modify based on where ID is stored in your .mat
@@ -81,7 +82,7 @@ import matplotlib.pyplot as plt
 #Flattened dataset with gestures as groups and numpy arrays of shape (CYCLE, CHANNEL, TIME)
 
 for i in range(1, 41):
-    foldername = 'DatasetsProcessed_hdf5/OzdemirEMG/'
+    foldername = 'DatasetsProcessed_hdf5/MCS_EMG/'
     foldername = os.path.join(foldername, 'p' + str(i) + '/')
     hdf5_input_filename = f'participant_{i}.hdf5'
     hdf5_input_filename = os.path.join(foldername, hdf5_input_filename)
@@ -132,7 +133,7 @@ for i in range(1, 41):
 
 # %%
 gesture_names = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
-foldername = 'DatasetsProcessed_hdf5/OzdemirEMG/p40/'
+foldername = 'DatasetsProcessed_hdf5/MCS_EMG/p40/'
 hdf5_filename = 'flattened_participant_40.hdf5'
 hdf5_filename = os.path.join(foldername, hdf5_filename)
 with h5py.File(hdf5_filename, 'r') as hdf_file:
@@ -163,7 +164,7 @@ def filter(emg):
 
 # Check flattened data
 def getEMG (n):
-    file = h5py.File('DatasetsProcessed_hdf5/OzdemirEMG/p40/flattened_participant_40.hdf5', 'r')
+    file = h5py.File('DatasetsProcessed_hdf5/MCS_EMG/p40/flattened_participant_40.hdf5', 'r')
     emg = []
     for gesture in gesture_names:
         data = filter(torch.from_numpy(np.array(file["Gesture" + gesture]))).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
