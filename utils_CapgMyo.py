@@ -209,8 +209,7 @@ def getExtrema (n, proportion, lastSessionOnly=False):
         tensor_data = torch.from_numpy(np.concatenate(data, axis=0)) # 
         # (TIME STEP, CHANNEL)
         windowed_data = window(tensor_data) # (WINDOW, CHANNEL, TIME STEP)
-
-        num_windows = int(len(windowed_data) * proportion)
+        num_windows = np.round(len(windowed_data) * proportion).astype(int)
         selected_windows = windowed_data[:num_windows]
 
         for j in range(numElectrodes):

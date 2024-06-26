@@ -117,18 +117,29 @@ def getEMG (args):
     for i, gesture in enumerate(gesture_labels):
         assert "Gesture" + gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
         # [# repetitions, # electrodes, # timesteps]
-        data = np.array(file["Gesture" + gesture])
+        data = np.array(file["Gesture" + gesture]) 
         
         if (type(args) != int and n != leftout):
             for j in range(len(data)):
                 data[j] = target_normalize(data[j], target_min, target_max, i)
         
-        data = filter(torch.from_numpy(data)).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
-        emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)).to(torch.float16))
-    return torch.cat(emg, dim=0)
+        data = filter(torch.from_numpy(data)).unfold(dimension=-1, size=wLenTimesteps, step=stepLen) # (5, 4, 20, 500)
+        emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)).to(torch.float16)) 
+    return torch.cat(emg, dim=0) # (REPETITION*WINDOW, ELECTRODE, TIME STEP)
 
 # assumes first of the 4 repetitions accessed
-def getExtrema (n, p):
+def getExtrema (n, proportion):
+    """Returns the min/max EMG values for each electrode per gesture over a proportion of the windows of data. 
+
+    Per gesture, accumulates data across each of its repetitions and windows this data. Then takes a proportion of the windows and calculates the min/max values for each electrode over these windows across all trials and time steps. 
+
+    Args:
+        n (int): subject number
+        proportion: proportion of the windows to consider
+
+    Returns:
+        mins, maxes: mins[electrode][gesture] is min value of electrode for gesture across proportion of windows
+    """
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
@@ -136,13 +147,20 @@ def getExtrema (n, p):
     file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     for i, gesture in enumerate(gesture_labels):
         # get the first repetition for each gesture
-        data = np.array(file["Gesture" + gesture])
-        data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
-        data = data[:, :int(len(data[0])*p)]
+        data = np.array(file["Gesture" + gesture])  # (REPETITION, ELECTRODE, TIME STEPS)
+
+        data = np.concatenate([data[i] for i in range(len(data))], axis=-1)  # (ELECTRODE, TIMESTEPS * REPETITIONS)
+
+        data = data.transpose() # (TOTAL TIME STEPS, ELECTRODE)
+        tensor_data = torch.from_numpy(data)
+        windowed_data = tensor_data.unfold(dimension=0, size=wLenTimesteps, step=stepLen) # (WINDOW, CHANNEL, TIME STEP)
+
+        num_windows = np.round(len(windowed_data)* proportion).astype(int)
+        selected_windows = windowed_data[:num_windows]
 
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[j])
-            maxes[j][i] = np.max(data[j])
+            mins[j][i] = torch.min(selected_windows[:, j, :])
+            maxes[j][i] = torch.max(selected_windows[:, j, :])
     return mins, maxes
 
 def getLabels (n):
