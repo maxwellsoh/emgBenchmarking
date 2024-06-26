@@ -154,7 +154,7 @@ def getEMG (args):
         emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)).to(torch.float16))
     return torch.cat(emg, dim=0)
 
-def getExtrema (n, p):
+def getExtrema (n, proportion):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
@@ -163,11 +163,17 @@ def getExtrema (n, p):
     for i, gesture in enumerate(gesture_labels):
         data = np.array(file[gesture])
         data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
-        data = data[:, :int(len(data[0])*p)]
+
+        data = data.transpose() # (TOTAL TIME STEPS, ELECTRODE)
+        tensor_data = torch.from_numpy(data)
+        windowed_data = tensor_data.unfold(dimension=0, size=wLenTimesteps, step=stepLen) # (WINDOW, CHANNEL, TIME STEP)
+
+        num_windows = np.round(len(windowed_data)* proportion).astype(int)
+        selected_windows = windowed_data[:num_windows]
 
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[j])
-            maxes[j][i] = np.max(data[j])
+            mins[j][i] = torch.min(selected_windows[:, j, :])
+            maxes[j][i] = torch.max(selected_windows[:, j, :])
     return mins, maxes
 
 def getLabels (n):
