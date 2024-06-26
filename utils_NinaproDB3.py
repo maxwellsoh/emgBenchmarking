@@ -360,12 +360,12 @@ def getExtrema (n, proportion, exercise, args):
     labels = getLabels((n, exercise, args))  # (TIME STEP, LABEL)
 
     # need to convert labels out of one-hot encoding
-    num_gestures = labels.shape[1]
+    numGestures = labels.shape[1]
     labels = torch.argmax(labels, dim=1) 
     
     # Create new arrays to hold data
-    mins = np.zeros((numElectrodes, num_gestures))   
-    maxes = np.zeros((numElectrodes, num_gestures))
+    mins = np.zeros((numElectrodes, numGestures))   
+    maxes = np.zeros((numElectrodes, numGestures))
 
     # Get the proportion of the windows per gesture 
     unique_labels, counts = np.unique(labels, return_counts=True)
