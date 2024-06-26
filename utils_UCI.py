@@ -209,26 +209,38 @@ def getEMG_separateSessions(args, unfold=True):
         return torch.cat(emg, dim=0)
     return torch.cat(emg, dim=0)
 
-def getExtrema (n, p, lastSessionOnly=False):
+def getExtrema (n, proportion, lastSessionOnly=False):
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
     if lastSessionOnly:
-        emg = getEMG_separateSessions((n, 2), unfold=False)
-        labels = getLabels_separateSessions((n, 2), unfold=False)
+        emg = getEMG_separateSessions((n, 2), unfold=True) 
+        labels = getLabels_separateSessions((n, 2), unfold=True)
     else:
-        emg = getEMG(n, unfold=False)
-        labels = getLabels(n, unfold=False)
+        emg = getEMG(n, unfold=True) # (WINDOW, ELECTRODE, TIMESTEP)
+        labels = getLabels(n, unfold=True) #(WINDOW, GESTURE), one hot encoded
+        
+    # convert labels out of one hot encoding
+    labels = torch.argmax(labels, dim=1)
 
-    for i in range(numGestures):
-        subEMG = emg[labels[:, i] == 1.0]
-        subEMG = np.array(subEMG[:int(len(subEMG)*p)])
+    # Get the proportion of the windows per gesture 
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    size_per_gesture = np.round(proportion*counts).astype(int)
+    gesture_amount = dict(zip(unique_labels, size_per_gesture)) # (GESTURE, NUMBER OF WINDOWS)
 
-        # subEMG will be [# timesteps, # electrodes]
-        for j in range(numElectrodes):
-            mins[j][i] = np.min(subEMG[:, j])
-            maxes[j][i] = np.max(subEMG[:, j])
+    for gesture in gesture_amount.keys():
+        size_for_current_gesture = gesture_amount[gesture]
+
+        all_windows = np.where(labels == gesture)[0]
+        chosen_windows = all_windows[:size_for_current_gesture] 
+        
+        # out of these indices, pick the min/max emg values
+        for j in range(numElectrodes): 
+            # minimum emg value
+            mins[j][gesture] = torch.min(emg[chosen_windows, j])
+            maxes[j][gesture] = torch.max(emg[chosen_windows, j])
     return mins, maxes
+
 
 def getRestim_separateSessions(args, unfold=True):
     subject_number, session_number = args
