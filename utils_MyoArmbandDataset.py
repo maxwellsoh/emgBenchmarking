@@ -149,24 +149,25 @@ def getExtrema (n, proportion):
     maxes = np.zeros((numElectrodes, numGestures))
 
     for i in range(numGestures):
-        data = []
+        
+        emg = []
 
         for j in range(4):
             if (n < 3):
-                emg = np.fromfile(f'myoarmbanddataset/Female{n-1}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
+                data = np.fromfile(f'myoarmbanddataset/Female{n-1}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
             else:
-                emg = np.fromfile(f'myoarmbanddataset/Male{n-3}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
+                data = np.fromfile(f'myoarmbanddataset/Male{n-3}/Test1/classe_{i + j*numGestures}.dat', dtype=np.int16)
 
-            data.append(format_emg(np.array(emg, dtype=np.float32)).transpose()) # (4, CHANNEL, SAMPLE)
+            data = format_emg(np.array(data, dtype=np.float32))
+            # windowed per repetition (needs to match the windowing in getEMG)
+            emg.append(torch.from_numpy(data).unfold(dimension=0, size=wLenTimesteps, step=stepLen)) # (REPETITION, WINDOW, ELECTRODE, TIME STEP) 
 
-        # concatenate acros repetitions 
-        data = np.concatenate([data[i] for i in range(len(data))], axis=-1) # (ELECTRODE, SAMPLE * 4)
-        data = data.transpose() # (TOTAL TIME STEPS, ELECTRODE)
-        tensor_data = torch.from_numpy(data)
-        windowed_data = tensor_data.unfold(dimension=0, size=wLenTimesteps, step=stepLen) # (WINDOW, CHANNEL, TIME STEP)
 
-        num_windows = np.round(len(windowed_data)*proportion).astype(int)
-        selected_windows = windowed_data[:num_windows]
+        # concatenate across repetitions 
+        emg = torch.cat(emg, dim=0) # (WINDOW, ELECTRODE, TIME STEP)
+
+        num_windows = np.round(len(emg)*proportion).astype(int)
+        selected_windows = emg[:num_windows]
 
         for j in range(numElectrodes):
             mins[j][i] = torch.min(selected_windows[:, j, :])
