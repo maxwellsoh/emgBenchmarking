@@ -146,7 +146,9 @@ To run the new dataset, input the dataset name to the dataset argument of `CNN_E
 
 ## Creating Custom Runs
 run_CNN_EMG.py also takes in config files. Create a new yaml file with your arguments and run: 
-`python run_CNN_EMG.py --config config/example.yaml`
+```
+python run_CNN_EMG.py --config config/example.yaml
+```
 
 # Troubleshooting
 If you run into an error, `OSError: [Errno 24] Too many open files`
