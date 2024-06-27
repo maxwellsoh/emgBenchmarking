@@ -95,7 +95,8 @@ def replicate_table(args, table_args, table_num):
             line_args.leftout_subject = subj
             if table_num == 1 and line == 2: 
                 line_args.number_windows = table_args.number_windows
-                # NOTE: the other line specific parameters are already automatically added after the load_config call. only number of windows has to be updated since all but one call use the default value.
+            if table_num == 3 or table_num == 4:
+                line_args.model = table_args.best_model
             
             run_command(line_args)
     

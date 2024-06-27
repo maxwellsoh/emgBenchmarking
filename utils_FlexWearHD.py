@@ -98,7 +98,7 @@ def getData(n, gesture, target_min=None, target_max=None, leftout=None, session_
         for i in range(len(data)):
             data[i] = target_normalize(data[i], target_min, target_max, gesture_labels.index(gesture))
 
-    data = highpassFilter(torch.from_numpy(data).unfold(dimension=-1, size=wLenTimesteps, step=stepLen))
+    data = highpassFilter(torch.from_numpy(data).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)) 
 
     return torch.cat([data[i] for i in range(len(data))], axis=1).permute([1, 0, 2])
 
@@ -146,7 +146,20 @@ def getEMG_separateSessions(args):
         
     return torch.cat([getData(subject_number, name, target_min=target_min, target_max=target_max, leftout=leftout, session_number=session_number) for name in gesture_labels], axis=0)
 
-def getExtrema (n, p, lastSessionOnly=False):
+def getExtrema (n, proportion, lastSessionOnly=False):
+    """Returns the min max of the electrode per gesture for a proportion of its windows. 
+    
+    Used for target normalization.
+
+    Args:
+        n: participant
+        proportion: proportion of windows to consider
+
+    Returns:
+        (ELECTRODE, GESTURE): min and max values for each electrode per gesture over proportion of windows
+
+    """
+
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
     n = participants[n - 1]
@@ -163,14 +176,21 @@ def getExtrema (n, p, lastSessionOnly=False):
             file = h5py.File('./FlexWear-HD/FlexWear-HD_Dataset/p0' + str(n) +'/data_allchannels_initial.h5', 'r')
     
     for i in range(numGestures):
+    
         data = np.array(file[gesture_labels[i]])
-        data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
-        data = data[:, :int(len(data[0])*p)]
+        data = np.concatenate([data[i] for i in range(len(data))], axis=-1) # concat across trials 
 
-        # data will be [# channel, # timestep]
+        data = data.transpose() # (TOTAL TIME STEPS, ELECTRODE)
+
+        windowed_data = torch.from_numpy(data).unfold(dimension=0, size=wLenTimesteps, step=stepLen) # (WINDOW, ELECTRODE, TIME STEP)
+
+        num_windows = int(len(windowed_data)* proportion)
+        selected_windows = windowed_data[:num_windows]
+
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[j])
-            maxes[j][i] = np.max(data[j])
+            mins[j][i] = torch.min(selected_windows[:, j, :])
+            maxes[j][i] = torch.max(selected_windows[:, j, :])
+    
     return mins, maxes
 
 def getGestures(n):
