@@ -64,7 +64,9 @@ CNN_EMG.py will automatically download the necessary datasets for each run. Note
 Each table has parameters that will be changed across each run. These parameters can be updated in the following yaml file. You can configure it with one of the 6 datasets (capgmyo, hyser, myoarmbanddataset, ninapro-db5, uciemg, flexwear-hd). 
 `./config/table{i}.yaml`. 
 Once set, run:
-`python run_CNN_EMG.py --table{i}`
+```
+python run_CNN_EMG.py --table{i}
+```
 
 ### Manually
 To replicate the first table, run the following shell script for each of the 6 datasets (capgmyo, hyser, myoarmbanddataset, ninapro-db5, uciemg, flexwear-hd). The parameters that will need to be changed across runs are at the top
