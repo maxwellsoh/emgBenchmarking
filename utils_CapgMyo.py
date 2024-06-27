@@ -24,7 +24,7 @@ numGestures = 8
 fs = 1000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
-stepLen = 50 #50 ms
+stepLen = int(50/1000*fs) #50 ms
 numElectrodes = 128
 num_subjects = 10 # 10 subjects with 2 sessions each
 cmap = mpl.colormaps['viridis']
@@ -80,7 +80,7 @@ def target_normalize (data, target_min, target_max, gesture):
     return data
 
 def window (e):
-    return e.unfold(dimension=0, size=wLen, step=50)
+    return e.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
 
 def filter(emg):
     # Butterworth bandpass filter
@@ -113,7 +113,8 @@ def fft_plot(signal):
     plt.grid(True)
     plt.show()
 
-def getData (subject, gesture, trial):    
+def getData (subject, gesture, trial): 
+
     if (isinstance(subject, int)):  
         sub = str(subject)
         if subject < 10:
@@ -136,6 +137,7 @@ def getData (subject, gesture, trial):
     if (not isinstance(subject, int) and leftout != subject[0]):
         mat_array = target_normalize(mat_array, target_min, target_max, gesture - 1)
 
+    # stacks data per gesture for all trials
     tensor_data = torch.from_numpy(mat_array)
     if trial < 10:
         return torch.cat((window(tensor_data), getData(subject, gesture, trial + 1)), dim=0)
@@ -166,7 +168,20 @@ def getEMG_separateSessions(args):
     else:
         return filter(getData((data_index, mins, maxes, leftout), 1, 1))
 
-def getExtrema (n, p, lastSessionOnly=False):
+def getExtrema (n, proportion, lastSessionOnly=False):
+    """Returns the min/max EMG values for each electrode per gesture over a proportion of the windows of data. 
+
+    Per gesture, accumulates data across each of its trials and windows this data. Then takes a proportion of the windows and calculates the min/max values for each electrode over these windows across all trials and time steps. 
+
+    Args:
+        n (int): subject number
+        proportion: proportion of the windows to consider
+        lastSessionOnly (bool, optional):. Defaults to False.
+
+    Returns:
+        mins, maxes: mins[electrode][gesture] is min value of electrode for gesture across proportion of windows
+    """
+
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
@@ -187,15 +202,22 @@ def getExtrema (n, p, lastSessionOnly=False):
             if trial == 9:
                 name = '0' + sub + '-00' + str(i+1) + '-010'
             mat_data = io.loadmat('./CapgMyo_B/dbb-preprocessed-0' + sub + '/' + name + '.mat')
-            data.append(mat_data['data'].transpose())
+            # data.append(mat_data['data'].transpose()) 
 
-        data = np.concatenate([data[i] for i in range(len(data))], axis=-1)
-        data = data[:, :int(len(data[0])*p)]
+            data.append(mat_data['data']) # (TRIAL, TIME STEP, CHANNEL)
+
+        tensor_data = torch.from_numpy(np.concatenate(data, axis=0)) # 
+        # (TIME STEP, CHANNEL)
+        windowed_data = window(tensor_data) # (WINDOW, CHANNEL, TIME STEP)
+        num_windows = np.round(len(windowed_data) * proportion).astype(int)
+        selected_windows = windowed_data[:num_windows]
 
         for j in range(numElectrodes):
-            mins[j][i] = np.min(data[j])
-            maxes[j][i] = np.max(data[j])
+            mins[j][i] = torch.min(selected_windows[:, j, :])
+            maxes[j][i] = torch.max(selected_windows[:, j, :])
+            
     return mins, maxes
+
 
 def getLabels (n):
     emg_len = len(getEMG(n))

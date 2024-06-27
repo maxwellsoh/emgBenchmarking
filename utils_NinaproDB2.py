@@ -132,6 +132,12 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 def balance(restimulus):
+    """ Balances distribution of restimulus by minimizing zero (rest) gestures.
+
+    Args:
+        restimulus (tensor): restimulus tensor
+
+    """
     numZero = 0
     indices = []
     count_dict = {}
@@ -166,16 +172,25 @@ def balance(restimulus):
                 
     return indices
 
-def contract(R, unfold=True):
-    numGestures = R.max() + 1
+def contract(restim, unfold=True):
+    """Converts restimulus tensor to one-hot encoded tensor.
+
+    Args:
+        restim (tensor): restimulus data tensor
+        unfold (bool, optional): whether data was unfolded according to time steps. Defaults to True.
+
+    Returns:
+        labels: restimulus data now one-hot encoded
+    """
+    numGestures = restim.max() + 1 # + 1 to account for rest gesture
     labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(R), numGestures))
+    labels = labels.new_zeros(size=(len(restim), numGestures))
     if unfold:
-        for x in range(len(R)):
-            labels[x][int(R[x][0][0])] = 1.0
+        for x in range(len(restim)):
+            labels[x][int(restim[x][0][0])] = 1.0
     else:
-        for x in range(len(R)):
-            labels[x][int(R[x][0])] = 1.0
+        for x in range(len(restim)):
+            labels[x][int(restim[x][0])] = 1.0
     return labels
 
 def filter(emg):
@@ -183,13 +198,24 @@ def filter(emg):
     b, a = butter(N=1, Wn=999.0, btype='lowpass', analog=False, fs=2000.0)
     return torch.from_numpy(np.flip(filtfilt(b, a, emg),axis=0).copy())
 
-def getRestim (n: int, exercise: int = 2, unfold=True):
+def getRestim (n: int, exercise: int, unfold=True):
+    """
+    Returns a restiumulus (label) tensor for participant n and exercise exercise and if unfold, unfolded across time. 
+
+    (Unfold=False is needed in getEMG for target normalization)
+
+    Args:
+        n (int): participant 
+        exercise (int): exercise. 
+        unfold (bool, optional): whether or not to unfold data across time steps. Defaults to True.
+    """
     restim = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['restimulus'])
+
     if unfold:
         return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
     return restim
 
-def target_normalize (data, target_min, target_max, restim):
+def target_normalize (data, target_min, target_max, restim):    
     source_min = np.zeros(numElectrodes, dtype=np.float32)
     source_max = np.zeros(numElectrodes, dtype=np.float32)
 
@@ -210,59 +236,160 @@ def target_normalize (data, target_min, target_max, restim):
             - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture])
     return data_norm
 
-def getEMG (args, unfold=True):
-    if (len(args) == 2):
-        n, exercise = args
+def getEMG (input):
+    """Returns EMG data for a given participant and exercise. EMG data is balanced (reduced rest gestures), target normalized (if toggled), filtered (butterworth), and unfolded across time. 
+
+    Args:
+        n (int): participant number
+        exercise (int): exercise number
+        target_min (np.array): minimum target values for each electrode
+        target_max (np.array): maximum target values for each electrode
+        leftout (int): participant number to leave out
+        args: argument parser object (needed for DB3 to ignore subject 10, can be ignored for DB2)
+
+    Returns:
+        (WINDOW, ELECTRODE, TIME STEP): EMG data
+    """
+
+    if (len(input) == 3):
+        n, exercise, args = input
         leftout = None
+        is_target_normalize = False
     else:
-        n, exercise, target_min, target_max, leftout = args
+        n, exercise, target_min, target_max, leftout, args = input
+        is_target_normalize = True
 
-    #emg = pd.read_hdf(f'DatasetsProcessed_hdf5/NinaproDB5/s{n}/emgS{n}_E2.hdf5')
-    #emg = torch.tensor(emg.values)
-    emg = io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['emg']
+    emg = io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['emg'] # (TOTAL TIME STEPS, ELECTRODE)
     
-    if not(unfold):
-        return emg.astype(np.float16)
-
-    if (leftout != None and n != leftout):
+    # normalize data for non leftout participants 
+    if (is_target_normalize and n != leftout):
         emg = target_normalize(emg, target_min, target_max, np.array(getRestim(n, exercise, unfold=False)))
     
     restim = getRestim(n, exercise, unfold=True)
     emg = torch.from_numpy(emg).to(torch.float16)
-    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)]) # (WINDOWS, ELECTRODE, TIME STEP)
 
-def getExtrema (n, p, exercise):
-    emg = getEMG((n, exercise), unfold=False)
-    labels = getLabels((n, exercise), unfold=False)
+def get_decrements(args):
+    """
+    Calculates how much gestures from exercise 1, 2, and 3 should be decremented by to make them sequential.
+
+    Args:
+        args: args parser object
+
+    Returns:
+        (d1, d2, d3): decrements for each exercise
+    """
     
-    resize = min(len(emg), len(labels))
-    emg = emg[:resize]
-    labels = labels[:resize]
+    decrements = {(1,): [0, 0, 0], (2,): [0, 17, 0], (3,): [0, 0, 40], (1,2): [0, 0, 0], (1,3): [0, 0, 23], (2,3): [0, 17, 17], (1,2,3): [0, 0, 0]}
+    exercises = tuple(args.exercises)
+    return decrements[exercises]
 
-    mins = np.zeros((numElectrodes, labels.shape[1]))
-    maxes = np.zeros((numElectrodes, labels.shape[1]))
+def make_gestures_sequential(balanced_restim, args):
+    """
+    Removes missing gaps between gestures depending on which exercises are selected.
 
-    for i in range(labels.shape[1]):
-        subEMG = emg[labels[:, i] == 1.0]
-        subEMG = subEMG[:int(len(subEMG)*p)]
+    Ex: If args.exercises = [1, 3], gesture labels in exercise 1 are kept the same while gesture labels in exercise 3 are decremented by 23. 
 
-        # set the min and max for all electrodes to 0
-        if len(subEMG) == 0:
-            continue
+    Doing so prevents out of bound array accesses in train_test_split. 
+
+    Returns:
+        balanced_restim: restim but with gestures now sequential
+    """
+   
+    exercise_starts = {1: 1, 2: 18, 3: 41}
+    decrements = get_decrements(args)
+    for x in range(len(balanced_restim)): 
+        value = balanced_restim[x][0][0] # TODO: break here and check why its [x][0][0]
+
+        if value != 0:
+            exercise = (max(ex for ex in exercise_starts if exercise_starts[ex] <= value))-1
+            d = decrements[exercise]
+    
+            balanced_restim[x][0][0] = value - d
+
+    return balanced_restim
+
+def getLabels (input):
+    """Returns one-hot-encoding labels for a given participant and exercise. Labels are balanced (reduced rest gestures) and are sequential (no gaps between gestures of different exercises).
+
+    Args:
+        n (int): participant number
+        exercise (int): exercise number
+        args: argument parser object
+
+    Returns:
+        (TIME STEP, GESTURE): one-hot-encoded labels for participant n and exercise exercise
+    """
+
+    n, exercise, args = input
+    restim = getRestim(n, exercise)             
+    balanced_restim = restim[balance(restim)]   # (WINDOW, GESTURE, TIME STEP) 
+    ordered_restim = make_gestures_sequential(balanced_restim, args) 
+    return contract(ordered_restim)
+
+def getExtrema (n, proportion, exercise, args):
+    """Returns the min max of the electrode per gesture for a proportion of its windows. 
+    
+    Used for target normalization.
+
+    Args:
+        n: participant
+        proportion: proportion of windows to consider
+        exercise: exercise
+        args_exercises: exercises for the overall program (important for getLabels)
+
+    Returns:
+        (ELECTRODE, GESTURE): min and max values for each electrode per gesture
+
+    """
+
+    # Windowed data (must be windowed and balanced so that it matches the splitting in train_test_split)
+    emg = getEMG((n, exercise, args))       # (WINDOW, ELECTRODE, TIME STEP)
+    labels = getLabels((n, exercise, args))  # (TIME STEP, LABEL)
+
+    # need to convert labels out of one-hot encoding
+    num_gestures = labels.shape[1]
+    labels = torch.argmax(labels, dim=1) 
+    
+    # Create new arrays to hold data
+    mins = np.zeros((numElectrodes, num_gestures))   
+    maxes = np.zeros((numElectrodes, num_gestures))
+
+    # Get the proportion of the windows per gesture 
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    size_per_gesture = np.round(proportion*counts).astype(int)
+    gesture_amount = dict(zip(unique_labels, size_per_gesture)) # (GESTURE, NUMBER OF WINDOWS)
+
+    for gesture in gesture_amount.keys():
+        size_for_current_gesture = gesture_amount[gesture]
+
+        all_windows = np.where(labels == gesture)[0]
+        chosen_windows = all_windows[:size_for_current_gesture] 
         
-        # subEMG will be [# timesteps, # electrodes]
-        for j in range(numElectrodes):
-            mins[j][i] = np.min(subEMG[:, j])
-            maxes[j][i] = np.max(subEMG[:, j])
+        # out of these indices, pick the min/max emg values
+        for j in range(numElectrodes): 
+            # minimum emg value
+            mins[j][gesture] = torch.min(emg[chosen_windows, j])
+            maxes[j][gesture] = torch.max(emg[chosen_windows, j])
+
     return mins, maxes
+            
+def getForces(input):
+    """Returns force data for a given participant and exercise. Forces are balanced (reduced rest gestures) and sequential (no gaps between gestures of different exercises).
 
-def getLabels (args, unfold=True):
-    n, exercise = args
-    restim = getRestim(n, exercise, unfold)
-    if unfold:
-        return contract(restim[balance(restim)])
-    return contract(restim, False)
+    Args:
+        (n, exercise): participant number and exercise number
 
+    Returns:
+        _type_: _description_
+    """
+    n, exercise = input
+    assert exercise == 3, "Only exercise 3 has force data."
+    force = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['force'])
+    force = force.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+    restim = getRestim(n,exercise)
+    return force[balance(restim)]
+    
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
     data = (data - global_min) / (global_max - global_min)
@@ -280,7 +407,7 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
     
     # Normalize with standard ImageNet normalization
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    image = normalize(image)
+    image = normalize(image) # NOTE: not sure where normalize function went
     
     return image.numpy().astype(np.float32)
 

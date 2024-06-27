@@ -194,31 +194,50 @@ def getEMG_separateSessions(args):
     return emg
         
     
-def getExtrema (n, p, lastSessionOnly=False):
+def getExtrema (n, proportion, lastSessionOnly=False):
+    """Returns the min max of the electrode per gesture for a proportion of its windows. 
+    
+    Used for target normalization.
+
+    Args:
+        n: participant
+        proportion: proportion of windows to consider
+        exercise: exercise
+        args_exercises: exercises for the overall program (important for getLabels)
+
+    Returns:
+        (ELECTRODE, GESTURE): min and max values for each electrode per gesture
+
+    """
     mins = np.zeros((numElectrodes, numGestures))
     maxes = np.zeros((numElectrodes, numGestures))
 
-    if (n < 10):
-        sub = f'0{n}'
-    else:
-        sub = f'{n}'
-
     if lastSessionOnly:
-        emg = getEMG_help(sub, "2", unfold=False)
-        labels = getLabels_separateSessions((n, 2), unfold=False)
+        emg = getEMG((n), session_number=2) 
+        labels = getLabels(n, unfold=True, session_number=2)
     else:
-        emg = getEMG_help(sub, "1", unfold=False)
-        labels = getLabels_separateSessions((n, 1), unfold=False)
+        emg = getEMG((n), session_number=1) # (WINDOW, CHANNEL, TIME STEP)
+        labels = getLabels(n, unfold=True, session_number=1) # (WINDOW, GESTURE)
 
-    for i in range(numGestures):
-        subEMG = [emg[j] for j in range(len(emg)) if labels[j, i] == 1.0]
-        subEMG = torch.cat(subEMG, dim=0)
-        subEMG = np.array(subEMG[:int(len(subEMG)*p)])
+    # convert labels out of one hot encoding
+    labels = torch.argmax(labels, dim=1)
 
-        # subEMG will be [# timesteps, # electrodes]
-        for j in range(numElectrodes):
-            mins[j][i] = np.min(subEMG[:, j])
-            maxes[j][i] = np.max(subEMG[:, j])
+    # Get the proportion of the windows per gesture 
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    size_per_gesture = np.round(proportion*counts).astype(int)
+    gesture_amount = dict(zip(unique_labels, size_per_gesture)) # (GESTURE, NUMBER OF WINDOWS)
+
+    for gesture in gesture_amount.keys():
+        size_for_current_gesture = gesture_amount[gesture]
+
+        all_windows = np.where(labels == gesture)[0]
+        chosen_windows = all_windows[:size_for_current_gesture] 
+        
+        # out of these indices, pick the min/max emg values
+        for j in range(numElectrodes): 
+            # minimum emg value
+            mins[j][gesture] = torch.min(emg[chosen_windows, j])
+            maxes[j][gesture] = torch.max(emg[chosen_windows, j])
     return mins, maxes
 
 def contract(R):
