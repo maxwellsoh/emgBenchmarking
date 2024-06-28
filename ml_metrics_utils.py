@@ -190,12 +190,12 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
 
 
         **{
-            f"train/{name}": value.item() 
+            f"test/{name}": value.item() 
             for name, value in testing_metrics_values.items() 
             if name != 'R2Score_RawValues'
         },
         **{
-            f"train/R2Score_RawValues_{i+1}": v.item() 
+            f"test/R2Score_RawValues_{i+1}": v.item() 
             for name, value in testing_metrics_values.items() 
             if name == 'R2Score_RawValues'
             for i, v in enumerate(value)
