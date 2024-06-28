@@ -394,8 +394,8 @@ if exercises:
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
             if (args.target_normalize > 0):
-                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, exercise, args)
-                emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject + 1, args) for i in range(utils.num_subjects)])
+                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize, exercise, args)
+                emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject, args) for i in range(utils.num_subjects)])
 
             else:
                 emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
@@ -508,22 +508,20 @@ else: # Not exercises
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out:
                 total_number_of_sessions = 2
-                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, lastSessionOnly=False)
+                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize, lastSessionOnly=False)
                 emg = []
                 labels = []
                 for i in range(1, total_number_of_sessions+1):
-                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.leftout_subject + 1) for j in range(utils.num_subjects)])
+                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.leftout_subject) for j in range(utils.num_subjects)])
 
                     emg.extend(emg_async.get())
                     
                     labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
                     labels.extend(labels_async.get())
             else:
-                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize)
+                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize)
                 
-                emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
-
-
+                emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject) for i in range(utils.num_subjects)])
 
                 emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
                 
