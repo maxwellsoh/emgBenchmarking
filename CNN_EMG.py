@@ -19,7 +19,7 @@ logging.getLogger('matplotlib').setLevel(logging.WARNING)
 import timm
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 import zarr
-import cross_validation_utilities.train_test_split as tts # custom train test split to split stratified without shuffling
+from Split_Strategies.cross_validation_utilities import train_test_split as tts
 import gc
 import datetime
 from PIL import Image
@@ -1393,21 +1393,6 @@ print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE/FORCE)
 print("Size of X_test:      ", X_test.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
 print("Size of Y_test:      ", Y_test.shape) # (SAMPLE, GESTURE/FORCE)
 
-# get X_test and Y_test from splitting validation 50-50 with stratify
-if args.train_test_split_for_time_series:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False)
-else:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True)
-
-X_test = torch.from_numpy(X_test).to(torch.float16)
-Y_test = torch.from_numpy(Y_test).to(torch.float16)
-X_validation = torch.from_numpy(X_validation).to(torch.float16)
-Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE)
-print("Size of X_test:      ", X_test.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-print("Size of Y_test:      ", Y_test.shape) # (SAMPLE, GESTURE)
-
 model_name = args.model
 
 if args.model == "vit_tiny_patch2_32":
@@ -2190,7 +2175,7 @@ else:
                 wandb.log({
                 "train/Loss": train_loss,
                 "train/Learning Rate": optimizer.param_groups[0]['lr'],
-                "train/Epoch": epoch,
+                "train/Epoch": epoch+1,
                 "validation/Loss": val_loss,
                 **{
                     f"train/{name}": value.item() 
@@ -2414,7 +2399,7 @@ else:
             wandb.log({
                 "train/Loss": train_loss,
                 "train/Learning Rate": optimizer.param_groups[0]['lr'],
-                "train/Epoch": epoch,
+                "train/Epoch": epoch+1,
                 "validation/Loss": val_loss,
                 **{
                     f"train/{name}": value.item() 
@@ -2649,7 +2634,7 @@ else:
                         for i, v in enumerate(value)
                     },
                     "train/Learning Rate": optimizer.param_groups[0]['lr'],
-                    "train/Epoch": epoch,
+                    "train/Epoch": epoch+1,
                     "validation/Loss": val_loss,
                     **{
                         f"validation/{name}": value.item() 

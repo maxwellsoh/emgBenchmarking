@@ -282,7 +282,7 @@ class CNN_Trainer(Model_Trainer):
             wandb.log({
                 "train/Loss": train_loss,
                 "train/Learning Rate": self.optimizer.param_groups[0]['lr'],
-                "train/Epoch": epoch,
+                "train/Epoch": epoch+1,
                 "validation/Loss": val_loss,
                 **{
                     f"train/{name}": value.item() 
@@ -312,7 +312,7 @@ class CNN_Trainer(Model_Trainer):
             })
 
         torch.save(self.model.state_dict(), self.model_filename)
-        wandb.save(f'self.model/self.modelParameters_{self.formatted_datetime}.pth')
+        wandb.save(f'model/modelParameters_{self.formatted_datetime}.pth')
 
         if self.args.pretrain_and_finetune:
             ### Finish the current run and start a new run for finetuning
@@ -517,7 +517,7 @@ class CNN_Trainer(Model_Trainer):
                         for i, v in enumerate(value)
                     },
                     "train/Learning Rate": self.optimizer.param_groups[0]['lr'],
-                    "train/Epoch": epoch,
+                    "train/Epoch": epoch+1,
                     "validation/Loss": val_loss,
                     **{
                         f"validation/{name}": value.item() 

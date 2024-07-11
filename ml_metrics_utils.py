@@ -188,7 +188,6 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
     wandb.log({
         "test/Loss": test_loss,
 
-
         **{
             f"train/{name}": value.item() 
             for name, value in testing_metrics_values.items() 

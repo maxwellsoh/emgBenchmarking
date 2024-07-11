@@ -200,7 +200,7 @@ class MLP_Trainer(Classic_Trainer):
             wandb.log({
             "train/Loss": train_loss,
             "train/Learning Rate": self.optimizer.param_groups[0]['lr'],
-            "train/Epoch": epoch,
+            "train/Epoch": epoch+1,
             "validation/Loss": val_loss,
             **{
                 f"train/{name}": value.item() 
