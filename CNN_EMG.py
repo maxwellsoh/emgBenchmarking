@@ -41,295 +41,327 @@ import ml_metrics_utils as ml_utils
 from sklearn.metrics import confusion_matrix, classification_report
 import VisualTransformer
 
+# TODO: get it to automatically call the right programs if it is missing them... should be just a straight call. need to work on actually running it 
 
+# Define a custom argument type for a list of integers
 def list_of_ints(arg):
-    """Define a custom argument type for a list of integers"""
     return list(map(int, arg.split(',')))
 
-def parse_args(): 
-    """Argument parser for configuring different trials. 
+## Argument parser with optional argumenets
 
-    Returns:
-        ArgumentParser: argument parser 
-    """
-    ## Argument parser with optional argumenets
+# Create the parser
+parser = argparse.ArgumentParser(description="Include arguments for running different trials")
 
-    # Create the parser
-    parser = argparse.ArgumentParser(description="Include arguments for running different trials")
-    parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
-    parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
-    # Add argument for doing leave-one-subject-out
-    parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
-    # Add argument for leftout subject
-    parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation, starting from subject 1', default=0)
-    # Add parser for seed
-    parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0 by default.', default=0)
-    # Add number of epochs to train for
-    parser.add_argument('--epochs', type=int, help='number of epochs to train for. Set to 25 by default.', default=25)
-    # Add whether or not to use k folds (leftout_subject must be 0)
-    parser.add_argument('--turn_on_kfold', type=utils.str2bool, help='whether or not to use k folds cross validation. Set to False by default.', default=False)
-    # Add argument for stratified k folds cross validation
-    parser.add_argument('--kfold', type=int, help='number of folds for stratified k-folds cross-validation. Set to 5 by default.', default=5)
-    # Add argument for checking the index of the fold
-    parser.add_argument('--fold_index', type=int, help='index of the fold to use for cross validation (should be from 1 to --kfold). Set to 1 by default.', default=1)
-    # Add argument for whether or not to use cyclical learning rate
-    parser.add_argument('--turn_on_cyclical_lr', type=utils.str2bool, help='whether or not to use cyclical learning rate. Set to False by default.', default=False)
-    # Add argument for whether or not to use cosine annealing with warm restarts
-    parser.add_argument('--turn_on_cosine_annealing', type=utils.str2bool, help='whether or not to use cosine annealing with warm restarts. Set to False by default.', default=False)
-    # Add argument for whether or not to use RMS
-    parser.add_argument('--turn_on_rms', type=utils.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
-    # Add argument for RMS input window size (resulting feature dimension to classifier)
-    parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
-    # Add argument for whether or not to concatenate magnitude image
-    parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
-    # Add argument for model to use
-    parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_patch16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
-    # Add argument for exercises to include
-    parser.add_argument('--exercises', type=list_of_ints, help='List the exercises of the 3 to load. The most popular for benchmarking seem to be 2 and 3. Can format as \'--exercises 1,2,3\'', default=[1, 2, 3])
-    # Add argument for project suffix
-    parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
-    # Add argument for full or partial dataset for MCS EMG dataset
-    parser.add_argument('--full_dataset_mcs', type=utils.str2bool, help='whether or not to use the full dataset for MCS EMG Dataset. Set to False by default.', default=False)
-    # Add argument for partial dataset for Ninapro DB2 and DB5
-    parser.add_argument('--partial_dataset_ninapro', type=utils.str2bool, help='whether or not to use the partial dataset for Ninapro DB2 and DB5. Set to False by default.', default=False)
-    # Add argument for using spectrogram transform
-    parser.add_argument('--turn_on_spectrogram', type=utils.str2bool, help='whether or not to use spectrogram transform. Set to False by default.', default=False)
-    # Add argument for using cwt
-    parser.add_argument('--turn_on_cwt', type=utils.str2bool, help='whether or not to use cwt. Set to False by default.', default=False)
-    # Add argument for using Hilbert Huang Transform
-    parser.add_argument('--turn_on_hht', type=utils.str2bool, help='whether or not to use HHT. Set to False by default.', default=False)
-    # Add argument for saving images
-    parser.add_argument('--save_images', type=utils.str2bool, help='whether or not to save images. Set to False by default.', default=False)
-    # Add argument to turn off scaler normalization
-    parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help='whether or not to turn off scaler normalization. Set to False by default.', default=False)
-    # Add argument to change learning rate
-    parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 1e-4 by default.', default=1e-4)
-    # Add argument to specify which gpu to use (if any gpu exists)
-    parser.add_argument('--gpu', type=int, help='which gpu to use. Set to 0 by default.', default=0)
-    # Add argument for loading just a few images from dataset for debugging
-    parser.add_argument('--load_few_images', type=utils.str2bool, help='whether or not to load just a few images from dataset for debugging. Set to False by default.', default=False)
-    # Add argument for reducing training data size while remaining stratified in terms of gestures and amount of data from each subject
-    parser.add_argument('--reduce_training_data_size', type=utils.str2bool, help='whether or not to reduce training data size while remaining stratified in terms of gestures and amount of data from each subject. Set to False by default.', default=False)
-    # Add argument for size of reduced training data
-    parser.add_argument('--reduced_training_data_size', type=int, help='size of reduced training data. Set to 56000 by default.', default=56000)
-    # Add argument to leve n subjects out randomly
-    parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
-    # use target domain for normalization
-    parser.add_argument('--target_normalize', type=float, help='use a poportion of leftout data for normalization. Set to 0 by default.', default=0.0)
-    # Test with transfer learning by using some data from the validation dataset
-    parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
-    # Add argument for cross validation for time series
-    parser.add_argument('--train_test_split_for_time_series', type=utils.str2bool, help='whether or not to use data split for time series. Set to False by default.', default=False)
-    # Add argument for proportion of left-out-subject data to use for transfer learning
-    parser.add_argument('--proportion_transfer_learning_from_leftout_subject', type=float, help='proportion of left-out-subject data to use for transfer learning. Set to 0.25 by default.', default=0.25)
-    # Add argument for amount for reducing number of data to generate for transfer learning
-    parser.add_argument('--reduce_data_for_transfer_learning', type=int, help='amount for reducing number of data to generate for transfer learning. Set to 1 by default.', default=1)
-    # Add argument for whether to do leave-one-session-out
-    parser.add_argument('--leave_one_session_out', type=utils.str2bool, help='whether or not to leave one session out. Set to False by default.', default=False)
-    # Add argument for whether to do held_out test
-    parser.add_argument('--held_out_test', type=utils.str2bool, help='whether or not to do held out test. Set to False by default.', default=False)
-    # Add argument for whether to use only the subject left out for training in leave out session test
-    parser.add_argument('--one_subject_for_training_set_for_session_test', type=utils.str2bool, help='whether or not to use only the subject left out for training in leave out session test. Set to False by default.', default=False)
-    # Add argument for pretraining on all data from other subjects, and fine-tuning on some data from left out subject
-    parser.add_argument('--pretrain_and_finetune', type=utils.str2bool, help='whether or not to pretrain on all data from other subjects, and fine-tune on some data from left out subject. Set to False by default.', default=False)
-    # Add argument for finetuning epochs
-    parser.add_argument('--finetuning_epochs', type=int, help='number of epochs to fine-tune for. Set to 25 by default.', default=25)
-    # Add argument for whether or not to turn on unlabeled domain adaptation
-    parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool, help='whether or not to turn on unlabeled domain adaptation methods. Set to False by default.', default=False)
-    # Add argument to specify algorithm to use for unlabeled domain adaptation
-    parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "fixmatch" by default.', default="fixmatch")
-    # Add argument to specify proportion from left-out-subject to keep as unlabeled data
-    parser.add_argument('--proportion_unlabeled_data_from_leftout_subject', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75) # TODO: fix, we note that this affects leave-one-session-out even when fully supervised
-    # Add argument to specify batch size
-    parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by default.', default=64)
-    # Add argument for whether to use unlabeled data for subjects used for training as well
-    parser.add_argument('--proportion_unlabeled_data_from_training_subjects', type=float, help='proportion of data from training subjects to use as unlabeled data. Set to 0.0 by default.', default=0.0)
-    # Add argument for cutting down amount of total data for training subjects
-    parser.add_argument('--proportion_data_from_training_subjects', type=float, help='proportion of data from training subjects to use. Set to 1.0 by default.', default=1.0)
-    # Add argument for loading unlabeled data from flexwear-hd dataset
-    parser.add_argument('--load_unlabeled_data_flexwearhd', type=utils.str2bool, help='whether or not to load unlabeled data from FlexWear-HD dataset. Set to False by default.', default=False)
+# Add argument for dataset
 
-    args = parser.parse_args()
-    return args
+parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
+parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
+# Add argument for doing leave-one-subject-out
+parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
+# Add argument for leftout subject
+parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation, starting from subject 1', default=0)
+# Add parser for seed
+parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0 by default.', default=0)
+# Add number of epochs to train for
+parser.add_argument('--epochs', type=int, help='number of epochs to train for. Set to 25 by default.', default=25)
+# Add whether or not to use k folds (leftout_subject must be 0)
+parser.add_argument('--turn_on_kfold', type=utils.str2bool, help='whether or not to use k folds cross validation. Set to False by default.', default=False)
+# Add argument for stratified k folds cross validation
+parser.add_argument('--kfold', type=int, help='number of folds for stratified k-folds cross-validation. Set to 5 by default.', default=5)
+# Add argument for checking the index of the fold
+parser.add_argument('--fold_index', type=int, help='index of the fold to use for cross validation (should be from 1 to --kfold). Set to 1 by default.', default=1)
+# Add argument for whether or not to use cyclical learning rate
+parser.add_argument('--turn_on_cyclical_lr', type=utils.str2bool, help='whether or not to use cyclical learning rate. Set to False by default.', default=False)
+# Add argument for whether or not to use cosine annealing with warm restarts
+parser.add_argument('--turn_on_cosine_annealing', type=utils.str2bool, help='whether or not to use cosine annealing with warm restarts. Set to False by default.', default=False)
+# Add argument for whether or not to use RMS
+parser.add_argument('--turn_on_rms', type=utils.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
+# Add argument for RMS input window size (resulting feature dimension to classifier)
+parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
+# Add argument for whether or not to concatenate magnitude image
+parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
+# Add argument for model to use
+parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_patch16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
+# Add argument for exercises to include
+parser.add_argument('--exercises', type=list_of_ints, help='List the exercises of the 3 to load. The most popular for benchmarking seem to be 2 and 3. Can format as \'--exercises 1,2,3\'', default=[1, 2, 3])
+# Add argument for project suffix
+parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
+# Add argument for full or partial dataset for MCS EMG dataset
+parser.add_argument('--full_dataset_mcs', type=utils.str2bool, help='whether or not to use the full dataset for MCS EMG Dataset. Set to False by default.', default=False)
+# Add argument for partial dataset for Ninapro DB2 and DB5
+parser.add_argument('--partial_dataset_ninapro', type=utils.str2bool, help='whether or not to use the partial dataset for Ninapro DB2 and DB5. Set to False by default.', default=False)
+# Add argument for using spectrogram transform
+parser.add_argument('--turn_on_spectrogram', type=utils.str2bool, help='whether or not to use spectrogram transform. Set to False by default.', default=False)
+# Add argument for using cwt
+parser.add_argument('--turn_on_cwt', type=utils.str2bool, help='whether or not to use cwt. Set to False by default.', default=False)
+# Add argument for using Hilbert Huang Transform
+parser.add_argument('--turn_on_hht', type=utils.str2bool, help='whether or not to use HHT. Set to False by default.', default=False)
+# Add argument for saving images
+parser.add_argument('--save_images', type=utils.str2bool, help='whether or not to save images. Set to False by default.', default=False)
+# Add argument to turn off scaler normalization
+parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help='whether or not to turn off scaler normalization. Set to False by default.', default=False)
+# Add argument to change learning rate
+parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 1e-4 by default.', default=1e-4)
+# Add argument to specify which gpu to use (if any gpu exists)
+parser.add_argument('--gpu', type=int, help='which gpu to use. Set to 0 by default.', default=0)
+# Add argument for loading just a few images from dataset for debugging
+parser.add_argument('--load_few_images', type=utils.str2bool, help='whether or not to load just a few images from dataset for debugging. Set to False by default.', default=False)
+# Add argument for reducing training data size while remaining stratified in terms of gestures and amount of data from each subject
+parser.add_argument('--reduce_training_data_size', type=utils.str2bool, help='whether or not to reduce training data size while remaining stratified in terms of gestures and amount of data from each subject. Set to False by default.', default=False)
+# Add argument for size of reduced training data
+parser.add_argument('--reduced_training_data_size', type=int, help='size of reduced training data. Set to 56000 by default.', default=56000)
+# Add argument to leve n subjects out randomly
+parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
+# use target domain for normalization
+parser.add_argument('--target_normalize', type=float, help='use a poportion of leftout data for normalization. Set to 0 by default.', default=0.0)
+# Test with transfer learning by using some data from the validation dataset
+parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
+# Add argument for cross validation for time series
+parser.add_argument('--train_test_split_for_time_series', type=utils.str2bool, help='whether or not to use data split for time series. Set to False by default.', default=False)
+# Add argument for proportion of left-out-subject data to use for transfer learning
+parser.add_argument('--proportion_transfer_learning_from_leftout_subject', type=float, help='proportion of left-out-subject data to use for transfer learning. Set to 0.25 by default.', default=0.25)
+# Add argument for amount for reducing number of data to generate for transfer learning
+parser.add_argument('--reduce_data_for_transfer_learning', type=int, help='amount for reducing number of data to generate for transfer learning. Set to 1 by default.', default=1)
+# Add argument for whether to do leave-one-session-out
+parser.add_argument('--leave_one_session_out', type=utils.str2bool, help='whether or not to leave one session out. Set to False by default.', default=False)
+# Add argument for whether to do held_out test
+parser.add_argument('--held_out_test', type=utils.str2bool, help='whether or not to do held out test. Set to False by default.', default=False)
+# Add argument for whether to use only the subject left out for training in leave out session test
+parser.add_argument('--one_subject_for_training_set_for_session_test', type=utils.str2bool, help='whether or not to use only the subject left out for training in leave out session test. Set to False by default.', default=False)
+# Add argument for pretraining on all data from other subjects, and fine-tuning on some data from left out subject
+parser.add_argument('--pretrain_and_finetune', type=utils.str2bool, help='whether or not to pretrain on all data from other subjects, and fine-tune on some data from left out subject. Set to False by default.', default=False)
+# Add argument for finetuning epochs
+parser.add_argument('--finetuning_epochs', type=int, help='number of epochs to fine-tune for. Set to 25 by default.', default=25)
+# Add argument for whether or not to turn on unlabeled domain adaptation
+parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool, help='whether or not to turn on unlabeled domain adaptation methods. Set to False by default.', default=False)
+# Add argument to specify algorithm to use for unlabeled domain adaptation
+parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "fixmatch" by default.', default="fixmatch")
+# Add argument to specify proportion from left-out-subject to keep as unlabeled data
+parser.add_argument('--proportion_unlabeled_data_from_leftout_subject', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75) # TODO: fix, we note that this affects leave-one-session-out even when fully supervised
+# Add argument to specify batch size
+parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by default.', default=64)
+# Add argument for whether to use unlabeled data for subjects used for training as well
+parser.add_argument('--proportion_unlabeled_data_from_training_subjects', type=float, help='proportion of data from training subjects to use as unlabeled data. Set to 0.0 by default.', default=0.0)
+# Add argument for cutting down amount of total data for training subjects
+parser.add_argument('--proportion_data_from_training_subjects', type=float, help='proportion of data from training subjects to use. Set to 1.0 by default.', default=1.0)
+# Add argument for loading unlabeled data from flexwear-hd dataset
+parser.add_argument('--load_unlabeled_data_flexwearhd', type=utils.str2bool, help='whether or not to load unlabeled data from FlexWear-HD dataset. Set to False by default.', default=False)
 
-def initialize():
-    args = parse_args()
-    exercises = False
-    args.dataset = args.dataset.lower()
+# Parse the arguments
+args = parser.parse_args()
 
-    # SAFETY CHECKS 
+exercises = False
 
-    if args.load_unlabeled_data_flexwearhd:
-    assert args.dataset == "flexwear-hd", "Can only load unlabeled online data from FlexWear-HD dataset"
-    print("Loading unlabeled online data from FlexWear-HD dataset")
-    unlabeled_online_data = utils.getOnlineUnlabeledData(args.leftout_subject)
+if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
+    print("Warning: not using pytorch, many arguments will be ignored")
+    if args.turn_on_unlabeled_domain_adaptation:
+        raise NotImplementedError("Cannot use unlabeled domain adaptation with MLP, SVC, or RF")
+    if args.pretrain_and_finetune:
+        raise NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
 
-    if args.proportion_unlabeled_data_from_training_subjects > 0.0:
-        assert args.turn_on_unlabeled_domain_adaptation, "Cannot use unlabeled data from training subjects without turning on unlabeled domain adaptation"
+if (args.dataset.lower() == "uciemg" or args.dataset.lower() == "uci"):
+    if (not os.path.exists("./uciEMG")):
+        print("uciEMG dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--UCI'])
+    import utils_UCI as utils
+    print(f"The dataset being tested is uciEMG")
+    project_name = 'emg_benchmarking_uci'
+    args.dataset = "uciemg"
 
-    if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
-        print("Warning: not using pytorch, many arguments will be ignored")
-        if args.turn_on_unlabeled_domain_adaptation:
-            raise NotImplementedError("Cannot use unlabeled domain adaptation with MLP, SVC, or RF")
-        if args.pretrain_and_finetune:
-            raise NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
-
+elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_db2"):
+    if (not os.path.exists("./NinaproDB2")):
+        print("NinaproDB2 dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--NinaproDB2'])
+    import utils_NinaproDB2 as utils
+    print(f"The dataset being tested is ninapro-db2")
+    project_name = 'emg_benchmarking_ninapro-db2'
+    exercises = True
+    if args.leave_one_session_out:
+        raise ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
     if args.force_regression:
-        assert args.dataset in {"ninapro-db3", "ninapro_db3"}, "Regression only implemented for Ninapro DB2 and DB3 dataset."
+        assert args.exercises == [3], "Regression only implemented for exercise 3"
+    args.dataset = 'ninapro-db2'
 
-    if (args.dataset in {"uciemg", "uci"}):
-        if (not os.path.exists("./uciEMG")):
-            print("uciEMG dataset does not exist yet. Downloading now...")
-            subprocess.run(['python', './get_datasets.py', '--UCI'])
-        import utils_UCI as utils
-        print(f"The dataset being tested is uciEMG")
-        project_name = 'emg_benchmarking_uci'
-        args.dataset = "uciemg"
+elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_db5"):
+    if (not os.path.exists("./NinaproDB5")):
+        print("NinaproDB5 dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--NinaproDB5'])
+        subprocess.run(['python', './process_NinaproDB5.py'])
+    import utils_NinaproDB5 as utils
+    print(f"The dataset being tested is ninapro-db5")
+    project_name = 'emg_benchmarking_ninapro-db5'
+    exercises = True
+    if args.leave_one_session_out:
+        raise ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
+    args.dataset = 'ninapro-db5'
 
-    elif (args.dataset in {"ninapro-db2", "ninapro_db2"}):
-        if (not os.path.exists("./NinaproDB2")):
-            print("NinaproDB2 dataset does not exist yet. Downloading now...")
-            subprocess.run(['python', './get_datasets.py', '--NinaproDB2'])
-        import utils_NinaproDB2 as utils
-        print(f"The dataset being tested is ninapro-db2")
-        project_name = 'emg_benchmarking_ninapro-db2'
-        exercises = True
-        if args.leave_one_session_out:
-            raise ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
-        if args.force_regression:
-            assert args.exercises == [3], "Regression only implemented for exercise 3"
-        args.dataset = 'ninapro-db2'
+elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
+    import utils_NinaproDB3 as utils
+    assert args.exercises == [1] or args.partial_dataset_ninapro or (args.exercises == [3] and args.force_regression), "Exercise C cannot be used for classification due to missing data."
+    print(f"The dataset being tested is ninapro-db3")
+    project_name = 'emg_benchmarking_ninapro-db3'
+    exercises = True
+    if args.leave_one_session_out:
+        raise ValueError("leave-one-session-out not implemented for ninapro-db3; only one session exists")
+    
+    if args.force_regression:
+        print("NOTE: Subject 10 is missing gesture data for exercise 3 and cannot be used for regression. This is done automatically.")
+        MISSING_SUBJECT = 10 # subject 10 missing most force data
+    
+    assert not(args.force_regression and args.leftout_subject == 10), "Subject 10 is missing gesture data for exercise 3 and cannot be used. Please choose another subject."
 
-    elif (args.dataset in { "ninapro-db5", "ninapro_db5"}):
-        if (not os.path.exists("./NinaproDB5")):
-            print("NinaproDB5 dataset does not exist yet. Downloading now...")
-            subprocess.run(['python', './get_datasets.py', '--NinaproDB5'])
-            subprocess.run(['python', './process_NinaproDB5.py'])
-        import utils_NinaproDB5 as utils
-        print(f"The dataset being tested is ninapro-db5")
-        project_name = 'emg_benchmarking_ninapro-db5'
-        exercises = True
-        if args.leave_one_session_out:
-            raise ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
-        args.dataset = 'ninapro-db5'
+    if args.force_regression and args.leftout_subject == 11: 
+        args.leftout_subject == 10
+        # subject 10 is missing force data and is deleted internally 
 
-    elif (args.dataset in {"ninapro-db3", "ninapro_db3"}):
-        import utils_NinaproDB3 as utils
+    args.dataset = 'ninapro-db3'
 
-        assert args.exercises == [1] or args.partial_dataset_ninapro or (args.exercises == [3] and args.force_regression), "Exercise C cannot be used for classification due to missing data."
-        print(f"The dataset being tested is ninapro-db3")
-        project_name = 'emg_benchmarking_ninapro-db3'
-        exercises = True
-        if args.leave_one_session_out:
-            raise ValueError("leave-one-session-out not implemented for ninapro-db3; only one session exists")
-        
-        if args.force_regression:
-            print("NOTE: Subject 10 is missing gesture data for exercise 3 and is not used for regression.")
-        
-        assert not(args.force_regression and args.leftout_subject == 10), "Subject 10 is missing gesture data for exercise 3 and cannot be used. Please choose another subject."
+elif (args.dataset.lower() == "myoarmbanddataset"):
+    if (not os.path.exists("./myoarmbanddataset")):
+        print("myoarmbanddataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--MyoArmbandDataset'])
+    import utils_MyoArmbandDataset as utils
+    print(f"The dataset being tested is myoarmbanddataset")
+    project_name = 'emg_benchmarking_myoarmbanddataset'
+    if args.leave_one_session_out:
+        raise ValueError("leave-one-session-out not implemented for myoarmbanddataset; only one session exists")
+    args.dataset = 'myoarmbanddataset'
 
-        if args.force_regression and args.leftout_subject == 11: 
-            args.leftout_subject = 10
-            # subject 10 is missing force data and is deleted internally 
+elif (args.dataset.lower() == "hyser"):
+    if (not os.path.exists("./hyser")):
+        print("Hyser dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--Hyser'])
+    import utils_Hyser as utils
+    print(f"The dataset being tested is hyser")
+    project_name = 'emg_benchmarking_hyser'
+    args.dataset = 'hyser'
 
-        args.dataset = 'ninapro-db3'
+elif (args.dataset.lower() == "capgmyo"):
+    if (not os.path.exists("./CapgMyo_B")):
+        print("CapgMyo_B dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--CapgMyo_B'])
+    import utils_CapgMyo as utils
+    print(f"The dataset being tested is CapgMyo")
+    project_name = 'emg_benchmarking_capgmyo'
+    if args.leave_one_session_out:
+      utils.num_subjects = 10
+    args.dataset = 'capgmyo'
 
-    elif (args.dataset.lower() == "myoarmbanddataset"):
-        if (not os.path.exists("./myoarmbanddataset")):
-            print("myoarmbanddataset does not exist yet. Downloading now...")
-            subprocess.run(['python', './get_datasets.py', '--MyoArmbandDataset'])
-        import utils_MyoArmbandDataset as utils
-        print(f"The dataset being tested is myoarmbanddataset")
-        project_name = 'emg_benchmarking_myoarmbanddataset'
-        if args.leave_one_session_out:
-            raise ValueError("leave-one-session-out not implemented for myoarmbanddataset; only one session exists")
-        args.dataset = 'myoarmbanddataset'
+elif (args.dataset.lower() == "flexwear-hd"):
+    if (not os.path.exists("./FlexWear-HD")):
+        print("FlexWear-HD dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--FlexWearHD_Dataset'])
+    import utils_FlexWearHD as utils
+    print(f"The dataset being tested is FlexWear-HD Dataset")
+    project_name = 'emg_benchmarking_flexwear-hd_dataset'
+    # if args.leave_one_session_out:
+        # raise ValueError("leave-one-session-out not implemented for FlexWear-HDDataset; only one session exists")
+    args.dataset = 'flexwear-hd'
 
-    elif (args.dataset.lower() == "hyser"):
-        if (not os.path.exists("./hyser")):
-            print("Hyser dataset does not exist yet. Downloading now...")
-            subprocess.run(['python', './get_datasets.py', '--Hyser'])
-        import utils_Hyser as utils
-        print(f"The dataset being tested is hyser")
-        project_name = 'emg_benchmarking_hyser'
-        args.dataset = 'hyser'
+elif (args.dataset.lower() == "sci"):
+    import utils_SCI as utils
+    print(f"The dataset being tested is SCI")
+    project_name = 'emg_benchmarking_sci'
+    args.dataset = 'sci'
+    assert not args.transfer_learning, "Transfer learning not implemented for SCI dataset"
+    assert not args.leave_one_subject_out, "Leave one subject out not implemented for SCI dataset"
 
-    elif (args.dataset.lower() == "capgmyo"):
-        if (not os.path.exists("./CapgMyo_B")):
-            print("CapgMyo_B dataset does not exist yet. Downloading now...")
-            subprocess.run(['python', './get_datasets.py', '--CapgMyo_B'])
-        import utils_CapgMyo as utils
-        print(f"The dataset being tested is CapgMyo")
-        project_name = 'emg_benchmarking_capgmyo'
-        if args.leave_one_session_out:
-            utils.num_subjects = 10
-        args.dataset = 'capgmyo'
+elif (args.dataset.lower() == "mcs"):
+    if (not os.path.exists("./MCS_EMG")):
+        print("MCS dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--MCS_EMG'])
 
-    elif (args.dataset.lower() == "flexwear-hd"):
-        if (not os.path.exists("./FlexWear-HD")):
-            print("FlexWear-HD dataset does not exist yet. Downloading now...")
-            subprocess.run(['python', './get_datasets.py', '--FlexWearHD_Dataset'])
-        import utils_FlexWearHD as utils
-        print(f"The dataset being tested is FlexWear-HD Dataset")
-        project_name = 'emg_benchmarking_flexwear-hd_dataset'
-        # if args.leave_one_session_out:
-            # raise ValueError("leave-one-session-out not implemented for FlexWear-HDDataset; only one session exists")
-        args.dataset = 'flexwear-hd'
-
-    elif (args.dataset.lower() == "sci"):
-        import utils_SCI as utils
-        print(f"The dataset being tested is SCI")
-        project_name = 'emg_benchmarking_sci'
-        args.dataset = 'sci'
-        assert not args.transfer_learning, "Transfer learning not implemented for SCI dataset"
-        assert not args.leave_one_subject_out, "Leave one subject out not implemented for SCI dataset"
-
-    elif (args.dataset.lower() == "mcs"):
-        if (not os.path.exists("./MCS_EMG")):
-            print("MCS dataset does not exist yet. Downloading now...")
-            subprocess.run(['python', './get_datasets.py', '--MCS_EMG'])
-
-        print(f"The dataset being tested is MCS_EMG")
-        project_name = 'emg_benchmarking_mcs'
-        if args.full_dataset_mcs:
-            print(f"Using the full dataset for MCS EMG")
-            utils.gesture_labels = utils.gesture_labels_full
-            utils.numGestures = len(utils.gesture_labels)
-        else: 
-            print(f"Using the partial dataset for MCS EMG")
-            utils.gesture_labels = utils.gesture_labels_partial
-            utils.numGestures = len(utils.gesture_labels)
-        if args.leave_one_session_out:
-            raise ValueError("leave-one-session-out not implemented for MCS_EMG; only one session exists")
-        args.dataset = 'mcs'
-        
+    print(f"The dataset being tested is MCS_EMG")
+    project_name = 'emg_benchmarking_mcs'
+    if args.full_dataset_mcs:
+        print(f"Using the full dataset for MCS EMG")
+        utils.gesture_labels = utils.gesture_labels_full
+        utils.numGestures = len(utils.gesture_labels)
     else: 
-        raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," +
-                        "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
-        
-    if args.turn_off_scaler_normalization:
-        assert args.target_normalize == 0.0, "Cannot turn off scaler normalization and turn on target normalize at the same time"
-        
+        print(f"Using the partial dataset for MCS EMG")
+        utils.gesture_labels = utils.gesture_labels_partial
+        utils.numGestures = len(utils.gesture_labels)
+    if args.leave_one_session_out:
+        raise ValueError("leave-one-session-out not implemented for MCS_EMG; only one session exists")
+    args.dataset = 'mcs'
+    
+else: 
+    raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," +
+                    "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
+    
+if args.turn_off_scaler_normalization:
+    assert args.target_normalize == 0.0, "Cannot turn off scaler normalization and turn on target normalize at the same time"
+    
+# Use the arguments
+print(f"The value of --leftout_subject is {args.leftout_subject}")
+print(f"The value of --seed is {args.seed}")
+print(f"The value of --epochs is {args.epochs}")
+print(f"The model to use is {args.model}")
+if args.turn_on_kfold:
+    print(f"The value of --turn_on_kfold is {args.turn_on_kfold}")
+    print(f"The value of --kfold is {args.kfold}")
+    print(f"The value of --fold_index is {args.fold_index}")
+    
+if args.turn_on_cyclical_lr:
+    print(f"The value of --turn_on_cyclical_lr is {args.turn_on_cyclical_lr}")
+if args.turn_on_cosine_annealing:
+    print(f"The value of --turn_on_cosine_annealing is {args.turn_on_cosine_annealing}")
+if args.turn_on_cyclical_lr and args.turn_on_cosine_annealing:
+    print("Cannot turn on both cyclical learning rate and cosine annealing")
+    exit()
+if args.turn_on_rms:
+    print(f"The value of --turn_on_rms is {args.turn_on_rms}")
+    print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
+if args.turn_on_magnitude:
+    print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
+if exercises:
+    print(f"The value of --exercises is {args.exercises}")
+print(f"The value of --project_name_suffix is {args.project_name_suffix}")
+print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
+print(f"The value of --turn_on_cwt is {args.turn_on_cwt}")
+print(f"The value of --turn_on_hht is {args.turn_on_hht}")
 
-    def print_params(args):
-        for param, value in vars(args).items():
-            if getattr(args, param):
-                print(f"The value of --{param} is {value}")
+print(f"The value of --save_images is {args.save_images}")
+print(f"The value of --turn_off_scaler_normalization is {args.turn_off_scaler_normalization}")
+print(f"The value of --learning_rate is {args.learning_rate}")
+print(f"The value of --gpu is {args.gpu}")
 
-    print_params(args)
-            
+print(f"The value of --load_few_images is {args.load_few_images}")
+print(f"The value of --reduce_training_data_size is {args.reduce_training_data_size}")
+print(f"The value of --reduced_training_data_size is {args.reduced_training_data_size}")
 
-    # Add date and time to filename
-    current_datetime = datetime.datetime.now()
-    formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_out_randomly}")
+print(f"The value of --target_normalize is {args.target_normalize}")
+print(f"The value of --transfer_learning is {args.transfer_learning}")
+print(f"The value of --train_test_split_for_time_series is {args.train_test_split_for_time_series}")
+print(f"The value of --proportion_transfer_learning_from_leftout_subject is {args.proportion_transfer_learning_from_leftout_subject}")
+print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
+print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
+print(f"The value of --held_out_test is {args.held_out_test}")
+print(f"The value of --one_subject_for_training_set_for_session_test is {args.one_subject_for_training_set_for_session_test}")
+print(f"The value of --pretrain_and_finetune is {args.pretrain_and_finetune}")
+print(f"The value of --finetuning_epochs is {args.finetuning_epochs}")
 
-    print("------------------------------------------------------------------------------------------------------------------------")
-    print("Starting run at", formatted_datetime)
-    print("------------------------------------------------------------------------------------------------------------------------")
+print(f"The value of --turn_on_unlabeled_domain_adaptation is {args.turn_on_unlabeled_domain_adaptation}")
+print(f"The value of --unlabeled_algorithm is {args.unlabeled_algorithm}")
+print(f"The value of --proportion_unlabeled_data_from_leftout_subject is {args.proportion_unlabeled_data_from_leftout_subject}")
 
-    return args, exercises, project_name, formatted_datetime, utils
+print(f"The value of --batch_size is {args.batch_size}")
 
-args, exercises, project_name, formatted_datetime, utils = initialize()    
+print(f"The value of --proportion_unlabeled_data_from_training_subjects is {args.proportion_unlabeled_data_from_training_subjects}")
+print(f"The value of --proportion_data_from_training_subjects is {args.proportion_data_from_training_subjects}")
+print(f"The value of --load_unlabeled_data_flexwearhd is {args.load_unlabeled_data_flexwearhd}")
+
+if args.force_regression:
+    print(f"The value of --force_regression is {args.force_regression}")
+
+# Add date and time to filename
+current_datetime = datetime.datetime.now()
+formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+
+print("------------------------------------------------------------------------------------------------------------------------")
+print("Starting run at", formatted_datetime)
+print("------------------------------------------------------------------------------------------------------------------------")
 
 # %%
 # 0 for no LOSO; participants here are 1-13
@@ -344,10 +376,12 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(args.seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
-def set_exercise():
-    """ Set the exercises for the partial dataset for Ninapro datasets. 
-    """
+    
+if exercises:
+    emg = []
+    labels = []
+    if args.force_regression:
+        forces = []
 
     if args.partial_dataset_ninapro:
         if args.dataset == "ninapro-db2":
@@ -357,19 +391,6 @@ def set_exercise():
         elif args.dataset == "ninapro-db3":
             args.exercises = [1]
 
-def get_EMG():
-    if exercises:
-        return get_EMG_ninapro()
-    else:
-        return get_EMG_other_datasets()
-
-def get_EMG_ninapro():
-    """Gets the EMG data for Ninapro datasets.
-
-    Returns:
-        emg (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME): EMG data for the dataset with target_normalization (if applicable).
-    """
-    emg = []
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
             if (args.target_normalize > 0):
@@ -377,89 +398,61 @@ def get_EMG_ninapro():
                 emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject, args) for i in range(utils.num_subjects)])
 
             else:
-                emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, args) for i in range(utils.num_subjects)])
+                emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
 
             emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
+            
+            labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
 
-    return emg
+            labels.append(labels_async.get())
 
-def get_EMG_other_datasets(): 
-    """Gets the EMG data for other, non Ninapro datasets.
-
-    Returns:
-        emg (SUBJECT, TRIAL, CHANNEL, TIME STEP): EMG data for the dataset with target_normalization (if applicable). 
-    """
-    emg = []
-    if (args.target_normalize > 0):
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-            mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize)
-            if args.leave_one_session_out:
-                emg = []
-                labels = []
-                for i in range(1, utils.num_sessions+1):
-                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.leftout_subject) for j in range(utils.num_subjects)])
-                    emg.extend(emg_async.get())
-
-            else:
-                emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject + 1) for i in range(utils.num_subjects)])
-
-                emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-    else: 
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-            if args.leave_one_session_out:
-       
-                emg = []
-                labels = []
-                for i in range(1, utils.num_sessions+1):
-                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
-                    emg.extend(emg_async.get())
-        
-            else: # Not leave one session out
-                emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(utils.num_subjects)])
-                emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-    return emg
-
-def process_data(emg, labels, forces=None):
-    """Appends exercise sets together and add dimensions to labels if necessary. 
-
-    Args:
-        emg (_type_): _description_
-    """
+            if args.force_regression:
+                assert(exercise == 3), "Regression only implemented for exercise 3"
+                forces_async = pool.map_async(utils.getForces, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
+                forces.append(forces_async.get())
+                
+            assert len(emg[-1]) == len(labels[-1]), "Number of trials for EMG and labels do not match"
+            if args.force_regression:
+                assert len(emg[-1]) == len(forces[-1]), "Number of trials for EMG and forces do not match"
+            
     
-    if (args.force_regression and args.dataset == "ninapro-db3"): 
-        # Subject 10 is missing most of exercise 3 data. 
-        MISSING_SUBJECT = 10
+    # Delete subject 10s data for DB3 force_regression
+    if args.force_regression and args.dataset == "ninapro-db3": 
         utils.num_subjects -= 1
+
+        assert emg[0][MISSING_SUBJECT-1] == None
+        assert labels[0][MISSING_SUBJECT-1] == None
+        assert forces[0][MISSING_SUBJECT-1] == None
 
         del emg[0][MISSING_SUBJECT-1]
         del labels[0][MISSING_SUBJECT-1]
         del forces[0][MISSING_SUBJECT-1]
 
-    
-    # Store concatenated data for each subject
-    new_emg = []  
-    new_labels = []  
-    numGestures = 0
+    # Append exercise sets together and add dimensions to labels if necessary
+    new_emg = []  # This will store the concatenated data for each subject
+    new_labels = []  # This will store the concatenated labels for each subject
+    numGestures = 0 # This will store the number of gestures for each subject
     if args.force_regression: 
         new_forces = []
 
-    for subject in range(utils.num_subjects):
-        # Store data for this subject across all exercise sets.
-        subject_trials = [] 
-        subject_labels = []
+    for subject in range(utils.num_subjects): 
+        subject_trials = []  # List to store trials for this subject across all exercise sets
+        subject_labels = []  # List to store labels for this subject across all exercise sets
         if args.force_regression:
-            subject_forces = []
+            subject_forces = [] # List to store forces for this subject across all exercise sets
+        
         for exercise_set in range(len(emg)):  
             # Append the trials of this subject in this exercise set
             subject_trials.append(emg[exercise_set][subject])
             subject_labels.append(labels[exercise_set][subject])
             if args.force_regression:
-                subject_forces.append(forces[exercise_set][subject][:,:,0]) # take the first to reduce dimension from 500
+                subject_forces.append(forces[exercise_set][subject][:,:,0]) # take the first of the 500
 
-        # Concatenate across exercise sets
-        concatenated_trials = np.concatenate(subject_trials, axis=0)  
+        concatenated_trials = np.concatenate(subject_trials, axis=0)  # Concatenate trials across exercise sets
         if args.force_regression:
-            concatenated_forces = np.concatenate(subject_forces, axis=0)
+            # assuming here that no further conversion needed for forces 
+            concatenated_forces = np.concatenate(subject_forces, axis=0)  # Concatenate forces across exercise sets
+        
         total_number_labels = 0
         for i in range(len(subject_labels)):
             total_number_labels += subject_labels[i].shape[1]
@@ -477,6 +470,7 @@ def process_data(emg, labels, forces=None):
         if args.partial_dataset_ninapro:
             desired_gesture_labels = utils.partial_gesture_indices
         
+        # Assuming labels are stored separately and need to be concatenated end-to-end
         concatenated_labels = np.concatenate(labels_set, axis=0) # (TRIAL)
 
         if args.partial_dataset_ninapro:
@@ -494,6 +488,9 @@ def process_data(emg, labels, forces=None):
         # Convert to one hot encoding
         concatenated_labels = np.eye(np.max(concatenated_labels) + 1)[concatenated_labels] # (TRIAL, GESTURE)
 
+        # labels are assigned corrctly depending on which exercise set 
+        # scale down depending on which exercise set you're on
+
         # Append the concatenated trials to the new_emg list
         new_emg.append(concatenated_trials)
         new_labels.append(concatenated_labels)
@@ -504,76 +501,56 @@ def process_data(emg, labels, forces=None):
     labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
     if args.force_regression:
         forces = [torch.from_numpy(forces_np) for forces_np in new_forces]
-        return emg, labels, forces
 
-    return emg, labels
+else: # Not exercises
 
-def get_labels():
-    if exercises:
-        return get_labels_ninapro()
-    else:
-        return get_labels_other_datasets()
-    
-def get_labels_ninapro():
-    labels = []
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-        for exercise in args.exercises:
-            labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
-            labels.append(labels_async.get())
+    if (args.target_normalize > 0):
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
+            if args.leave_one_session_out:
+                total_number_of_sessions = 2
+                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize, lastSessionOnly=False)
+                emg = []
+                labels = []
+                for i in range(1, total_number_of_sessions+1):
+                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.leftout_subject) for j in range(utils.num_subjects)])
 
-    return labels
-    
-def get_labels_other_datasets():
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-        if args.leave_one_session_out:
-            labels = []
-            for i in range(1, utils.num_sessions+1):
-                labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
-                labels.extend(labels_async.get())
-        else:
-            labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
-            labels = labels_async.get()
-    
-    return labels
+                    emg.extend(emg_async.get())
+                    
+                    labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
+                    labels.extend(labels_async.get())
+            else:
+                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize)
+                
+                emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject) for i in range(utils.num_subjects)])
 
-def get_forces():
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-        for exercise in args.exercises:
-            assert(exercise == 3), "Regression only implemented for exercise 3"
-            forces_async = pool.map_async(utils.getForces, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
-            forces.append(forces_async.get())
-    return forces
-    
-def get_data():
-    
-    if args.partial_dataset_ninapro:
-        set_exercise()
+                emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+                
+                labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
+                labels = labels_async.get()
+    else: # Not target_normalize
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
+            if args.leave_one_session_out: # based on 2 sessions for each subject
+                total_number_of_sessions = 2
+                emg = []
+                labels = []
+                for i in range(1, total_number_of_sessions+1):
+                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
+                    emg.extend(emg_async.get())
+                    
+                    labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
+                    labels.extend(labels_async.get())
+                
+            else: # Not leave one session out
+                dataset_identifiers = utils.num_subjects
+                    
+                emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(dataset_identifiers)])
+                emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+                
+                labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(dataset_identifiers)])
+                labels = labels_async.get()
 
-    emg = get_EMG()
-    labels = get_labels()
-    if args.force_regression:
-        forces = get_forces()
-
-    assert len(emg[-1]) == len(labels[-1]), "Number of trials for EMG and labels do not match"
-    if args.force_regression:
-        assert len(emg[-1]) == len(forces[-1]), "Number of trials for EMG and forces do not match"
-
-    if exercises:
-        if args.force_regression:
-            emg, labels, forces = process_data(emg, labels, forces)
-        else:
-            emg, labels = process_data(emg, labels)
+    print("subject 1 mean", torch.mean(emg[0]))
     numGestures = utils.numGestures
-
-    if args.force_regression:
-        return emg, labels, forces, numGestures
-    else:
-        return emg, labels, numGestures
-
-if args.force_regression:
-    emg, labels, forces, numGestures = get_data()
-else:  
-    emg, labels, numGestures = get_data()
     
 if args.load_unlabeled_data_flexwearhd:
     assert args.dataset == "flexwear-hd", "Can only load unlabeled online data from FlexWear-HD dataset"
@@ -601,82 +578,26 @@ else:
     # is usually much larger than the RMS
     sigma_coefficient = 0.5
     
-# leave out is used like everywhere
-
-def compute_emg_in():
+leaveOutIndices = []
+# Generate scaler for normalization
+if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # will have to run and test this again, or just remove
+    leaveOut = args.leave_n_subjects_out_randomly
+    print(f"Leaving out {leaveOut} subjects randomly")
+    # subject indices to leave out randomly
+    leaveOutIndices = np.random.choice(range(utils.num_subjects), leaveOut, replace=False)
+    print(f"Leaving out subjects {np.sort(leaveOutIndices)}")
+    emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg if i not in leaveOutIndices], axis=0, dtype=np.float32)
     
-    leaveOutIndices = []
-
-    # train and validation indices only for args.held_out_test
-    train_indices = None
-    validation_indices = None
+    global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
+    global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
     
-    if args.leave_n_subjects_out_randomly:
-        if args.leave_n_subjects_out_randomly:
-        leaveOut = args.leave_n_subjects_out_randomly
-
-        leaveOut = args.leave_n_subjects_out_randomly
-        print(f"Leaving out {leaveOut} subjects randomly")
-        # subject indices to leave out randomly
-        leaveOutIndices = np.random.choice(range(utils.num_subjects), leaveOut, replace=False)
-        print(f"Leaving out subjects {np.sort(leaveOutIndices)}")
-        emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg if i not in leaveOutIndices], axis=0, dtype=np.float32)
-        
-
-    else:
-        if (args.held_out_test): # can probably be deprecated and deleted
-            if args.turn_on_kfold:
-                
-                skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
-            
-                emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
-                labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-                
-                labels_for_folds = np.argmax(labels_in, axis=1)
-                
-                fold_count = 1
-                for train_index, test_index in skf.split(emg_in, labels_for_folds):
-                    if fold_count == args.fold_index:
-                        train_indices = train_index
-                        validation_indices = test_index
-                        break
-                    fold_count += 1
-
-            else:
-                # Reshape and concatenate EMG data
-                # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
-                # Then concatenate along the subject dimension (axis=0)
-                emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
-                labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-
-                indices = np.arange(emg_in.shape[0])
-                train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
-
-
-        elif (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # Running LOSO standardization
-            emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
-        else:
-            assert False, "Should not reach here. Need to catch none case earlier in scalar_normalize_emg()"
-
-    return emg_in, train_indices, validation_indices, leaveOutIndices
-    
-def compute_scaler(emg_in, train_indices=None):
-    
-    if args.held_out_test:
-        selected_emg = emg_in[train_indices]
-    else:
-        selected_emg = emg_in
-
-    global_low_value = selected_emg.mean() - sigma_coefficient*selected_emg.std()
-    global_high_value = selected_emg.mean() + sigma_coefficient*selected_emg.std()
-
     # Normalize by electrode
-    emg_in_by_electrode = selected_emg.reshape(-1, length, width)
-
+    emg_in_by_electrode = emg_in.reshape(-1, length, width)
+    
     # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
     # Reshape data to (SAMPLES*50, 16)
     emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
-
+    
     # Initialize and fit the scaler on the reshaped data
     # This will compute the mean and std dev for each electrode across all samples and features
     scaler = preprocessing.StandardScaler()
@@ -692,28 +613,127 @@ def compute_scaler(emg_in, train_indices=None):
     del emg_in_by_electrode
     del emg_reshaped
 
-    return global_low_value, global_high_value, scaler
-    
-def scalar_normalize_emg():
+else: # Not leave n subjects out randomly
+    if (args.held_out_test): # can probably be deprecated and deleted
+        if args.turn_on_kfold:
+            skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
+            
+            emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
+            labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+            
+            labels_for_folds = np.argmax(labels_in, axis=1)
+            
+            fold_count = 1
+            for train_index, test_index in skf.split(emg_in, labels_for_folds):
+                if fold_count == args.fold_index:
+                    train_indices = train_index
+                    validation_indices = test_index
+                    break
+                fold_count += 1
 
-    if args.turn_off_scaler_normalization:
+            # Normalize by electrode
+            emg_in_by_electrode = emg_in[train_indices].reshape(-1, length, width)
+            # s = preprocessing.StandardScaler().fit(emg_in[train_indices])
+            global_low_value = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
+            global_high_value = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
+
+            # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+            # Reshape data to (SAMPLES*50, 16)
+            emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
+
+            # Initialize and fit the scaler on the reshaped data
+            # This will compute the mean and std dev for each electrode across all samples and features
+            scaler = preprocessing.StandardScaler()
+            scaler.fit(emg_reshaped)
+            
+            # Repeat means and std_devs for each time point using np.repeat
+            scaler.mean_ = np.repeat(scaler.mean_, width)
+            scaler.scale_ = np.repeat(scaler.scale_, width)
+            scaler.var_ = np.repeat(scaler.var_, width)
+            scaler.n_features_in_ = width*utils.numElectrodes
+
+            del emg_in
+            del labels_in
+
+            del emg_in_by_electrode
+            del emg_reshaped
+
+        else: 
+            # Reshape and concatenate EMG data
+            # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
+            # Then concatenate along the subject dimension (axis=0)
+            emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
+            labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+
+            indices = np.arange(emg_in.shape[0])
+            train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
+            train_emg_in = emg_in[train_indices]  # Select only the train indices
+            # s = preprocessing.StandardScaler().fit(train_emg_in)
+
+            # Normalize by electrode
+            emg_in_by_electrode = train_emg_in.reshape(-1, length, width)
+            global_low_value = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
+            global_high_value = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
+
+            # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+            # Reshape data to (SAMPLES*50, 16)
+            emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
+
+            # Initialize and fit the scaler on the reshaped data
+            # This will compute the mean and std dev for each electrode across all samples and features
+            scaler = preprocessing.StandardScaler()
+            scaler.fit(emg_reshaped)
+            
+            # Repeat means and std_devs for each time point using np.repeat
+            scaler.mean_ = np.repeat(scaler.mean_, width)
+            scaler.scale_ = np.repeat(scaler.scale_, width)
+            scaler.var_ = np.repeat(scaler.var_, width)
+            scaler.n_features_in_ = width*utils.numElectrodes
+
+            del emg_in
+            del labels_in
+
+            del train_emg_in
+            del indices
+
+            del emg_in_by_electrode
+            del emg_reshaped
+
+    elif (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # Running LOSO standardization
+        emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
+        # s = preprocessing.StandardScaler().fit(emg_in)
+        global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
+        global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
+
+        # Normalize by electrode
+        emg_in_by_electrode = emg_in.reshape(-1, length, width)
+
+        # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+        # Reshape data to (SAMPLES*50, 16)
+        emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
+
+        # Initialize and fit the scaler on the reshaped data
+        # This will compute the mean and std dev for each electrode across all samples and features
+        scaler = preprocessing.StandardScaler()
+        scaler.fit(emg_reshaped)
+        
+        # Repeat means and std_devs for each time point using np.repeat
+        scaler.mean_ = np.repeat(scaler.mean_, width)
+        scaler.scale_ = np.repeat(scaler.scale_, width)
+        scaler.var_ = np.repeat(scaler.var_, width)
+        scaler.n_features_in_ = width*utils.numElectrodes
+
+        del emg_in
+        del emg_in_by_electrode
+        del emg_reshaped
+
+    else: 
         global_low_value = None
         global_high_value = None
         scaler = None
-        train_indices = None
-        validation_indices = None
-        leaveOutIndices = None
-
-    else: 
-        emg_in, leaveOutIndices, train_indices, validation_indices, leaveOutIndices = compute_emg_in()
-        global_low_value, global_high_value, scaler = compute_scaler(emg_in, train_indices)
-
-    # Train/Validation indices are only used for held out test and leave_out_indices is only for leave_n_subjects_out_randomly
 
 
-    return global_low_value, global_high_value, scaler, train_indices, validation_indices, leaveOutIndices
-
-global_low_value, global_high_value, scaler, train_indices, validation_indices, leaveOutIndices = scalar_normalize_emg()
+data = []
 
 class ToNumpy:
         """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
@@ -730,159 +750,140 @@ class ToNumpy:
 print("Width of EMG data: ", width)
 print("Length of EMG data: ", length)
 
+base_foldername_zarr = ""
 
-def create_foldername_zarr():
-    base_foldername_zarr = ""
-
-    if args.leave_n_subjects_out_randomly != 0:
-        base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
-    else:
-        if args.held_out_test:
-            base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
-        elif args.leave_one_session_out:
-            base_foldername_zarr = f'Leave_one_session_out_images_zarr/{args.dataset}/'
-        elif args.turn_off_scaler_normalization:
-            base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
-        elif args.leave_one_subject_out:
-            base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
-
-    if args.turn_off_scaler_normalization:
-        if args.leave_n_subjects_out_randomly != 0:
-            base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
-        else: 
-            if args.held_out_test:
-                base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
-            else: 
-                base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
-        scaler = None
-    else:
-        base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(leaveOut) + '/'
-        if args.target_normalize > 0:
-            base_foldername_zarr += 'target_normalize_' + str(args.target_normalize) + '/'  
-
-    if args.turn_on_rms:
-        base_foldername_zarr += 'RMS_input_windowsize_' + str(args.rms_input_windowsize) + '/'
-    elif args.turn_on_spectrogram:
-        base_foldername_zarr += 'spectrogram/'
-    elif args.turn_on_cwt:
-        base_foldername_zarr += 'cwt/'
-    elif args.turn_on_hht:
-        base_foldername_zarr += 'hht/'
-    else:
-        base_foldername_zarr += 'raw/'
-
-    if exercises:
-        if args.partial_dataset_ninapro:
-            base_foldername_zarr += 'partial_dataset_ninapro/'
-        else:
-            exercises_numbers_filename = '-'.join(map(str, args.exercises))
-            base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
-        
-    if args.save_images: 
-        if not os.path.exists(base_foldername_zarr):
-            os.makedirs(base_foldername_zarr)
-
-    return base_foldername_zarr
-
-base_foldername_zarr = create_foldername_zarr()
-
-def load_images():
-    data = []
-    for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-        if args.held_out_test:
-            subject_folder = f'subject{x}/'
-        elif args.leave_one_session_out:
-            subject_folder = f'session{x}/'
-        else:
-            subject_folder = f'LOSO_subject{x}/'
-        foldername_zarr = base_foldername_zarr + subject_folder
-        
-        subject_or_session = "session" if args.leave_one_session_out else "subject"
-        print(f"Attempting to load dataset for {subject_or_session}", x, "from", foldername_zarr)
-
-        print("Looking in folder: ", foldername_zarr)
-        # Check if the folder (dataset) exists, load if yes, else create and save
-        if os.path.exists(foldername_zarr):
-            # Load the dataset
-            dataset = zarr.open(foldername_zarr, mode='r')
-            print(f"Loaded dataset for {subject_or_session} {x} from {foldername_zarr}")
-            if args.load_few_images:
-                data += [dataset[:10]]
-            else: 
-                data += [dataset[:]]
-        else:
-            print(f"Could not find dataset for {subject_or_session} {x} at {foldername_zarr}")
-            # Get images and create the dataset
-            if (args.target_normalize > 0):
-                scaler = None
-            images = utils.getImages(emg[x], scaler, length, width, 
-                                    turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
-                                    turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value, 
-                                    turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt, 
-                                    turn_on_hht=args.turn_on_hht)
-            images = np.array(images, dtype=np.float16)
-            
-            # Save the dataset
-            if args.save_images:
-                os.makedirs(foldername_zarr, exist_ok=True)
-                dataset = zarr.open(foldername_zarr, mode='w', shape=images.shape, dtype=images.dtype, chunks=True)
-                dataset[:] = images
-                print(f"Saved dataset for subject {x} at {foldername_zarr}")
-            else:
-                print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
-            data += [images]
-            
-    if args.load_unlabeled_data_flexwearhd:
-        unlabeled_images = utils.getImages(unlabeled_online_data, scaler, length, width,
-                                                    turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize,
-                                                    turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value,
-                                                    turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt,
-                                                    turn_on_hht=args.turn_on_hht)
-        unlabeled_images = np.array(unlabeled_images, dtype=np.float16)
-        unlabeled_data = unlabeled_images
-        del unlabeled_images, unlabeled_online_data
-
-    return data
-
-# def print_train_test_set():
-#     print("Size of X_train:", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-#     print("Size of Y_train:", Y_train.size()) # (SAMPLE, GESTURE/FORCE)
-#     print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-#     print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
-
-#     if args.held_out_test:
-#         print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-#         print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
-
-def train_test_split_print(datasets):
-    for name, dataset in datasets.items():
-        print(f'{name} size: {dataset.shape}')
-    
-    
-
-
-data = load_images()
 if args.leave_n_subjects_out_randomly != 0:
-    """Validate using leaveOutIndices (random n subjects) and train using the rest"""
+    base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
+else:
+    if args.held_out_test:
+        base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
+    elif args.leave_one_session_out:
+        base_foldername_zarr = f'Leave_one_session_out_images_zarr/{args.dataset}/'
+    elif args.turn_off_scaler_normalization:
+        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
+    elif args.leave_one_subject_out:
+        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
 
-    y_data = forces if args.force_regression else labels
+if args.turn_off_scaler_normalization:
+    if args.leave_n_subjects_out_randomly != 0:
+        base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
+    else: 
+        if args.held_out_test:
+            base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
+        else: 
+            base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
+    scaler = None
+else:
+    base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(leaveOut) + '/'
+    if args.target_normalize > 0:
+        base_foldername_zarr += 'target_normalize_' + str(args.target_normalize) + '/'  
 
+if args.turn_on_rms:
+    base_foldername_zarr += 'RMS_input_windowsize_' + str(args.rms_input_windowsize) + '/'
+elif args.turn_on_spectrogram:
+    base_foldername_zarr += 'spectrogram/'
+elif args.turn_on_cwt:
+    base_foldername_zarr += 'cwt/'
+elif args.turn_on_hht:
+    base_foldername_zarr += 'hht/'
+else:
+    base_foldername_zarr += 'raw/'
+
+if exercises:
+    if args.partial_dataset_ninapro:
+        base_foldername_zarr += 'partial_dataset_ninapro/'
+    else:
+        exercises_numbers_filename = '-'.join(map(str, args.exercises))
+        base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
+    
+if args.save_images: 
+    if not os.path.exists(base_foldername_zarr):
+        os.makedirs(base_foldername_zarr)
+
+for x in tqdm(range(len(emg)), desc="Number of Subjects "):
+    if args.held_out_test:
+        subject_folder = f'subject{x}/'
+    elif args.leave_one_session_out:
+        subject_folder = f'session{x}/'
+    else:
+        subject_folder = f'LOSO_subject{x}/'
+    foldername_zarr = base_foldername_zarr + subject_folder
+    
+    subject_or_session = "session" if args.leave_one_session_out else "subject"
+    print(f"Attempting to load dataset for {subject_or_session}", x, "from", foldername_zarr)
+
+    print("Looking in folder: ", foldername_zarr)
+    # Check if the folder (dataset) exists, load if yes, else create and save
+    if os.path.exists(foldername_zarr):
+        # Load the dataset
+        dataset = zarr.open(foldername_zarr, mode='r')
+        print(f"Loaded dataset for {subject_or_session} {x} from {foldername_zarr}")
+        if args.load_few_images:
+            data += [dataset[:10]]
+        else: 
+            data += [dataset[:]]
+    else:
+        print(f"Could not find dataset for {subject_or_session} {x} at {foldername_zarr}")
+        # Get images and create the dataset
+        if (args.target_normalize > 0):
+            scaler = None
+        images = utils.getImages(emg[x], scaler, length, width, 
+                                 turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
+                                 turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value, 
+                                 turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt, 
+                                 turn_on_hht=args.turn_on_hht)
+        images = np.array(images, dtype=np.float16)
+        
+        # Save the dataset
+        if args.save_images:
+            os.makedirs(foldername_zarr, exist_ok=True)
+            dataset = zarr.open(foldername_zarr, mode='w', shape=images.shape, dtype=images.dtype, chunks=True)
+            dataset[:] = images
+            print(f"Saved dataset for subject {x} at {foldername_zarr}")
+        else:
+            print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
+        data += [images]
+        
+if args.load_unlabeled_data_flexwearhd:
+    unlabeled_images = utils.getImages(unlabeled_online_data, scaler, length, width,
+                                                turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize,
+                                                turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value,
+                                                turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt,
+                                                turn_on_hht=args.turn_on_hht)
+    unlabeled_images = np.array(unlabeled_images, dtype=np.float16)
+    unlabeled_data = unlabeled_images
+    del unlabeled_images, unlabeled_online_data
+
+if args.leave_n_subjects_out_randomly != 0:
+    
+    # Instead of the below code, leave n subjects out randomly to be used as the 
+    # validation set and the rest as the training set using leaveOutIndices
     X_validation = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
-    Y_validation = np.concatenate([np.array(y_data[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
-    label_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
+    X_validation = torch.from_numpy(X_validation).to(torch.float16)
+
+    if args.force_regression:
+        Y_validation = np.concatenate([np.array(forces[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
+        label_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
+    else: 
+        Y_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
+        label_validation = Y_validation
+    Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
     
     X_train = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
-    Y_train = np.concatenate([np.array(y_data[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
-    label_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
-    
-    X_validation = torch.from_numpy(X_validation).to(torch.float16)
-    Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-    label_validation = torch.from_numpy(label_validation).to(torch.float16)
-
     X_train = torch.from_numpy(X_train).to(torch.float16)
-    Y_train = torch.from_numpy(Y_train).to(torch.float16)
-    label_train = torch.from_numpy(label_train).to(torch.float16)
 
+    if args.force_regression: 
+        Y_train = np.concatenate([np.array(forces[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float32)
+        label_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
+    else: 
+        Y_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
+        label_train = Y_train
+    Y_train = torch.from_numpy(Y_train).to(torch.float16)
+        
+    print("Size of X_train:", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+    print("Size of Y_train:", Y_train.size()) # (SAMPLE, GESTURE)
+    print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+    print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
     
     del data
     del emg
@@ -890,36 +891,29 @@ if args.leave_n_subjects_out_randomly != 0:
 
 else: 
     if args.held_out_test:
-        """Train using train_indices. Split validation indices into validation and test using labels to stratify.""" 
-
         combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
         combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
         if args.force_regression:
             combined_forces = np.concatenate([np.array(i) for i in forces], axis=0, dtype=np.float32)
 
-        combined_y = combined_forces if args.force_regression else combined_labels
-
         X_train = combined_images[train_indices]
-        Y_train = combined_y[train_indices]
-        label_train = combined_labels[train_indices]
+        if args.force_regression:
+            Y_train = combined_forces[train_indices]
+            label_train = combined_labels[train_indices]
+        else:
+            Y_train = combined_labels[train_indices]
+            label_train = Y_train
         
         X_validation = combined_images[validation_indices]
-        Y_validation = combined_y[validation_indices]
         label_validation = combined_labels[validation_indices]
-  
+        if args.force_regression:
+            Y_validation = combined_forces[validation_indices]
+        else:
+            Y_validation = label_validation
+
+        
         X_validation, X_test, Y_validation, Y_test, label_validation, label_test= model_selection.train_test_split(X_validation, Y_validation, label_validation, test_size=0.5, stratify=label_validation)
     
-        X_train = torch.from_numpy(X_train).to(torch.float16)
-        Y_train = torch.from_numpy(Y_train).to(torch.float16)
-        label_train = torch.from_numpy(label_train).to(torch.float16)
-
-        X_validation = torch.from_numpy(X_validation).to(torch.float16)
-        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-        label_validation = torch.from_numpy(label_validation).to(torch.float16)
-
-        X_test = torch.from_numpy(X_test).to(torch.float16)
-        Y_test = torch.from_numpy(Y_test).to(torch.float16)
-        label_test = torch.from_numpy(label_test).to(torch.float16)
 
         del combined_images
         del combined_labels
@@ -929,32 +923,34 @@ else:
         del emg
         if args.force_regression:
             del forces
-
-    elif args.leave_one_session_out:
-        """ Splits data based on leaving one session of leaveOut subject out. 
         
-        Leftout subject's sessions are split into first n sessions and last session. Creates training using non leftout, finetuining using leftout first n, and validation using left out's last session. If domain adaptation is turned on, splits these into labeled and unlabeled. 
-
-        Returns
-        -------
-        train: non leftout subject's labeled data
-        train_unlabeled: non leftout subject's unlabeled data (if unlabeled domain adaptation)
-        train_finetuning: leftout subject's first n sessions labeled data
-        train_finetuning_unlabeled: leftout subject's first n sessions unlabeled data (if unlabeled domain adaptation)
-        validation: leftout subject's last session data
-
-        """
-
-        left_out_subject_last_session_index = (utils.num_sessions - 1) * utils.num_subjects + leaveOut-1
-        left_out_subject_first_n_sessions_indices = [i for i in range(utils.num_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
-
+        X_train = torch.from_numpy(X_train).to(torch.float16)
+        Y_train = torch.from_numpy(Y_train).to(torch.float16)
+        label_train = torch.from_numpy(label_train).to(torch.float16)
+        X_validation = torch.from_numpy(X_validation).to(torch.float16)
+        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
+        label_validation = torch.from_numpy(label_validation).to(torch.float16)
+        X_test = torch.from_numpy(X_test).to(torch.float16)
+        Y_test = torch.from_numpy(Y_test).to(torch.float16)
+        label_test = torch.from_numpy(label_test).to(torch.float16)
+        print("Size of X_train:     ", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_train:     ", Y_train.size()) # (SAMPLE, GESTURE)
+        print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
+        print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
+        print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
+    
+    elif args.leave_one_session_out:
+        total_number_of_sessions = 2 # all datasets used in our benchmark have at most 2 sessions but this can be changed using a variable from dataset-specific utils instead
+        left_out_subject_last_session_index = (total_number_of_sessions - 1) * utils.num_subjects + leaveOut-1
+        left_out_subject_first_n_sessions_indices = [i for i in range(total_number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
         print("left_out_subject_last_session_index:", left_out_subject_last_session_index)
         print("left_out_subject_first_n_sessions_indices:", left_out_subject_first_n_sessions_indices)
 
         X_pretrain = []
         Y_pretrain = []
-        label_pretrain = []
 
+        label_pretrain = []
         if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
             X_pretrain_unlabeled_list = []
             Y_pretrain_unlabeled_list = []
@@ -962,29 +958,27 @@ else:
     
         X_finetune = []
         Y_finetune = []
+
         label_finetune = []
 
-
         if args.proportion_unlabeled_data_from_leftout_subject>0 and args.turn_on_unlabeled_domain_adaptation:
+
             X_finetune_unlabeled_list = []
             Y_finetune_unlabeled_list = []
             label_finetune_unlabeled_list = []
 
-        # created self variables
-
-        for i in range(utils.num_sessions*utils.num_subjects):
+        for i in range(total_number_of_sessions * utils.num_subjects):
             X_train_temp = data[i]
-            Y_train_temp = forces[i] if args.force_regression else labels[i]
             label_train_temp = labels[i]
+            if args.force_regression:
+                Y_train_temp = forces[i]
+            else:
+                Y_train_temp = label_train_temp
 
-            # Pretraining created wiith all but leftout subject
             if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices:
-
-                # Training set is a proportion of data from training subjects
                 if args.proportion_data_from_training_subjects<1.0:
                     X_train_temp, _, Y_train_temp, _, label_train_temp, _ = tts.train_test_split(X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
-                    
-                # Pretrain set is split into labeled and unlabeled data (where unlabeled really just means not using it during pretraining)
+                        
                 if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
                     X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled, label_pretrain_labeled, label_pretrain_unlabeled  = tts.train_test_split(
                         X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
@@ -994,16 +988,11 @@ else:
                     X_pretrain_unlabeled_list.append(np.array(X_pretrain_unlabeled))
                     Y_pretrain_unlabeled_list.append(np.array(Y_pretrain_unlabeled))
                     label_pretrain_unlabeled_list.append(np.array(label_pretrain_unlabeled))
-                # Pretrain is all data except from lefout subject
                 else:
                     X_pretrain.append(np.array(X_train_temp))
                     Y_pretrain.append(np.array(Y_train_temp))
                     label_pretrain.append(np.array(label_train_temp))
-            
-            # Finetuning created with first n sessions of leftout subject 
             elif i in left_out_subject_first_n_sessions_indices:
-
-                # Finetuning set is a proportion of data from leftout subject which is split into labeled and unlabeled. 
                 if args.proportion_unlabeled_data_from_leftout_subject>0 and args.turn_on_unlabeled_domain_adaptation:
                     X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled, label_finetune_labeled, label_finetune_unlabeled = tts.train_test_split(
                         X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
@@ -1013,77 +1002,61 @@ else:
                     X_finetune_unlabeled_list.append(np.array(X_finetune_unlabeled))
                     Y_finetune_unlabeled_list.append(np.array(Y_finetune_unlabeled))
                     label_finetune_unlabeled_list.append(np.array(label_finetune_unlabeled))
-                # Finetuning is data for the first n sessions of leftout subject
                 else:
                     X_finetune.append(np.array(X_train_temp))
                     Y_finetune.append(np.array(Y_train_temp))
                     label_finetune.append(np.array(label_train_temp))
 
-        # Validation is leftout subject's last session
-        X_validation = np.array(data[left_out_subject_last_session_index])
-        y_data = forces if args.force_regression else labels
-        Y_validation = np.array(y_data[left_out_subject_last_session_index])
-        label_validation = np.array(labels[left_out_subject_last_session_index])
-
-
-        # AT THE END OF THIS LOOP: pretrain (labeled), pretrain_unlabeled, finetune (labeled), finetune_unlabeled, validation
-
         if args.load_unlabeled_data_flexwearhd:
+            assert(not args.force_regression)
             X_finetune_unlabeled_list.append(unlabeled_data)
             Y_finetune_unlabeled_list.append(np.zeros(unlabeled_data.shape[0]))
+            assert not args.force_regression, "Regression only for DB2/3"
             label_finetune_unlabeled_list.append(np.zeros(unlabeled_data.shape[0])) 
 
         if utils.num_subjects == 1:
             assert not args.pretrain_and_finetune, "Cannot pretrain and finetune with only one subject"
 
-        # Concatenate sets
-
-        # Non leftout subject data (if unlabeled_domain_adaptation: labeled only)
-        X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
-        Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
-        label_pretrain = np.concatenate(label_pretrain, axis=0, dtype=np.float16)
-
-        # Leftout subject's first n sessions (if unlabeled_domain_adaptation: labeled only)
+        if utils.num_subjects > 1:
+            X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
+            Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
+            label_pretrain = np.concatenate(label_pretrain, axis=0, dtype=np.float16)
         X_finetune = np.concatenate(X_finetune, axis=0, dtype=np.float16)
         Y_finetune = np.concatenate(Y_finetune, axis=0, dtype=np.float16)
         label_finetune = np.concatenate(label_finetune, axis=0, dtype=np.float16)
+        X_validation = np.array(data[left_out_subject_last_session_index])
+        if args.force_regression:
+            Y_validation = np.array(forces[left_out_subject_last_session_index])
+            label_validation = np.array(labels[left_out_subject_last_session_index])
+        else:
+            Y_validation = np.array(labels[left_out_subject_last_session_index])
+            label_validation = Y_validation
 
-        if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation: # A
-            # Non leftout subject data (if unlabeled_domain_adaptation: unlabeled only)
+        if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
             X_pretrain_unlabeled = np.concatenate(X_pretrain_unlabeled_list, axis=0, dtype=np.float16)
             Y_pretrain_unlabeled = np.concatenate(Y_pretrain_unlabeled_list, axis=0, dtype=np.float16)
             label_pretrain_unlabeled = np.concatenate(label_pretrain_unlabeled_list, axis=0, dtype=np.float16)
 
         if (args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_flexwearhd) and args.turn_on_unlabeled_domain_adaptation:
-            # Leftout subject's first n sessions (if unlabeled_domain_adaptation: unlabeled only)
             X_finetune_unlabeled = np.concatenate(X_finetune_unlabeled_list, axis=0, dtype=np.float16)
             Y_finetune_unlabeled = np.concatenate(Y_finetune_unlabeled_list, axis=0, dtype=np.float16)
             label_finetune_unlabeled = np.concatenate(label_finetune_unlabeled_list, axis=0, dtype=np.float16)
         
-        # Non leftout subject data (if unlabeled_domain_adaptation: labeled only)
-        X_train = torch.from_numpy(X_pretrain).to(torch.float16)
-        Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
-        label_train = torch.from_numpy(label_pretrain).to(torch.float16)
-
-        # Leftout subject's first n sessions (if unlabeled_domain_adaptation: labeled only)
+        if utils.num_subjects > 1:
+            X_train = torch.from_numpy(X_pretrain).to(torch.float16)
+            Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
+            label_train = torch.from_numpy(label_pretrain).to(torch.float16)
         X_train_finetuning = torch.from_numpy(X_finetune).to(torch.float16)
         Y_train_finetuning = torch.from_numpy(Y_finetune).to(torch.float16)
         label_train_finetuning = torch.from_numpy(label_finetune).to(torch.float16)
-
-        # Leftout subject's last index
         X_validation = torch.from_numpy(X_validation).to(torch.float16)
         Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
         label_validation = torch.from_numpy(label_validation).to(torch.float16)
-
-        if args.proportion_unlabeled_data_from_training_subjects>0: #A 
-
-            # Non leftout subject data (if unlabeled_domain_adaptation: unlabeled only)
+        if args.proportion_unlabeled_data_from_training_subjects>0:
             X_train_unlabeled = torch.from_numpy(X_pretrain_unlabeled).to(torch.float16)
             Y_train_unlabeled = torch.from_numpy(Y_pretrain_unlabeled).to(torch.float16)
             label_train_unlabeled = torch.from_numpy(label_pretrain_unlabeled).to(torch.float16)
         if (args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_flexwearhd) and args.turn_on_unlabeled_domain_adaptation:
-
-            # Leftout subject's first n sessions (if unlabeled_domain_adaptation: unlabeled only)
             X_train_finetuning_unlabeled = torch.from_numpy(X_finetune_unlabeled).to(torch.float16)
             Y_train_finetuning_unlabeled = torch.from_numpy(Y_finetune_unlabeled).to(torch.float16)
             label_train_finetuning_unlabeled = torch.from_numpy(label_finetune_unlabeled).to(torch.float16)
@@ -1111,18 +1084,22 @@ else:
                 print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.size())
 
             if args.proportion_unlabeled_data_from_leftout_subject>0:
-  
+                # proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data_from_leftout_subject # DELETE
+                # X_train_labeled_leftout_subject, X_train_unlabeled_leftout_subject, Y_train_labeled_leftout_subject, Y_train_unlabeled_leftout_subject = tts.train_test_split(
+                #     X_train_finetuning, Y_train_finetuning, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
+                # X_train_finetuning = torch.tensor(X_train_labeled_leftout_subject)
+                # Y_train_finetuning = torch.tensor(Y_train_labeled_leftout_subject)
+                # X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_leftout_subject)
+                # Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_leftout_subject)
+                
                 print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
                 print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
                 print("Size of X_train_finetuning_unlabeled:     ", X_train_finetuning_unlabeled.shape)
                 print("Size of Y_train_finetuning_unlabeled:     ", Y_train_finetuning_unlabeled.shape)
             else: 
-                # Leftout subject's first n sessions (if unlabeled_domain_adaptation: labeled only)
                 X_train_finetuning = torch.tensor(X_train_finetuning)
                 Y_train_finetuning = torch.tensor(Y_train_finetuning)
                 label_train_finetuning = torch.tensor(label_train_finetuning)
-
-                # Leftout subject's first n sessions (if unlabeled_domain_adaptation: unlabeled only)
                 X_train_finetuning_unlabeled = None
                 Y_train_finetuning_unlabeled = None
                 label_train_finetuning_unlabeled = None
@@ -1130,20 +1107,18 @@ else:
                 print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
                 print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
             
+                
             if not args.pretrain_and_finetune:
-                # Non leftout subject data (if unlabeled_domain_adaptation: labeled only) + Leftout subject's first n sessions (if unlabeled_domain_adaptation: labeled only)
                 X_train = torch.concat((X_train, X_train_finetuning), axis=0)
                 Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
                 label_train = torch.concat((label_train, label_train_finetuning), axis=0)
                 
         else: # not turn_on_unlabeled_domain_adaptation
             if utils.num_subjects == 1:
-                # Leftout subject's first n sessions (if unlabeled_domain_adaptation: labeled only)
                 X_train = X_train_finetuning
                 Y_train = Y_train_finetuning
                 label_train = label_train_finetuning
             elif not args.pretrain_and_finetune:
-                # Non leftout subject data (if unlabeled_domain_adaptation: labeled only) + Leftout subject's first n sessions (if unlabeled_domain_adaptation: labeled only)
                 X_train = torch.concat((X_train, X_train_finetuning), axis=0)
                 Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
                 label_train = torch.concat((label_train, label_train_finetuning), axis=0)
@@ -1161,16 +1136,17 @@ else:
             del forces
         
     elif args.leave_one_subject_out: # Running LOSO rather than leave one session out
-    """ Uses left out subject for validation. All other subjects are used to create training set. Can reduce the size of the training set for each subject, take a proportion of the data from each subject, or split the training set into labeled and unlabeled data (if proportion_unlabeled_from_training subjects is given.)
-    """
-
         if args.reduce_training_data_size:
             reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
 
         X_validation = np.array(data[leaveOut-1])
-        y_data = forces if args.force_regression else labels
-        Y_validation = np.array(y_data[leaveOut-1])
-        label_validation = np.array(labels[leaveOut-1])
+        if args.force_regression: 
+            Y_validation = np.array(forces[leaveOut-1])
+            label_validation = np.array(labels[leaveOut-1]) # needed for stratify     
+        else: 
+            X_validation = np.array(data[leaveOut-1])
+            Y_validation = np.array(labels[leaveOut-1])
+            label_validation = Y_validation # needed for stratify
 
         X_train_list = []
         Y_train_list = []
@@ -1184,38 +1160,41 @@ else:
         for i in range(len(data)):
             if i == leaveOut-1:
                 continue
+            current_data = np.array(data[i])
+            current_labels = np.array(labels[i])
+            if args.force_regression: 
+                current_forces = np.array(forces[i])
 
-            X_train_temp = np.array(data[i])
-            Y_train_temp = np.array(forces[i]) if args.force_regression else np.array(labels[i])
-            label_train_temp = np.array(labels[i])
+            # NOTE: debug moving this force_regression casing out
+            if args.force_regression:
+                current_y = current_forces
+            else: 
+                current_y = current_labels
 
-            # Training set is reduced for each subject
             if args.reduce_training_data_size:
-                proportion_to_keep = reduced_size_per_subject / X_train_temp.shape[0]
-                X_train_temp, _, Y_train_temp, _, label_train_temp, _ = model_selection.train_test_split(X_train_temp, Y_train_temp, label_train_temp, train_size=proportion_to_keep, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
+                current_data, _, current_y, _, current_labels, _ = model_selection.train_test_split(current_data, current_y, current_labels, train_size=proportion_to_keep, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
                     
-            # Training set is a proportion of data from training 
             if args.proportion_data_from_training_subjects<1.0:
-                X_train_temp, _, Y_train_temp, _, label_train_temp, _ = tts.train_test_split(X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                current_data, _, current_y, _, current_labels, _ = tts.train_test_split(current_data, current_y, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
 
-            # Training set is split into labeled and unlabeled sets. 
             if args.proportion_unlabeled_data_from_training_subjects>0:
                 X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled, label_train_labeled, label_train_unlabeled = tts.train_test_split(
-                    X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
-                     
-                X_train_temp = X_train_labeled
-                Y_train_temp = Y_train_labeled
-                label_train_temp = label_train_labeled
+                    current_data, current_y, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                
+                current_data = X_train_labeled
+                current_labels = label_train_labeled
+                if args.force_regression:
+                    current_forces = Y_train_labeled
 
                 X_train_unlabeled_list.append(X_train_unlabeled)
                 Y_train_unlabeled_list.append(Y_train_unlabeled)
                 label_train_unlabeled_list.append(label_train_unlabeled)
 
-            X_train_list.append(X_train_temp)
-            Y_train_list.append(Y_train_temp)
-            label_train_list.append(label_train_temp)
+            X_train_list.append(current_data)
+            Y_train_list.append(current_y)
+            label_train_list.append(current_labels)
             
-        # Concatenate and relabel sets 
         X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
         Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
         label_train = torch.from_numpy(np.concatenate(label_train_list, axis=0)).to(torch.float16)
@@ -1232,26 +1211,17 @@ else:
         proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
         if args.transfer_learning: # while in leave one subject out
             proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
-            
             proportion_unlabeled_of_proportion_to_keep_of_leftout = args.proportion_unlabeled_data_from_leftout_subject
             
-            # Split your leftout subject into training and validation (partial_leftout_subject)
             if proportion_to_keep_of_leftout_subject_for_training>0.0:
+                if args.train_test_split_for_time_series:
+                    X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject,label_validation_partial_leftout_subject= tts.train_test_split(
+                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
     
-                X_train_partial_leftout_subject, X_validation_partial_leftout_subject, \
-                Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, \
-                label_train_partial_leftout_subject, label_validation_partial_leftout_subject = \
-                    tts.train_test_split(
-                        X_validation, 
-                        Y_validation, 
-                        train_size=proportion_to_keep_of_leftout_subject_for_training, 
-                        stratify=label_validation, 
-                        random_state=args.seed, 
-                        shuffle=(not args.train_test_split_for_time_series), 
-                        force_regression=args.force_regression
-                    )
-
-            # Otherwise, all the data from the leftout subject used for validation          
+                else:
+                    X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject, label_validation_partial_leftout_subject = tts.train_test_split(
+                    X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
+                        
             else:
                 X_validation_partial_leftout_subject = X_validation
                 Y_validation_partial_leftout_subject = Y_validation
@@ -1261,23 +1231,20 @@ else:
                 Y_train_partial_leftout_subject = torch.tensor([])
                 label_train_partial_leftout_subject = torch.tensor([])
 
-            # Split the leftout subjects training (train_partial_leftout_subject) into labeled and unlabeled data.
+                
             if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
-
-                X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
-                Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, \
-                label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = \
-                    tts.train_test_split(
-                        X_train_partial_leftout_subject, 
-                        Y_train_partial_leftout_subject, 
-                        train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, 
-                        stratify=label_train_partial_leftout_subject, 
-                        random_state=args.seed, 
-                        shuffle=(not args.train_test_split_for_time_series), 
-                        force_regression=args.force_regression
-                    )
-
+                if args.train_test_split_for_time_series:
+                    X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
+                    Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
+                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
+        
+                else:
+                    X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
+                    Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
+                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
+            
             if args.load_unlabeled_data_flexwearhd:
+                assert not args.force_regression, "Regression only for Ninapro DB2/3"
                 if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
                     X_train_unlabeled_partial_leftout_subject = np.concatenate([X_train_unlabeled_partial_leftout_subject, unlabeled_data], axis=0)
                     Y_train_unlabeled_partial_leftout_subject = np.concatenate([Y_train_unlabeled_partial_leftout_subject, np.zeros((unlabeled_data.shape[0], utils.numGestures))], axis=0)
@@ -1293,7 +1260,6 @@ else:
             if args.force_regression:
                 print("Size of label_train_partial_leftout_subject:     ", label_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE)
 
-            # Add the partial from leftout subject to train/finetune
             if not args.turn_on_unlabeled_domain_adaptation:
                 # Append the partial validation data to the training data
                 if proportion_to_keep_of_leftout_subject_for_training>0:
@@ -1378,6 +1344,7 @@ else:
             if args.force_regression: 
                 print("Size of label_train_finetuning:     ", label_train_finetuning.shape)
             
+
     elif utils.num_subjects == 1:  
         
         assert not args.pretrain_and_finetune, "Cannot pretrain and finetune with only one subject"
@@ -1389,14 +1356,10 @@ else:
         else:
             Y_train = labels[0]
 
-        X_train, X_validation, Y_train, Y_validation, label_train, label_validation = \
-            tts.train_test_split(
-                X_train, 
-                Y_train, 
-                test_size=1-args.proportion_transfer_learning_from_leftout_subject, 
-                stratify=label_train, 
-                shuffle=(not args.train_test_split_for_time_series)
-            )
+        if args.train_test_split_for_time_series:
+            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=False)
+        else:
+            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=True)
 
         X_train = torch.tensor(X_train).to(torch.float16)
         Y_train = torch.tensor(Y_train).to(torch.float16)
@@ -1413,7 +1376,6 @@ else:
     else: 
         raise ValueError("Please specify the type of test you want to run")
     
-print_train_test_set()
 # get X_test and Y_test from splitting validation 50-50 with stratify
 if args.train_test_split_for_time_series:
     X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False)
@@ -2778,4 +2740,3 @@ else:
             utils.plot_confusion_matrix(np.argmax(Y_train.cpu().detach().numpy(), axis=1), np.array(train_predictions), gesture_labels, testrun_foldername, args, formatted_datetime, 'train')
             
     run.finish()
-# %%
