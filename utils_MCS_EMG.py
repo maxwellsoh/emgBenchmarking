@@ -21,6 +21,7 @@ import scipy
 import emd
 import fcwt
 
+name = "MCS Utils"
 fs = 2000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)

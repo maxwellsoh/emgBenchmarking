@@ -27,6 +27,7 @@ wLenTimesteps = int(wLen / 1000 * fs)
 stepLen = int(125.0 / 1000 * fs) # 125 ms
 numElectrodes = 256
 num_subjects = 20
+num_sessions = 2
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
 gesture_nums = {'6' : 0, '7' : 1, '8' : 2, '9' : 3, '10' : 4, '11' : 5, '30' : 6, '31' : 7, '32' : 8, '34' : 9}

@@ -159,6 +159,7 @@ def contract(restim, unfold=True):
     else:
         for x in range(len(restim)):
             labels[x][int(restim[x][0])] = 1.0
+
     return labels
 
 def filter(emg):
@@ -296,7 +297,6 @@ def make_gestures_sequential(balanced_restim, args):
             d = decrements[exercise]
     
             balanced_restim[x][0][0] = value - d
-
     return balanced_restim
 
   

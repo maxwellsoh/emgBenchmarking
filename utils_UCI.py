@@ -20,6 +20,8 @@ from scipy.signal import spectrogram, stft
 import pywt
 import fcwt
 
+name = "UCI Utils"
+
 numGestures = 6 # 7 total, but not all subjects have 7
 fs = 1000 #Hz (device sampling frequency is 200Hz but raw data is collected at 1000Hz)
 wLen = 250 # ms
@@ -28,6 +30,7 @@ stepLen = 50 # 125 ms (increased from 50ms due to high number of subjects)
 stepLen = int(stepLen / 1000 * fs)
 numElectrodes = 8
 num_subjects = 36
+num_sessions = 2
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
 gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations","extended palm"]
