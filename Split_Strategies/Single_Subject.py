@@ -6,6 +6,7 @@ class Single_Subject(Data_Split_Strategy):
     def __init__(self, X_data, Y_data, label_data, env):
         super().__init__(X_data, Y_data, label_data, env)
         
+
     def train_from_one_subject(self):
         self.X.train_from_one_subject()
         self.Y.train_from_one_subject()

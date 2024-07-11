@@ -12,6 +12,15 @@ class X_Data(Data):
     def __init__(self, env):
         super().__init__("X", env)
 
+        # Set seeds for reproducibility
+        np.random.seed(self.args.seed)
+        torch.manual_seed(self.args.seed)
+        torch.cuda.manual_seed(self.args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
         # EMG specific values
         self.width = None
         self.length = None

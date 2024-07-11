@@ -9,6 +9,8 @@ class Classic_Trainer(Model_Trainer):
     def __init__(self, X_data, Y_data, label_data, env):
         super().__init__(X_data, Y_data, label_data, env)
 
+        
+
     def set_model(self):
         raise NotImplementedError("Model should be defined in MLP or SVC_RF Trainer")
 

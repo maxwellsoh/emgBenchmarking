@@ -55,6 +55,8 @@ from Model.SVC_RF_Trainer import SVC_RF_Trainer
 from hook_manager import Hook_Manager
 
 
+
+
 class Data_Initializer():
 
     def __init__(self, env):
@@ -544,6 +546,17 @@ def main():
     run_setup = Run_Setup()
     hooks.register_hook("setup_run", run_setup.setup_run)
     env = hooks.call_hook("setup_run")
+
+
+    # Set seeds for reproducibility
+    random.seed(env.args.seed)
+    np.random.seed(env.args.seed)
+    torch.manual_seed(env.args.seed)
+    torch.cuda.manual_seed(env.args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(env.args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     data_initializer = Data_Initializer(env)  
     hooks.register_hook("initialize_data", data_initializer.initialize_data)

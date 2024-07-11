@@ -19,6 +19,10 @@ class Combined():
         self.Y = y_obj
         self.label = label_obj
 
+        # Set seeds for reproducibility
+        np.random.seed(self.args.seed)
+    
+
     def process_ninapro(self):
         """ Appends exercise sets together and adds dimensions to data if necessary for Ninapro dataset values. 
 

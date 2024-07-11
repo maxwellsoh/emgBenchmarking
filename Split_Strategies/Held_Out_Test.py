@@ -10,6 +10,10 @@ class Held_Out_Test(Data_Split_Strategy):
     def __init__(self, X_data, Y_data, label_data, env):
         super().__init__(X_data, Y_data, label_data, env)
 
+        # Set seeds for reproducibility
+        np.random.seed(self.args.seed)
+    
+
     def combine_data(self):
         """
         Combines data across the 0th axis.

@@ -15,6 +15,14 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
     def __init__(self, X_data, Y_data, label_data, env):
         super().__init__(self, X_data, Y_data, label_data, env)
 
+        # Set seeds for reproducibility
+        torch.manual_seed(self.args.seed)
+        torch.cuda.manual_seed(self.args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
         self.semilearn_config = None
         self.semilearn_algorithm = None
         self.semilearn_config_dict = None

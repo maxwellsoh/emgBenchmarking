@@ -9,6 +9,15 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
     def __init__(self, X_data, Y_data, label_data, env):
         super().__init__(X_data, Y_data, label_data, env)
 
+        # Set seeds for reproducibility
+        np.random.seed(self.args.seed)
+        torch.manual_seed(self.args.seed)
+        torch.cuda.manual_seed(self.args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
     def append_to_train_unlabeled_list(self, X_new_data, Y_new_data, label_new_data):
         self.X.append_to_train_unlabeled_list(X_new_data)
         self.Y.append_to_train_unlabeled_list(Y_new_data)

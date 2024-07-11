@@ -14,6 +14,8 @@ class SVC_RF_Trainer(Classic_Trainer):
     def __init__(self, X_data, Y_data, label_data, env):
         super().__init__(X_data, Y_data, label_data, env)
 
+        
+
     def set_model(self):
         if self.args.model == "SVC":
             model = SVC(probability=True)

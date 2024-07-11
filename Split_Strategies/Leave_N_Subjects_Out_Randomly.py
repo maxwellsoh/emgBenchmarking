@@ -6,6 +6,7 @@ class Leave_N_Subjects_Out_Randomly(Data_Split_Strategy):
 
     def __init__(self, X_data, Y_data, label_data, env):
         super().__init__(X_data, Y_data, label_data, env)
+
     
     def validation_from_leave_out_indices(self):
         """

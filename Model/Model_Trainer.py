@@ -29,6 +29,14 @@ class Model_Trainer():
         self.formatted_datetime = env.formatted_datetime
         self.exercises = env.exercises
 
+        # Set seeds for reproducibility
+        np.random.seed(self.args.seed)
+        torch.manual_seed(self.args.seed)
+        torch.cuda.manual_seed(self.args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
         
         if hasattr(self.X, 'leaveOutIndices'):
             self.leaveOutIndices = self.X.leaveOutIndices

@@ -23,6 +23,15 @@ class CNN_Trainer(Model_Trainer):
     def __init__(self, X_data, Y_data, label_data, env):
         super().__init__(X_data, Y_data, label_data, env)
 
+        # Set seeds for reproducibility
+        np.random.seed(self.args.seed)
+        torch.manual_seed(self.args.seed)
+        torch.cuda.manual_seed(self.args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
     def set_model(self):
 
         if self.args.model == 'resnet50_custom':
