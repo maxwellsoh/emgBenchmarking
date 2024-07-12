@@ -56,6 +56,7 @@ class Setup():
         self.project_name = None
         self.formatted_datetime = None
         self.leaveOut = None
+        self.seed = None
 
 class Run_Setup():
     """
@@ -362,12 +363,25 @@ class Run_Setup():
 
         return args
 
+    def set_seeds_for_reproducibility(self, args):
+        """ Set seeds for reproducibility. 
+        """
+
+        seed = args.seed
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
     def setup_run(self):
 
         args = self.parse_args()
         args, exercises, project_name, formatted_datetime, utils = self.setup_for_dataset(args)
         args = self.set_exercise(args)
         self.print_params(args)
+        self.set_seeds_for_reproducibility(args)
         
         env = Setup()
         env.args = args
@@ -377,6 +391,7 @@ class Run_Setup():
         env.utils = utils
         env.leaveOut = int(args.leftout_subject)
         env.num_gestures = utils.numGestures
+        env.seed = args.seed
 
         return env
 
@@ -385,6 +400,7 @@ hooks = Hook_Manager()
 run_setup = Run_Setup()
 hooks.register_hook("setup_run", run_setup.setup_run)
 env = hooks.call_hook("setup_run")
+
 
 exercises = env.exercises
 project_name = env.project_name
@@ -396,341 +412,6 @@ num_gestures = env.num_gestures
 
 
 # END OF MY ADDITIONS
-
-
-# Define a custom argument type for a list of integers
-def list_of_ints(arg):
-    return list(map(int, arg.split(',')))
-
-## Argument parser with optional argumenets
-
-# Create the parser
-parser = argparse.ArgumentParser(description="Include arguments for running different trials")
-
-# Add argument for force regression (implemented in Ninapro DB2 and DB3)
-parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
-# Add argument for dataset
-parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
-# Add argument for doing leave-one-subject-out
-parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
-# Add argument for leftout subject
-parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation, starting from subject 1', default=0)
-# Add parser for seed
-parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0 by default.', default=0)
-# Add number of epochs to train for
-parser.add_argument('--epochs', type=int, help='number of epochs to train for. Set to 25 by default.', default=25)
-# Add whether or not to use k folds (leftout_subject must be 0)
-parser.add_argument('--turn_on_kfold', type=utils.str2bool, help='whether or not to use k folds cross validation. Set to False by default.', default=False)
-# Add argument for stratified k folds cross validation
-parser.add_argument('--kfold', type=int, help='number of folds for stratified k-folds cross-validation. Set to 5 by default.', default=5)
-# Add argument for checking the index of the fold
-parser.add_argument('--fold_index', type=int, help='index of the fold to use for cross validation (should be from 1 to --kfold). Set to 1 by default.', default=1)
-# Add argument for whether or not to use cyclical learning rate
-parser.add_argument('--turn_on_cyclical_lr', type=utils.str2bool, help='whether or not to use cyclical learning rate. Set to False by default.', default=False)
-# Add argument for whether or not to use cosine annealing with warm restarts
-parser.add_argument('--turn_on_cosine_annealing', type=utils.str2bool, help='whether or not to use cosine annealing with warm restarts. Set to False by default.', default=False)
-# Add argument for whether or not to use RMS
-parser.add_argument('--turn_on_rms', type=utils.str2bool, help='whether or not to use RMS. Set to False by default.', default=False)
-# Add argument for RMS input window size (resulting feature dimension to classifier)
-parser.add_argument('--rms_input_windowsize', type=int, help='RMS input window size. Set to 1000 by default.', default=1000)
-# Add argument for whether or not to concatenate magnitude image
-parser.add_argument('--turn_on_magnitude', type=utils.str2bool, help='whether or not to concatenate magnitude image. Set to False by default.', default=False)
-# Add argument for model to use
-parser.add_argument('--model', type=str, help='model to use (e.g. \'convnext_tiny_custom\', \'convnext_tiny\', \'davit_tiny.msft_in1k\', \'efficientnet_b3.ns_jft_in1k\', \'vit_tiny_patch16_224\', \'efficientnet_b0\'). Set to resnet50 by default.', default='resnet50')
-# Add argument for exercises to include
-parser.add_argument('--exercises', type=list_of_ints, help='List the exercises of the 3 to load. The most popular for benchmarking seem to be 2 and 3. Can format as \'--exercises 1,2,3\'', default=[1, 2, 3])
-# Add argument for project suffix
-parser.add_argument('--project_name_suffix', type=str, help='suffix for project name. Set to empty string by default.', default='')
-# Add argument for full or partial dataset for MCS EMG dataset
-parser.add_argument('--full_dataset_mcs', type=utils.str2bool, help='whether or not to use the full dataset for MCS EMG Dataset. Set to False by default.', default=False)
-# Add argument for partial dataset for Ninapro DB2 and DB5
-parser.add_argument('--partial_dataset_ninapro', type=utils.str2bool, help='whether or not to use the partial dataset for Ninapro DB2 and DB5. Set to False by default.', default=False)
-# Add argument for using spectrogram transform
-parser.add_argument('--turn_on_spectrogram', type=utils.str2bool, help='whether or not to use spectrogram transform. Set to False by default.', default=False)
-# Add argument for using cwt
-parser.add_argument('--turn_on_cwt', type=utils.str2bool, help='whether or not to use cwt. Set to False by default.', default=False)
-# Add argument for using Hilbert Huang Transform
-parser.add_argument('--turn_on_hht', type=utils.str2bool, help='whether or not to use HHT. Set to False by default.', default=False)
-# Add argument for saving images
-parser.add_argument('--save_images', type=utils.str2bool, help='whether or not to save images. Set to False by default.', default=False)
-# Add argument to turn off scaler normalization
-parser.add_argument('--turn_off_scaler_normalization', type=utils.str2bool, help='whether or not to turn off scaler normalization. Set to False by default.', default=False)
-# Add argument to change learning rate
-parser.add_argument('--learning_rate', type=float, help='learning rate. Set to 1e-4 by default.', default=1e-4)
-# Add argument to specify which gpu to use (if any gpu exists)
-parser.add_argument('--gpu', type=int, help='which gpu to use. Set to 0 by default.', default=0)
-# Add argument for loading just a few images from dataset for debugging
-parser.add_argument('--load_few_images', type=utils.str2bool, help='whether or not to load just a few images from dataset for debugging. Set to False by default.', default=False)
-# Add argument for reducing training data size while remaining stratified in terms of gestures and amount of data from each subject
-parser.add_argument('--reduce_training_data_size', type=utils.str2bool, help='whether or not to reduce training data size while remaining stratified in terms of gestures and amount of data from each subject. Set to False by default.', default=False)
-# Add argument for size of reduced training data
-parser.add_argument('--reduced_training_data_size', type=int, help='size of reduced training data. Set to 56000 by default.', default=56000)
-# Add argument to leve n subjects out randomly
-parser.add_argument('--leave_n_subjects_out_randomly', type=int, help='number of subjects to leave out randomly. Set to 0 by default.', default=0)
-# use target domain for normalization
-parser.add_argument('--target_normalize', type=float, help='use a poportion of leftout data for normalization. Set to 0 by default.', default=0.0)
-# Test with transfer learning by using some data from the validation dataset
-parser.add_argument('--transfer_learning', type=utils.str2bool, help='use some data from the validation dataset for transfer learning. Set to False by default.', default=False)
-# Add argument for cross validation for time series
-parser.add_argument('--train_test_split_for_time_series', type=utils.str2bool, help='whether or not to use data split for time series. Set to False by default.', default=False)
-# Add argument for proportion of left-out-subject data to use for transfer learning
-parser.add_argument('--proportion_transfer_learning_from_leftout_subject', type=float, help='proportion of left-out-subject data to use for transfer learning. Set to 0.25 by default.', default=0.25)
-# Add argument for amount for reducing number of data to generate for transfer learning
-parser.add_argument('--reduce_data_for_transfer_learning', type=int, help='amount for reducing number of data to generate for transfer learning. Set to 1 by default.', default=1)
-# Add argument for whether to do leave-one-session-out
-parser.add_argument('--leave_one_session_out', type=utils.str2bool, help='whether or not to leave one session out. Set to False by default.', default=False)
-# Add argument for whether to do held_out test
-parser.add_argument('--held_out_test', type=utils.str2bool, help='whether or not to do held out test. Set to False by default.', default=False)
-# Add argument for whether to use only the subject left out for training in leave out session test
-parser.add_argument('--one_subject_for_training_set_for_session_test', type=utils.str2bool, help='whether or not to use only the subject left out for training in leave out session test. Set to False by default.', default=False)
-# Add argument for pretraining on all data from other subjects, and fine-tuning on some data from left out subject
-parser.add_argument('--pretrain_and_finetune', type=utils.str2bool, help='whether or not to pretrain on all data from other subjects, and fine-tune on some data from left out subject. Set to False by default.', default=False)
-# Add argument for finetuning epochs
-parser.add_argument('--finetuning_epochs', type=int, help='number of epochs to fine-tune for. Set to 25 by default.', default=25)
-# Add argument for whether or not to turn on unlabeled domain adaptation
-parser.add_argument('--turn_on_unlabeled_domain_adaptation', type=utils.str2bool, help='whether or not to turn on unlabeled domain adaptation methods. Set to False by default.', default=False)
-# Add argument to specify algorithm to use for unlabeled domain adaptation
-parser.add_argument('--unlabeled_algorithm', type=str, help='algorithm to use for unlabeled domain adaptation. Set to "fixmatch" by default.', default="fixmatch")
-# Add argument to specify proportion from left-out-subject to keep as unlabeled data
-parser.add_argument('--proportion_unlabeled_data_from_leftout_subject', type=float, help='proportion of data from left-out-subject to keep as unlabeled data. Set to 0.75 by default.', default=0.75) # TODO: fix, we note that this affects leave-one-session-out even when fully supervised
-# Add argument to specify batch size
-parser.add_argument('--batch_size', type=int, help='batch size. Set to 64 by default.', default=64)
-# Add argument for whether to use unlabeled data for subjects used for training as well
-parser.add_argument('--proportion_unlabeled_data_from_training_subjects', type=float, help='proportion of data from training subjects to use as unlabeled data. Set to 0.0 by default.', default=0.0)
-# Add argument for cutting down amount of total data for training subjects
-parser.add_argument('--proportion_data_from_training_subjects', type=float, help='proportion of data from training subjects to use. Set to 1.0 by default.', default=1.0)
-# Add argument for loading unlabeled data from flexwear-hd dataset
-parser.add_argument('--load_unlabeled_data_flexwearhd', type=utils.str2bool, help='whether or not to load unlabeled data from FlexWear-HD dataset. Set to False by default.', default=False)
-
-# Parse the arguments
-args = parser.parse_args()
-
-exercises = False
-
-if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
-    print("Warning: not using pytorch, many arguments will be ignored")
-    if args.turn_on_unlabeled_domain_adaptation:
-        raise NotImplementedError("Cannot use unlabeled domain adaptation with MLP, SVC, or RF")
-    if args.pretrain_and_finetune:
-        raise NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
-
-if (args.dataset.lower() == "uciemg" or args.dataset.lower() == "uci"):
-    if (not os.path.exists("./uciEMG")):
-        print("uciEMG dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--UCI'])
-    import utils_UCI as utils
-    print(f"The dataset being tested is uciEMG")
-    project_name = 'emg_benchmarking_uci'
-    args.dataset = "uciemg"
-
-elif (args.dataset.lower() == "ninapro-db2" or args.dataset.lower() == "ninapro_db2"):
-    if (not os.path.exists("./NinaproDB2")):
-        print("NinaproDB2 dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--NinaproDB2'])
-    import utils_NinaproDB2 as utils
-    print(f"The dataset being tested is ninapro-db2")
-    project_name = 'emg_benchmarking_ninapro-db2'
-    exercises = True
-    if args.leave_one_session_out:
-        raise ValueError("leave-one-session-out not implemented for ninapro-db2; only one session exists")
-    if args.force_regression:
-        assert args.exercises == [3], "Regression only implemented for exercise 3"
-    args.dataset = 'ninapro-db2'
-
-elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_db5"):
-    if (not os.path.exists("./NinaproDB5")):
-        print("NinaproDB5 dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--NinaproDB5'])
-        subprocess.run(['python', './process_NinaproDB5.py'])
-    import utils_NinaproDB5 as utils
-    print(f"The dataset being tested is ninapro-db5")
-    project_name = 'emg_benchmarking_ninapro-db5'
-    exercises = True
-    if args.leave_one_session_out:
-        raise ValueError("leave-one-session-out not implemented for ninapro-db5; only one session exists")
-    args.dataset = 'ninapro-db5'
-
-elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
-    import utils_NinaproDB3 as utils
-    assert args.exercises == [1] or args.partial_dataset_ninapro or (args.exercises == [3] and args.force_regression), "Exercise C cannot be used for classification due to missing data."
-    print(f"The dataset being tested is ninapro-db3")
-    project_name = 'emg_benchmarking_ninapro-db3'
-    exercises = True
-    if args.leave_one_session_out:
-        raise ValueError("leave-one-session-out not implemented for ninapro-db3; only one session exists")
-    
-    if args.force_regression:
-        print("NOTE: Subject 10 is missing gesture data for exercise 3 and cannot be used for regression. This is done automatically.")
-        MISSING_SUBJECT = 10 # subject 10 missing most force data
-    
-    assert not(args.force_regression and args.leftout_subject == 10), "Subject 10 is missing gesture data for exercise 3 and cannot be used. Please choose another subject."
-
-    if args.force_regression and args.leftout_subject == 11: 
-        args.leftout_subject == 10
-        # subject 10 is missing force data and is deleted internally 
-
-    args.dataset = 'ninapro-db3'
-
-elif (args.dataset.lower() == "myoarmbanddataset"):
-    if (not os.path.exists("./myoarmbanddataset")):
-        print("myoarmbanddataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--MyoArmbandDataset'])
-    import utils_MyoArmbandDataset as utils
-    print(f"The dataset being tested is myoarmbanddataset")
-    project_name = 'emg_benchmarking_myoarmbanddataset'
-    if args.leave_one_session_out:
-        raise ValueError("leave-one-session-out not implemented for myoarmbanddataset; only one session exists")
-    args.dataset = 'myoarmbanddataset'
-
-elif (args.dataset.lower() == "hyser"):
-    if (not os.path.exists("./hyser")):
-        print("Hyser dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--Hyser'])
-    import utils_Hyser as utils
-    print(f"The dataset being tested is hyser")
-    project_name = 'emg_benchmarking_hyser'
-    args.dataset = 'hyser'
-
-elif (args.dataset.lower() == "capgmyo"):
-    if (not os.path.exists("./CapgMyo_B")):
-        print("CapgMyo_B dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--CapgMyo_B'])
-    import utils_CapgMyo as utils
-    print(f"The dataset being tested is CapgMyo")
-    project_name = 'emg_benchmarking_capgmyo'
-    if args.leave_one_session_out:
-      utils.num_subjects = 10
-    args.dataset = 'capgmyo'
-
-elif (args.dataset.lower() == "flexwear-hd"):
-    if (not os.path.exists("./FlexWear-HD")):
-        print("FlexWear-HD dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--FlexWearHD_Dataset'])
-    import utils_FlexWearHD as utils
-    print(f"The dataset being tested is FlexWear-HD Dataset")
-    project_name = 'emg_benchmarking_flexwear-hd_dataset'
-    # if args.leave_one_session_out:
-        # raise ValueError("leave-one-session-out not implemented for FlexWear-HDDataset; only one session exists")
-    args.dataset = 'flexwear-hd'
-
-elif (args.dataset.lower() == "sci"):
-    import utils_SCI as utils
-    print(f"The dataset being tested is SCI")
-    project_name = 'emg_benchmarking_sci'
-    args.dataset = 'sci'
-    assert not args.transfer_learning, "Transfer learning not implemented for SCI dataset"
-    assert not args.leave_one_subject_out, "Leave one subject out not implemented for SCI dataset"
-
-elif (args.dataset.lower() == "mcs"):
-    if (not os.path.exists("./MCS_EMG")):
-        print("MCS dataset does not exist yet. Downloading now...")
-        subprocess.run(['python', './get_datasets.py', '--MCS_EMG'])
-
-    print(f"The dataset being tested is MCS_EMG")
-    project_name = 'emg_benchmarking_mcs'
-    if args.full_dataset_mcs:
-        print(f"Using the full dataset for MCS EMG")
-        utils.gesture_labels = utils.gesture_labels_full
-        utils.numGestures = len(utils.gesture_labels)
-    else: 
-        print(f"Using the partial dataset for MCS EMG")
-        utils.gesture_labels = utils.gesture_labels_partial
-        utils.numGestures = len(utils.gesture_labels)
-    if args.leave_one_session_out:
-        raise ValueError("leave-one-session-out not implemented for MCS_EMG; only one session exists")
-    args.dataset = 'mcs'
-    
-else: 
-    raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," +
-                    "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
-    
-if args.turn_off_scaler_normalization:
-    assert args.target_normalize == 0.0, "Cannot turn off scaler normalization and turn on target normalize at the same time"
-    
-# Use the arguments
-print(f"The value of --leftout_subject is {args.leftout_subject}")
-print(f"The value of --seed is {args.seed}")
-print(f"The value of --epochs is {args.epochs}")
-print(f"The model to use is {args.model}")
-if args.turn_on_kfold:
-    print(f"The value of --turn_on_kfold is {args.turn_on_kfold}")
-    print(f"The value of --kfold is {args.kfold}")
-    print(f"The value of --fold_index is {args.fold_index}")
-    
-if args.turn_on_cyclical_lr:
-    print(f"The value of --turn_on_cyclical_lr is {args.turn_on_cyclical_lr}")
-if args.turn_on_cosine_annealing:
-    print(f"The value of --turn_on_cosine_annealing is {args.turn_on_cosine_annealing}")
-if args.turn_on_cyclical_lr and args.turn_on_cosine_annealing:
-    print("Cannot turn on both cyclical learning rate and cosine annealing")
-    exit()
-if args.turn_on_rms:
-    print(f"The value of --turn_on_rms is {args.turn_on_rms}")
-    print(f"The value of --rms_input_windowsize is {args.rms_input_windowsize}")
-if args.turn_on_magnitude:
-    print(f"The value of --turn_on_magnitude is {args.turn_on_magnitude}")
-if exercises:
-    print(f"The value of --exercises is {args.exercises}")
-print(f"The value of --project_name_suffix is {args.project_name_suffix}")
-print(f"The value of --turn_on_spectrogram is {args.turn_on_spectrogram}")
-print(f"The value of --turn_on_cwt is {args.turn_on_cwt}")
-print(f"The value of --turn_on_hht is {args.turn_on_hht}")
-
-print(f"The value of --save_images is {args.save_images}")
-print(f"The value of --turn_off_scaler_normalization is {args.turn_off_scaler_normalization}")
-print(f"The value of --learning_rate is {args.learning_rate}")
-print(f"The value of --gpu is {args.gpu}")
-
-print(f"The value of --load_few_images is {args.load_few_images}")
-print(f"The value of --reduce_training_data_size is {args.reduce_training_data_size}")
-print(f"The value of --reduced_training_data_size is {args.reduced_training_data_size}")
-
-print(f"The value of --leave_n_subjects_out_randomly is {args.leave_n_subjects_out_randomly}")
-print(f"The value of --target_normalize is {args.target_normalize}")
-print(f"The value of --transfer_learning is {args.transfer_learning}")
-print(f"The value of --train_test_split_for_time_series is {args.train_test_split_for_time_series}")
-print(f"The value of --proportion_transfer_learning_from_leftout_subject is {args.proportion_transfer_learning_from_leftout_subject}")
-print(f"The value of --reduce_data_for_transfer_learning is {args.reduce_data_for_transfer_learning}")
-print(f"The value of --leave_one_session_out is {args.leave_one_session_out}")
-print(f"The value of --held_out_test is {args.held_out_test}")
-print(f"The value of --one_subject_for_training_set_for_session_test is {args.one_subject_for_training_set_for_session_test}")
-print(f"The value of --pretrain_and_finetune is {args.pretrain_and_finetune}")
-print(f"The value of --finetuning_epochs is {args.finetuning_epochs}")
-
-print(f"The value of --turn_on_unlabeled_domain_adaptation is {args.turn_on_unlabeled_domain_adaptation}")
-print(f"The value of --unlabeled_algorithm is {args.unlabeled_algorithm}")
-print(f"The value of --proportion_unlabeled_data_from_leftout_subject is {args.proportion_unlabeled_data_from_leftout_subject}")
-
-print(f"The value of --batch_size is {args.batch_size}")
-
-print(f"The value of --proportion_unlabeled_data_from_training_subjects is {args.proportion_unlabeled_data_from_training_subjects}")
-print(f"The value of --proportion_data_from_training_subjects is {args.proportion_data_from_training_subjects}")
-print(f"The value of --load_unlabeled_data_flexwearhd is {args.load_unlabeled_data_flexwearhd}")
-
-if args.force_regression:
-    print(f"The value of --force_regression is {args.force_regression}")
-
-# Add date and time to filename
-current_datetime = datetime.datetime.now()
-formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
-
-print("------------------------------------------------------------------------------------------------------------------------")
-print("Starting run at", formatted_datetime)
-print("------------------------------------------------------------------------------------------------------------------------")
-
-# %%
-# 0 for no LOSO; participants here are 1-13
-leaveOut = int(args.leftout_subject)
-
-# Set seeds for reproducibility
-random.seed(args.seed)
-np.random.seed(args.seed)
-torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(args.seed)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
     
 if exercises:
     emg = []
