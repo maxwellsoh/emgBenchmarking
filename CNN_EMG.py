@@ -394,8 +394,8 @@ if exercises:
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
             if (args.target_normalize > 0):
-                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize, exercise, args)
-                emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject, args) for i in range(utils.num_subjects)])
+                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, exercise, args)
+                emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject+1, args) for i in range(utils.num_subjects)])
 
             else:
                 emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
@@ -508,20 +508,20 @@ else: # Not exercises
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out:
                 total_number_of_sessions = 2
-                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize, lastSessionOnly=False)
+                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, lastSessionOnly=False)
                 emg = []
                 labels = []
                 for i in range(1, total_number_of_sessions+1):
-                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.leftout_subject) for j in range(utils.num_subjects)])
+                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.leftout_subject+1) for j in range(utils.num_subjects)])
 
                     emg.extend(emg_async.get())
                     
                     labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
                     labels.extend(labels_async.get())
             else:
-                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize)
+                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize)
                 
-                emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject) for i in range(utils.num_subjects)])
+                emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject+1) for i in range(utils.num_subjects)])
 
                 emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
                 
@@ -1375,23 +1375,6 @@ else:
     
     else: 
         raise ValueError("Please specify the type of test you want to run")
-    
-# get X_test and Y_test from splitting validation 50-50 with stratify
-if args.train_test_split_for_time_series:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
-else:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
-
-X_test = torch.from_numpy(X_test).to(torch.float16)
-Y_test = torch.from_numpy(Y_test).to(torch.float16)
-label_test = torch.from_numpy(label_test).to(torch.float16)
-X_validation = torch.from_numpy(X_validation).to(torch.float16)
-Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-label_validation = torch.from_numpy(label_validation).to(torch.float16)
-print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE/FORCE)
-print("Size of X_test:      ", X_test.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-print("Size of Y_test:      ", Y_test.shape) # (SAMPLE, GESTURE/FORCE)
 
 # get X_test and Y_test from splitting validation 50-50 with stratify
 if args.train_test_split_for_time_series:
