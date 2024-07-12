@@ -58,7 +58,7 @@ parser.add_argument("--force_regression", type=utils.str2bool, help="Regression 
 parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
 # Add argument for doing leave-one-subject-out
 parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
-# Add argument for leftout subject
+# Add argument for leftout subject (indexed from 1)
 parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation, starting from subject 1', default=0)
 # Add parser for seed
 parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0 by default.', default=0)
@@ -146,6 +146,9 @@ parser.add_argument('--proportion_unlabeled_data_from_training_subjects', type=f
 parser.add_argument('--proportion_data_from_training_subjects', type=float, help='proportion of data from training subjects to use. Set to 1.0 by default.', default=1.0)
 # Add argument for loading unlabeled data from flexwear-hd dataset
 parser.add_argument('--load_unlabeled_data_flexwearhd', type=utils.str2bool, help='whether or not to load unlabeled data from FlexWear-HD dataset. Set to False by default.', default=False)
+# Add argument for target normalize subject index (indexed from 1)
+parser.add_argument('--target_normalize_subject', type=int, help='number of subject that is left out for target normalization, starting from subject 1', default=0)
+
 
 # Parse the arguments
 args = parser.parse_args()
@@ -354,6 +357,12 @@ print(f"The value of --load_unlabeled_data_flexwearhd is {args.load_unlabeled_da
 
 if args.force_regression:
     print(f"The value of --force_regression is {args.force_regression}")
+    
+if args.target_normalize_subject == 0:
+    print(f"The value of --target_normalize_subject is {args.target_normalize_subject}, defaulting to leftout subject")
+    args.target_normalize_subject = args.leftout_subject
+else:
+    print(f"The value of --target_normalize_subject is {args.target_normalize_subject}")
 
 # Add date and time to filename
 current_datetime = datetime.datetime.now()
@@ -394,8 +403,8 @@ if exercises:
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
         for exercise in args.exercises:
             if (args.target_normalize > 0):
-                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, exercise, args)
-                emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject+1, args) for i in range(utils.num_subjects)])
+                mins, maxes = utils.getExtrema(args.target_normalize_subject, args.target_normalize, exercise, args)
+                emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.target_normalize_subject, args) for i in range(utils.num_subjects)])
 
             else:
                 emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
@@ -508,20 +517,20 @@ else: # Not exercises
         with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
             if args.leave_one_session_out:
                 total_number_of_sessions = 2
-                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize, lastSessionOnly=False)
+                mins, maxes = utils.getExtrema(args.target_normalize_subject, args.target_normalize, lastSessionOnly=False)
                 emg = []
                 labels = []
                 for i in range(1, total_number_of_sessions+1):
-                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.leftout_subject+1) for j in range(utils.num_subjects)])
+                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.target_normalize_subject) for j in range(utils.num_subjects)])
 
                     emg.extend(emg_async.get())
                     
                     labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
                     labels.extend(labels_async.get())
             else:
-                mins, maxes = utils.getExtrema(args.leftout_subject+1, args.target_normalize)
+                mins, maxes = utils.getExtrema(args.target_normalize_subject, args.target_normalize)
                 
-                emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject+1) for i in range(utils.num_subjects)])
+                emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.target_normalize_subject) for i in range(utils.num_subjects)])
 
                 emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
                 
@@ -1753,6 +1762,8 @@ def create_wandb_runname():
         wandb_runname += '_load-unlabel-data-flexwearhd'
     if args.force_regression:
         wandb_runname += '_force-regression'
+    if args.target_normalize_subject != args.leftout_subject:
+        wandb_runname += '_targ-norm-subj-' + str(args.target_normalize_subject)
 
     return wandb_runname
 wandb_runname = create_wandb_runname()
