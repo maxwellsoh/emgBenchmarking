@@ -52,9 +52,9 @@ def list_of_ints(arg):
 # Create the parser
 parser = argparse.ArgumentParser(description="Include arguments for running different trials")
 
-# Add argument for dataset
-
+# Add argument for force regression (implemented in Ninapro DB2 and DB3)
 parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
+# Add argument for dataset
 parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
 # Add argument for doing leave-one-subject-out
 parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
@@ -977,11 +977,11 @@ else:
 
             if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices:
                 if args.proportion_data_from_training_subjects<1.0:
-                    X_train_temp, _, Y_train_temp, _, label_train_temp, _ = tts.train_test_split(X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                    X_train_temp, _, Y_train_temp, _, label_train_temp, _ = tts.train_test_split(X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
                         
                 if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
                     X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled, label_pretrain_labeled, label_pretrain_unlabeled  = tts.train_test_split(
-                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
                     X_pretrain.append(np.array(X_pretrain_labeled))
                     Y_pretrain.append(np.array(Y_pretrain_labeled))
                     label_pretrain.append(np.array(label_pretrain_labeled))
@@ -995,7 +995,7 @@ else:
             elif i in left_out_subject_first_n_sessions_indices:
                 if args.proportion_unlabeled_data_from_leftout_subject>0 and args.turn_on_unlabeled_domain_adaptation:
                     X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled, label_finetune_labeled, label_finetune_unlabeled = tts.train_test_split(
-                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
                     X_finetune.append(np.array(X_finetune_labeled))
                     Y_finetune.append(np.array(Y_finetune_labeled))
                     label_finetune.append(np.array(label_finetune_labeled))
@@ -1173,14 +1173,14 @@ else:
 
             if args.reduce_training_data_size:
                 proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
-                current_data, _, current_y, _, current_labels, _ = model_selection.train_test_split(current_data, current_y, current_labels, train_size=proportion_to_keep, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                current_data, _, current_y, _, current_labels, _ = model_selection.train_test_split(current_data, current_y, current_labels, train_size=proportion_to_keep, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
                     
             if args.proportion_data_from_training_subjects<1.0:
-                current_data, _, current_y, _, current_labels, _ = tts.train_test_split(current_data, current_y, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                current_data, _, current_y, _, current_labels, _ = tts.train_test_split(current_data, current_y, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
 
             if args.proportion_unlabeled_data_from_training_subjects>0:
                 X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled, label_train_labeled, label_train_unlabeled = tts.train_test_split(
-                    current_data, current_y, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series))
+                    current_data, current_y, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
                 
                 current_data = X_train_labeled
                 current_labels = label_train_labeled
@@ -1357,9 +1357,9 @@ else:
             Y_train = labels[0]
 
         if args.train_test_split_for_time_series:
-            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=False)
+            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=False, force_regression=args.force_regression)
         else:
-            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=True)
+            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=True, force_regression=args.force_regression)
 
         X_train = torch.tensor(X_train).to(torch.float16)
         Y_train = torch.tensor(Y_train).to(torch.float16)
@@ -1378,9 +1378,9 @@ else:
     
 # get X_test and Y_test from splitting validation 50-50 with stratify
 if args.train_test_split_for_time_series:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False)
+    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
 else:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True)
+    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
 
 X_test = torch.from_numpy(X_test).to(torch.float16)
 Y_test = torch.from_numpy(Y_test).to(torch.float16)
@@ -1395,9 +1395,9 @@ print("Size of Y_test:      ", Y_test.shape) # (SAMPLE, GESTURE/FORCE)
 
 # get X_test and Y_test from splitting validation 50-50 with stratify
 if args.train_test_split_for_time_series:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False)
+    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
 else:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True)
+    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
 
 X_test = torch.from_numpy(X_test).to(torch.float16)
 Y_test = torch.from_numpy(Y_test).to(torch.float16)
@@ -1768,6 +1768,8 @@ def create_wandb_runname():
         wandb_runname += '_unlabel-subj-prop-' + str(args.proportion_unlabeled_data_from_training_subjects)
     if args.load_unlabeled_data_flexwearhd:
         wandb_runname += '_load-unlabel-data-flexwearhd'
+    if args.force_regression:
+        wandb_runname += '_force-regression'
 
     return wandb_runname
 wandb_runname = create_wandb_runname()
@@ -2679,7 +2681,7 @@ else:
 
         model.eval()
         with torch.no_grad():
-            assert args.force_regression == False
+            # assert args.force_regression == False
             test_predictions = []
             for X_batch, Y_batch in tqdm(test_loader, desc="Test Batch Loading for Confusion Matrix"):
                 X_batch = X_batch.to(device).to(torch.float32)
