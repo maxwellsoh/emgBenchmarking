@@ -104,7 +104,8 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                     train_size=self.args.proportion_data_from_training_subjects, 
                     stratify=label_train_temp, 
                     random_state=self.args.seed, 
-                    shuffle=(not self.args.train_test_split_for_time_series)
+                    shuffle=(not self.args.train_test_split_for_time_series),
+                    force_regression=self.args.force_regression
                 )
  
             if self.args.proportion_unlabeled_data_from_training_subjects>0:
@@ -116,7 +117,8 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                     train_size=1-self.args.proportion_unlabeled_data_from_training_subjects, 
                     stratify=label_train_temp, 
                     random_state=self.args.seed, 
-                    shuffle=(not self.args.train_test_split_for_time_series)
+                    shuffle=(not self.args.train_test_split_for_time_series), 
+                    force_regression=self.args.force_regression
                 )
 
                 self.append_to_train_list(X_train_labeled, Y_train_labeled, label_train_labeled)
@@ -169,6 +171,7 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                     random_state=self.args.seed, 
                     shuffle=(not self.args.train_test_split_for_time_series), 
                     force_regression=self.args.force_regression
+                    
                 )
 
         # Otherwise validate with all of left out subject's data

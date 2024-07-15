@@ -26,7 +26,9 @@ class Single_Subject(Data_Split_Strategy):
             self.Y.train, 
             test_size=1-self.args.proportion_transfer_learning_from_leftout_subject, 
             stratify=self.label.train, 
-            shuffle=(not self.args.train_test_split_for_time_series))
+            shuffle=(not self.args.train_test_split_for_time_series), 
+            force_regression=self.args.force_regression
+            )
 
         self.train_from_self_tensor()
         self.validation_from_self_tensor()

@@ -78,7 +78,8 @@ class Data_Split_Strategy():
             test_size=0.5, 
             stratify=self.label.validation,
             random_state=self.args.seed,
-            shuffle=(not self.args.train_test_split_for_time_series)
+            shuffle=(not self.args.train_test_split_for_time_series),
+            force_regression=self.args.force_regression
         )
 
     def all_sets_to_tensor(self):
