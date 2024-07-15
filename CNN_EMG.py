@@ -73,18 +73,6 @@ class Run_Setup():
     def __init__(self):
             pass
 
-    def set_seeds_for_reproducibility(self, args):
-        """ 
-        Set seeds for reproducibility. 
-        """
-        seed = args.seed
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-
     def setup_run(self):
 
         # TODO: case on which one to import based on if config file is provided
@@ -95,7 +83,6 @@ class Run_Setup():
         setup.set_exercise()
         setup.print_params()
         env = setup.setup_env()
-        self.set_seeds_for_reproducibility(env.args)
         return env
 
 class Data_Initializer():
@@ -191,11 +178,18 @@ class Run_Model():
 
 def main():
 
-
     hooks = Hook_Manager()
     run_setup = Run_Setup()
     hooks.register_hook("setup_run", run_setup.setup_run)
     env = hooks.call_hook("setup_run")
+
+    seed = env.args.seed
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     data_initializer = Data_Initializer(env)
     hooks.register_hook("initialize_data", data_initializer.initialize_data)
