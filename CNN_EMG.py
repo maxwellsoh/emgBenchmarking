@@ -195,24 +195,25 @@ class Run_Model():
         model_trainer.model_loop()
 
 
+def main():
 
-hooks = Hook_Manager()
-run_setup = Run_Setup()
-hooks.register_hook("setup_run", run_setup.setup_run)
-env = hooks.call_hook("setup_run")
+    hooks = Hook_Manager()
+    run_setup = Run_Setup()
+    hooks.register_hook("setup_run", run_setup.setup_run)
+    env = hooks.call_hook("setup_run")
 
-data_initializer = Data_Initializer(env)
-hooks.register_hook("initialize_data", data_initializer.initialize_data)
-X, Y, label = hooks.call_hook("initialize_data")
+    data_initializer = Data_Initializer(env)
+    hooks.register_hook("initialize_data", data_initializer.initialize_data)
+    X, Y, label = hooks.call_hook("initialize_data")
 
+    data_splitter = Data_Splitter(env)
+    hooks.register_hook("split_data", data_splitter.split_data)
+    hooks.call_hook("split_data", X, Y, label)
 
-
-data_splitter = Data_Splitter(env)
-hooks.register_hook("split_data", data_splitter.split_data)
-hooks.call_hook("split_data", X, Y, label)
-
-run_model = Run_Model(env)
-hooks.register_hook("run_model", run_model.run_model)
-hooks.call_hook("run_model", X, Y, label)
+    run_model = Run_Model(env)
+    hooks.register_hook("run_model", run_model.run_model)
+    hooks.call_hook("run_model", X, Y, label)
 
 
+if __name__ == "__main__":
+    main()
