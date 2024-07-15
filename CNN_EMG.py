@@ -91,7 +91,7 @@ class Run_Setup():
 
         run = Parse_Arguments() # TODO: case if config
     
-        run.setup_args()
+        run.set_args()
         run.setup_for_dataset()
         run.set_exercise()
         run.print_params()
