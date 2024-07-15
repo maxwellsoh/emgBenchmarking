@@ -132,8 +132,62 @@ class X_Data(Data):
         if self.args.partial_dataset_ninapro:
             self.concatenated_trials = self.concatenated_trials[indices_for_partial_dataset]
 
+    def create_foldername_zarr(self):
+        base_foldername_zarr = ""
+
+        if self.args.leave_n_subjects_out_randomly != 0:
+            base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{self.args.dataset}/leave_{self.args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{self.args.seed}/'
+        else:
+            if self.args.held_out_test:
+                base_foldername_zarr = f'heldout_images_zarr/{self.args.dataset}/'
+            elif self.args.leave_one_session_out:
+                base_foldername_zarr = f'Leave_one_session_out_images_zarr/{self.args.dataset}/'
+            elif self.args.turn_off_scaler_normalization:
+                base_foldername_zarr = f'LOSOimages_zarr/{self.args.dataset}/'
+            elif self.args.leave_one_subject_out:
+                base_foldername_zarr = f'LOSOimages_zarr/{self.args.dataset}/'
+
+        if self.args.turn_off_scaler_normalization:
+            if self.args.leave_n_subjects_out_randomly != 0:
+                base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
+            else: 
+                if self.args.held_out_test:
+                    base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
+                else: 
+                    base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
+            scaler = None
+        else:
+            base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(self.leaveOut) + '/'
+            if self.args.target_normalize > 0:
+                base_foldername_zarr += 'target_normalize_' + str(self.args.target_normalize) + '/'  
+
+        if self.args.turn_on_rms:
+            base_foldername_zarr += 'RMS_input_windowsize_' + str(self.args.rms_input_windowsize) + '/'
+        elif self.args.turn_on_spectrogram:
+            base_foldername_zarr += 'spectrogram/'
+        elif self.args.turn_on_cwt:
+            base_foldername_zarr += 'cwt/'
+        elif self.args.turn_on_hht:
+            base_foldername_zarr += 'hht/'
+        else:
+            base_foldername_zarr += 'raw/'
+
+        if self.args.exercises:
+            if self.args.partial_dataset_ninapro:
+                base_foldername_zarr += 'partial_dataset_ninapro/'
+            else:
+                exercises_numbers_filename = '-'.join(map(str, self.args.exercises))
+                base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
+            
+        if self.args.save_images: 
+            if not os.path.exists(base_foldername_zarr):
+                os.makedirs(base_foldername_zarr)
+
+        return base_foldername_zarr
+
+
     
-    def load_images(self, base_foldername_zarr):
+    def load_images(self):
         """Updates self.data to be the loaded images for EMG data. Returns flexwear_unlabeled_data if self.args.load_unlabeled_data_flexwearhd.
         
         If dataset exists, loads images. Otherwise, creates imaeges and saves in directory. 
@@ -142,6 +196,8 @@ class X_Data(Data):
             flexwear_unlabeled_data: unlabeled data if self.args.load_unlabeled_data_flexwearhd
         """
         assert self.utils is not None, "self.utils is not defined. Please run initialize() first."
+
+        base_foldername_zarr = self.create_foldername_zarr()
 
         flexwear_unlabeled_data = None
 
@@ -173,8 +229,7 @@ class X_Data(Data):
                 print(f"Could not find dataset for {subject_or_session} {x} at {foldername_zarr}")
                 # Get images and create the dataset
                 if (self.args.target_normalize > 0):
-                    self.scaler = None
-                images = self.utils.getImages(
+                    self.scaler = None                images = self.utils.getImages(
                     emg[x], 
                     self.scaler, 
                     self.length, 
