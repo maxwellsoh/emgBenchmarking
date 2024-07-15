@@ -12,7 +12,36 @@ class Held_Out_Test(Data_Split_Strategy):
 
         # Set seeds for reproducibility
         np.random.seed(self.args.seed)
-    
+
+    def split(self):
+        """Train using train_indices. Split validation indices into validation and test using labels to stratify.""" 
+
+        X_combined_data, Y_combined_data, label_combined_data = self.combine_data()
+        self.train_from_train_indices(X_combined_data, Y_combined_data, label_combined_data)
+        self.validation_from_validation_indices(X_combined_data, Y_combined_data, label_combined_data)
+       
+        # Split validation into validation and test 50/50
+        self.X.validation, self.X.test, \
+        self.Y.validation, self.Y.test, \
+        self.label.validation, self.label.test \
+        = model_selection.train_test_split(
+            self.X.validation, 
+            self.Y.validation, 
+            self.label.validation, 
+            test_size=0.5, 
+            stratify=self.label.validation
+        )
+
+        self.convert_datasets_to_tensors()
+
+        del X_combined_data
+        del Y_combined_data
+        del label_combined_data
+      
+        self.del_data()
+        super().test_from_validation() # NOTE: are we intentionally splitting twice? 
+        super().print_set_shapes()
+        super().all_sets_to_tensor()
 
     def combine_data(self):
         """
@@ -59,32 +88,4 @@ class Held_Out_Test(Data_Split_Strategy):
         self.Y.del_combined_data()
         self.label.del_combined_data()
     
-    def split(self):
-        """Train using train_indices. Split validation indices into validation and test using labels to stratify.""" 
-
-        X_combined_data, Y_combined_data, label_combined_data = self.combine_data()
-        self.train_from_train_indices(X_combined_data, Y_combined_data, label_combined_data)
-        self.validation_from_validation_indices(X_combined_data, Y_combined_data, label_combined_data)
-       
-        # Split validation into validation and test 50/50
-        self.X.validation, self.X.test, \
-        self.Y.validation, self.Y.test, \
-        self.label.validation, self.label.test \
-        = model_selection.train_test_split(
-            self.X.validation, 
-            self.Y.validation, 
-            self.label.validation, 
-            test_size=0.5, 
-            stratify=self.label.validation
-        )
-
-        self.convert_datasets_to_tensors()
-
-        del X_combined_data
-        del Y_combined_data
-        del label_combined_data
-      
-        self.del_data()
-        super().test_from_validation() # NOTE: are we intentionally splitting twice? 
-        super().print_set_shapes()
-        super().all_sets_to_tensor()
+    

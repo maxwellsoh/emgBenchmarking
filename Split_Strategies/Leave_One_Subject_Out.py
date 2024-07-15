@@ -143,7 +143,6 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
         self.Y.train_finetuning_unlabeled_from(Y_new_data)
         self.label.train_finetuning_unlabeled_from(label_new_data)
 
-    
     def adjust_sets_for_leave_out_subj(self): 
         """
         If doing transfer learning, splits left out subject's data into train_partial_leftout_subject and validation_partial_leftout_subject sets.
@@ -170,8 +169,7 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                     stratify=self.label.validation, 
                     random_state=self.args.seed, 
                     shuffle=(not self.args.train_test_split_for_time_series), 
-                    force_regression=self.args.force_regression
-                    
+                    force_regression=self.args.force_regression    
                 )
 
         # Otherwise validate with all of left out subject's data

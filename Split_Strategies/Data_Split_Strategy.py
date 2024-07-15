@@ -23,6 +23,8 @@ class Data_Split_Strategy():
 
     def split(self):
         raise NotImplementedError("Subclasses must implement split()")
+    
+    # Helper Functions for Splits that are used in X, Y, and Label
 
     def convert_to_16_tensors(self, set_to_convert):
         self.X.convert_to_16_tensors(set_to_convert)
