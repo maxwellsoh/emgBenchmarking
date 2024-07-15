@@ -22,7 +22,7 @@ class Label_Data(Data):
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
 
-    def load_data(self, exercises):
+    def load_data(self):
         """Sets self.data to labels. """
 
         def get_labels_ninapro():
@@ -59,7 +59,7 @@ class Label_Data(Data):
             
             return labels
 
-        if exercises:
+        if self.exercises:
             self.data = get_labels_ninapro()
         else: 
             self.data = get_labels_other_datasets()

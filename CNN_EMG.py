@@ -131,70 +131,14 @@ class Data_Initializer():
 
         # Wrapper class to call operations on all three
         all_data = Combined_Data(self.X, self.Y, self.label, self.env)
-        all_data.load_data(self.exercises)
+        all_data.load_data()
         all_data.scaler_normalize_emg()
         
-        base_foldername_zarr = self.create_foldername_zarr()
-        self.X.load_images(base_foldername_zarr)
+        self.X.load_images()
         self.X.print_data_information()
 
         return self.X, self.Y, self.label
     
-    # Helper functions for Data_Initializer class
-
-    def create_foldername_zarr(self):
-        base_foldername_zarr = ""
-
-        if self.args.leave_n_subjects_out_randomly != 0:
-            base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{self.args.dataset}/leave_{self.args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{self.args.seed}/'
-        else:
-            if self.args.held_out_test:
-                base_foldername_zarr = f'heldout_images_zarr/{self.args.dataset}/'
-            elif self.args.leave_one_session_out:
-                base_foldername_zarr = f'Leave_one_session_out_images_zarr/{self.args.dataset}/'
-            elif self.args.turn_off_scaler_normalization:
-                base_foldername_zarr = f'LOSOimages_zarr/{self.args.dataset}/'
-            elif self.args.leave_one_subject_out:
-                base_foldername_zarr = f'LOSOimages_zarr/{self.args.dataset}/'
-
-        if self.args.turn_off_scaler_normalization:
-            if self.args.leave_n_subjects_out_randomly != 0:
-                base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
-            else: 
-                if self.args.held_out_test:
-                    base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
-                else: 
-                    base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
-            scaler = None
-        else:
-            base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(self.leaveOut) + '/'
-            if self.args.target_normalize > 0:
-                base_foldername_zarr += 'target_normalize_' + str(self.args.target_normalize) + '/'  
-
-        if self.args.turn_on_rms:
-            base_foldername_zarr += 'RMS_input_windowsize_' + str(self.args.rms_input_windowsize) + '/'
-        elif self.args.turn_on_spectrogram:
-            base_foldername_zarr += 'spectrogram/'
-        elif self.args.turn_on_cwt:
-            base_foldername_zarr += 'cwt/'
-        elif self.args.turn_on_hht:
-            base_foldername_zarr += 'hht/'
-        else:
-            base_foldername_zarr += 'raw/'
-
-        if self.exercises:
-            if self.args.partial_dataset_ninapro:
-                base_foldername_zarr += 'partial_dataset_ninapro/'
-            else:
-                exercises_numbers_filename = '-'.join(map(str, self.args.exercises))
-                base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
-            
-        if self.args.save_images: 
-            if not os.path.exists(base_foldername_zarr):
-                os.makedirs(base_foldername_zarr)
-
-        return base_foldername_zarr
-
 
 class Data_Splitter():
 

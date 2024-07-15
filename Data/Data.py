@@ -19,6 +19,7 @@ class Data():
         self.utils = env.utils
         self.leaveOut = env.leaveOut
         self.env = env
+        self.exercises = env.exercises
 
         # Set seeds for reproducibility
         np.random.seed(self.args.seed)

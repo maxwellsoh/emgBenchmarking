@@ -18,6 +18,7 @@ class Combined_Data():
         self.args = env.args
         self.utils = env.utils
         self.leaveOut = env.leaveOut
+        self.exercises = env.exercises
 
         self.X = x_obj
         self.Y = y_obj
@@ -65,12 +66,12 @@ class Combined_Data():
         del self.X.new_data, self.Y.new_data, self.label.new_data
         del self.X.subject_trials, self.Y.subject_trials, self.label.subject_trials
 
-    def load_data(self, exercises):
-        self.X.load_data(exercises)
-        self.Y.load_data(exercises)
-        self.label.load_data(exercises)
+    def load_data(self):
+        self.X.load_data()
+        self.Y.load_data()
+        self.label.load_data()
 
-        if exercises:
+        if self.exercises:
             self.process_ninapro()
 
         assert len(self.X.data[-1]) == len(self.Y.data[-1]), "Number of trials for X and Y do not match."

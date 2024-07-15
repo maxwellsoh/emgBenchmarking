@@ -23,7 +23,7 @@ class Y_Data(Data):
         torch.backends.cudnn.benchmark = False
 
 
-    def load_data(self, exercises):
+    def load_data(self):
         """ Sets self.data to force data if self.args.force_regression, otherwise sets self.data to labels. """
 
 
@@ -64,7 +64,7 @@ class Y_Data(Data):
             return labels
 
         def load_labels():
-            if exercises:
+            if self.exercises:
                 return load_labels_ninapro()
             else:
                 return load_labels_other_datasets()
