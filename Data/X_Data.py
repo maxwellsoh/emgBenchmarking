@@ -229,7 +229,8 @@ class X_Data(Data):
                 print(f"Could not find dataset for {subject_or_session} {x} at {foldername_zarr}")
                 # Get images and create the dataset
                 if (self.args.target_normalize > 0):
-                    self.scaler = None                images = self.utils.getImages(
+                    self.scaler = None
+                    images = self.utils.getImages(
                     emg[x], 
                     self.scaler, 
                     self.length, 

@@ -78,7 +78,8 @@ class Leave_One_Session_Out(Data_Split_Strategy):
                 train_size=self.args.proportion_data_from_training_subjects, 
                 stratify=label_train_temp, 
                 random_state=self.args.seed, 
-                shuffle=(not self.args.train_test_split_for_time_series)
+                shuffle=(not self.args.train_test_split_for_time_series), 
+                force_regression=self.args.force_regression
             )
             
         if self.args.proportion_unlabeled_data_from_training_subjects>0 and self.args.turn_on_unlabeled_domain_adaptation:

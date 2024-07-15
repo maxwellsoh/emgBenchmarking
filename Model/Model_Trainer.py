@@ -369,6 +369,8 @@ class Model_Trainer():
             wandb_runname += '_unlabel-subj-prop-' + str(self.args.proportion_unlabeled_data_from_training_subjects)
         if self.args.load_unlabeled_data_flexwearhd:
             wandb_runname += '_load-unlabel-data-flexwearhd'
+        if self.args.force_regression:
+            wandb_runname += '_force-regression'
 
         self.wandb_runname = wandb_runname
 
