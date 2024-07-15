@@ -49,6 +49,8 @@ from Data.Y_Data import Y_Data
 from Data.Label_Data import Label_Data
 from Data.Combined_Data import Combined_Data
 
+# Imports fro Data_Splitter
+from importlib import import_module
 
 class Setup():
     """
@@ -402,7 +404,6 @@ class Run_Setup():
 
         return env
 
-
 class Data_Initializer():
     """
     Loads in the data for the run. (EMG/labels/forces)
@@ -498,7 +499,33 @@ class Data_Initializer():
 
     
 
+class Data_Splitter():
 
+    def __init__(self, env):
+
+        self.args = env.args
+        self.utils = env.utils
+        self.env = env
+
+    def split_data(self, X_data, Y_data, label_data):
+
+        if self.args.leave_n_subjects_out_randomly:
+            split_strategy = "Leave_N_Subjects_Out_Randomly"
+        elif self.args.held_out_test:
+            split_strategy = "Held_Out_Test"
+        elif self.args.leave_one_session_out:
+            split_strategy = "Leave_One_Session_Out"
+        elif self.args.leave_one_subject_out:
+            split_strategy = "Leave_One_Subject_Out"
+        elif self.utils.num_subjects == 1:
+            split_strategy = "Single_Subject"
+        else:
+            raise ValueError("Please specify the type of test you want to run")
+
+        strategy_module = import_module(f"Split_Strategies.{split_strategy}")
+        strategy_class = getattr(strategy_module, split_strategy)
+        strategy_class = strategy_class(X_data, Y_data, label_data, self.env)
+        strategy_class.split()
 
 
 # THIS SHOULD BE IN A MAIN FUNCTION
@@ -513,7 +540,9 @@ data_initializer = Data_Initializer(env)
 hooks.register_hook("initialize_data", data_initializer.initialize_data)
 X, Y, label = hooks.call_hook("initialize_data")
 
-
+data_splitter = Data_Splitter(env)
+hooks.register_hook("split_data", data_splitter.split_data)
+hooks.call_hook("split_data", X, Y, label)
 
 
 
@@ -540,177 +569,32 @@ numGestures = env.num_gestures
 if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)):
     leaveOutIndices = X.leaveOutIndices
 
+X_train = X.train if not None else None
+Y_train = Y.train if not None else None
+label_train = label.train if not None else None
+
+X_train_unlabeled = X.train_unlabeled if not None else None
+Y_train_unlabeled = Y.train_unlabeled if not None else None
+label_train_unlabeled = label.train_unlabeled if not None else None
+
+X_validation = X.validation if not None else None
+Y_validation = Y.validation if not None else None
+label_validation = label.validation if not None else None
+
+X_test = X.test if not None else None
+Y_test = Y.test if not None else None
+label_test = label.test if not None else None
+
+X_train_finetuning = X.train_finetuning if not None else None
+Y_train_finetuning = Y.train_finetuning if not None else None
+label_train_finetuning = label.train_finetuning if not None else None
+
+X_train_finetuning_unlabeled = X.train_finetuning_unlabeled if not None else None
+Y_train_finetuning_unlabeled = Y.train_finetuning_unlabeled if not None else None
+label_train_finetuning_unlabeled = label.train_finetuning_unlabeled if not None else None
 
 
-# These can be tuned to change the normalization
-# This is the coefficient for the standard deviation
-# used for the magnitude images. In practice, these
-# should be fairly small so that images have more
-# contrast
-# if args.turn_on_rms:
-#     # This tends to be small because in pracitice
-#     # the RMS is usually much smaller than the raw EMG
-#     # NOTE: Should check why this is the case
-#     sigma_coefficient = 0.1
-# else:
-#     # This tends to be larger because the raw EMG
-#     # is usually much larger than the RMS
-#     sigma_coefficient = 0.5
-    
-# [MOVED TO SCALER_NORMALIZE_EMG IN DATA_INITALIZER CLASS]
-# leaveOutIndices = []
-# # Generate scaler for normalization
-# if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # will have to run and test this again, or just remove
-#     leaveOut = args.leave_n_subjects_out_randomly
-#     print(f"Leaving out {leaveOut} subjects randomly")
-#     # subject indices to leave out randomly
-#     leaveOutIndices = np.random.choice(range(utils.num_subjects), leaveOut, replace=False)
-#     print(f"Leaving out subjects {np.sort(leaveOutIndices)}")
-#     emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg if i not in leaveOutIndices], axis=0, dtype=np.float32)
-    
-#     global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
-#     global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
-    
-#     # Normalize by electrode
-#     emg_in_by_electrode = emg_in.reshape(-1, length, width)
-    
-#     # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
-#     # Reshape data to (SAMPLES*50, 16)
-#     emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
-    
-#     # Initialize and fit the scaler on the reshaped data
-#     # This will compute the mean and std dev for each electrode across all samples and features
-#     scaler = preprocessing.StandardScaler()
-#     scaler.fit(emg_reshaped)
-    
-#     # Repeat means and std_devs for each time point using np.repeat
-#     scaler.mean_ = np.repeat(scaler.mean_, width)
-#     scaler.scale_ = np.repeat(scaler.scale_, width)
-#     scaler.var_ = np.repeat(scaler.var_, width)
-#     scaler.n_features_in_ = width*utils.numElectrodes
-
-#     del emg_in
-#     del emg_in_by_electrode
-#     del emg_reshaped
-
-# else: # Not leave n subjects out randomly
-#     if (args.held_out_test): # can probably be deprecated and deleted
-#         if args.turn_on_kfold:
-#             skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
-            
-#             emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
-#             labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-            
-#             labels_for_folds = np.argmax(labels_in, axis=1)
-            
-#             fold_count = 1
-#             for train_index, test_index in skf.split(emg_in, labels_for_folds):
-#                 if fold_count == args.fold_index:
-#                     train_indices = train_index
-#                     validation_indices = test_index
-#                     break
-#                 fold_count += 1
-
-#             # Normalize by electrode
-#             emg_in_by_electrode = emg_in[train_indices].reshape(-1, length, width)
-#             # s = preprocessing.StandardScaler().fit(emg_in[train_indices])
-#             global_low_value = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
-#             global_high_value = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
-
-#             # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
-#             # Reshape data to (SAMPLES*50, 16)
-#             emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
-
-#             # Initialize and fit the scaler on the reshaped data
-#             # This will compute the mean and std dev for each electrode across all samples and features
-#             scaler = preprocessing.StandardScaler()
-#             scaler.fit(emg_reshaped)
-            
-#             # Repeat means and std_devs for each time point using np.repeat
-#             scaler.mean_ = np.repeat(scaler.mean_, width)
-#             scaler.scale_ = np.repeat(scaler.scale_, width)
-#             scaler.var_ = np.repeat(scaler.var_, width)
-#             scaler.n_features_in_ = width*utils.numElectrodes
-
-#             del emg_in
-#             del labels_in
-
-#             del emg_in_by_electrode
-#             del emg_reshaped
-
-#         else: 
-#             # Reshape and concatenate EMG data
-#             # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
-#             # Then concatenate along the subject dimension (axis=0)
-#             emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
-#             labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-
-#             indices = np.arange(emg_in.shape[0])
-#             train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
-#             train_emg_in = emg_in[train_indices]  # Select only the train indices
-#             # s = preprocessing.StandardScaler().fit(train_emg_in)
-
-#             # Normalize by electrode
-#             emg_in_by_electrode = train_emg_in.reshape(-1, length, width)
-#             global_low_value = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
-#             global_high_value = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
-
-#             # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
-#             # Reshape data to (SAMPLES*50, 16)
-#             emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
-
-#             # Initialize and fit the scaler on the reshaped data
-#             # This will compute the mean and std dev for each electrode across all samples and features
-#             scaler = preprocessing.StandardScaler()
-#             scaler.fit(emg_reshaped)
-            
-#             # Repeat means and std_devs for each time point using np.repeat
-#             scaler.mean_ = np.repeat(scaler.mean_, width)
-#             scaler.scale_ = np.repeat(scaler.scale_, width)
-#             scaler.var_ = np.repeat(scaler.var_, width)
-#             scaler.n_features_in_ = width*utils.numElectrodes
-
-#             del emg_in
-#             del labels_in
-
-#             del train_emg_in
-#             del indices
-
-#             del emg_in_by_electrode
-#             del emg_reshaped
-
-#     elif (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # Running LOSO standardization
-#         emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
-#         # s = preprocessing.StandardScaler().fit(emg_in)
-#         global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
-#         global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
-
-#         # Normalize by electrode
-#         emg_in_by_electrode = emg_in.reshape(-1, length, width)
-
-#         # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
-#         # Reshape data to (SAMPLES*50, 16)
-#         emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
-
-#         # Initialize and fit the scaler on the reshaped data
-#         # This will compute the mean and std dev for each electrode across all samples and features
-#         scaler = preprocessing.StandardScaler()
-#         scaler.fit(emg_reshaped)
-        
-#         # Repeat means and std_devs for each time point using np.repeat
-#         scaler.mean_ = np.repeat(scaler.mean_, width)
-#         scaler.scale_ = np.repeat(scaler.scale_, width)
-#         scaler.var_ = np.repeat(scaler.var_, width)
-#         scaler.n_features_in_ = width*utils.numElectrodes
-
-#         del emg_in
-#         del emg_in_by_electrode
-#         del emg_reshaped
-
-#     else: 
-#         global_low_value = None
-#         global_high_value = None
-#         scaler = None
+# =================================================================================================
 
 
 class ToNumpy:
@@ -723,654 +607,6 @@ class ToNumpy:
                 return np.float32(pic.cpu().detach().numpy())
             else:
                 raise TypeError("Unsupported image type")
-
-
-# [MOVED TO CREATE_FOLDERNAME_ZARR HELPER IN DATA_INITIALIZER CLASS]
-# base_foldername_zarr = ""
-# if args.leave_n_subjects_out_randomly != 0:
-#     base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
-# else:
-#     if args.held_out_test:
-#         base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
-#     elif args.leave_one_session_out:
-#         base_foldername_zarr = f'Leave_one_session_out_images_zarr/{args.dataset}/'
-#     elif args.turn_off_scaler_normalization:
-#         base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
-#     elif args.leave_one_subject_out:
-#         base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
-
-# if args.turn_off_scaler_normalization:
-#     if args.leave_n_subjects_out_randomly != 0:
-#         base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
-#     else: 
-#         if args.held_out_test:
-#             base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
-#         else: 
-#             base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
-#     scaler = None
-# else:
-#     base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(leaveOut) + '/'
-#     if args.target_normalize > 0:
-#         base_foldername_zarr += 'target_normalize_' + str(args.target_normalize) + '/'  
-
-# if args.turn_on_rms:
-#     base_foldername_zarr += 'RMS_input_windowsize_' + str(args.rms_input_windowsize) + '/'
-# elif args.turn_on_spectrogram:
-#     base_foldername_zarr += 'spectrogram/'
-# elif args.turn_on_cwt:
-#     base_foldername_zarr += 'cwt/'
-# elif args.turn_on_hht:
-#     base_foldername_zarr += 'hht/'
-# else:
-#     base_foldername_zarr += 'raw/'
-
-# if exercises:
-#     if args.partial_dataset_ninapro:
-#         base_foldername_zarr += 'partial_dataset_ninapro/'
-#     else:
-#         exercises_numbers_filename = '-'.join(map(str, args.exercises))
-#         base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
-
-
-# [MOVED TO LOAD_IMAGES HELPER IN DATA_INITIALIZER CLASS]  
-# if args.save_images: 
-#     if not os.path.exists(base_foldername_zarr):
-#         os.makedirs(base_foldername_zarr)
-
-# for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-#     if args.held_out_test:
-#         subject_folder = f'subject{x}/'
-#     elif args.leave_one_session_out:
-#         subject_folder = f'session{x}/'
-#     else:
-#         subject_folder = f'LOSO_subject{x}/'
-#     foldername_zarr = base_foldername_zarr + subject_folder
-    
-#     subject_or_session = "session" if args.leave_one_session_out else "subject"
-#     print(f"Attempting to load dataset for {subject_or_session}", x, "from", foldername_zarr)
-
-#     print("Looking in folder: ", foldername_zarr)
-#     # Check if the folder (dataset) exists, load if yes, else create and save
-#     if os.path.exists(foldername_zarr):
-#         # Load the dataset
-#         dataset = zarr.open(foldername_zarr, mode='r')
-#         print(f"Loaded dataset for {subject_or_session} {x} from {foldername_zarr}")
-#         if args.load_few_images:
-#             data += [dataset[:10]]
-#         else: 
-#             data += [dataset[:]]
-#     else:
-#         print(f"Could not find dataset for {subject_or_session} {x} at {foldername_zarr}")
-#         # Get images and create the dataset
-#         if (args.target_normalize > 0):
-#             scaler = None
-#         images = utils.getImages(emg[x], scaler, length, width, 
-#                                  turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
-#                                  turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value, 
-#                                  turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt, 
-#                                  turn_on_hht=args.turn_on_hht)
-#         images = np.array(images, dtype=np.float16)
-        
-#         # Save the dataset
-#         if args.save_images:
-#             os.makedirs(foldername_zarr, exist_ok=True)
-#             dataset = zarr.open(foldername_zarr, mode='w', shape=images.shape, dtype=images.dtype, chunks=True)
-#             dataset[:] = images
-#             print(f"Saved dataset for subject {x} at {foldername_zarr}")
-#         else:
-#             print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
-#         data += [images]
-        
-# if args.load_unlabeled_data_flexwearhd:
-#     unlabeled_images = utils.getImages(unlabeled_online_data, scaler, length, width,
-#                                                 turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize,
-#                                                 turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value,
-#                                                 turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt,
-#                                                 turn_on_hht=args.turn_on_hht)
-#     unlabeled_images = np.array(unlabeled_images, dtype=np.float16)
-#     unlabeled_data = unlabeled_images
-#     del unlabeled_images, unlabeled_online_data
-
-
-# DATA_SPLITTER CLASS BELOW 
-if args.leave_n_subjects_out_randomly != 0:
-    
-    # Instead of the below code, leave n subjects out randomly to be used as the 
-    # validation set and the rest as the training set using leaveOutIndices
-    X_validation = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
-    X_validation = torch.from_numpy(X_validation).to(torch.float16)
-
-    if args.force_regression:
-        Y_validation = np.concatenate([np.array(forces[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
-        label_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
-    else: 
-        Y_validation = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i in leaveOutIndices], axis=0, dtype=np.float16)
-        label_validation = Y_validation
-    Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-    
-    X_train = np.concatenate([np.array(data[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
-    X_train = torch.from_numpy(X_train).to(torch.float16)
-
-    if args.force_regression: 
-        Y_train = np.concatenate([np.array(forces[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float32)
-        label_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
-    else: 
-        Y_train = np.concatenate([np.array(labels[i]) for i in range(utils.num_subjects) if i not in leaveOutIndices], axis=0, dtype=np.float16)
-        label_train = Y_train
-    Y_train = torch.from_numpy(Y_train).to(torch.float16)
-        
-    print("Size of X_train:", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-    print("Size of Y_train:", Y_train.size()) # (SAMPLE, GESTURE)
-    print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-    print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
-    
-    del data
-    del emg
-    del labels
-
-else: 
-    if args.held_out_test:
-        combined_labels = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-        combined_images = np.concatenate([np.array(i) for i in data], axis=0, dtype=np.float16)
-        if args.force_regression:
-            combined_forces = np.concatenate([np.array(i) for i in forces], axis=0, dtype=np.float32)
-
-        X_train = combined_images[train_indices]
-        if args.force_regression:
-            Y_train = combined_forces[train_indices]
-            label_train = combined_labels[train_indices]
-        else:
-            Y_train = combined_labels[train_indices]
-            label_train = Y_train
-        
-        X_validation = combined_images[validation_indices]
-        label_validation = combined_labels[validation_indices]
-        if args.force_regression:
-            Y_validation = combined_forces[validation_indices]
-        else:
-            Y_validation = label_validation
-
-        
-        X_validation, X_test, Y_validation, Y_test, label_validation, label_test= model_selection.train_test_split(X_validation, Y_validation, label_validation, test_size=0.5, stratify=label_validation)
-    
-
-        del combined_images
-        del combined_labels
-        if args.force_regression:
-            del combined_forces
-        del data
-        del emg
-        if args.force_regression:
-            del forces
-        
-        X_train = torch.from_numpy(X_train).to(torch.float16)
-        Y_train = torch.from_numpy(Y_train).to(torch.float16)
-        label_train = torch.from_numpy(label_train).to(torch.float16)
-        X_validation = torch.from_numpy(X_validation).to(torch.float16)
-        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-        label_validation = torch.from_numpy(label_validation).to(torch.float16)
-        X_test = torch.from_numpy(X_test).to(torch.float16)
-        Y_test = torch.from_numpy(Y_test).to(torch.float16)
-        label_test = torch.from_numpy(label_test).to(torch.float16)
-        print("Size of X_train:     ", X_train.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_train:     ", Y_train.size()) # (SAMPLE, GESTURE)
-        print("Size of X_validation:", X_validation.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_validation:", Y_validation.size()) # (SAMPLE, GESTURE)
-        print("Size of X_test:      ", X_test.size()) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_test:      ", Y_test.size()) # (SAMPLE, GESTURE)
-    
-    elif args.leave_one_session_out:
-        total_number_of_sessions = 2 # all datasets used in our benchmark have at most 2 sessions but this can be changed using a variable from dataset-specific utils instead
-        left_out_subject_last_session_index = (total_number_of_sessions - 1) * utils.num_subjects + leaveOut-1
-        left_out_subject_first_n_sessions_indices = [i for i in range(total_number_of_sessions * utils.num_subjects) if i % utils.num_subjects == (leaveOut-1) and i != left_out_subject_last_session_index]
-        print("left_out_subject_last_session_index:", left_out_subject_last_session_index)
-        print("left_out_subject_first_n_sessions_indices:", left_out_subject_first_n_sessions_indices)
-
-        X_pretrain = []
-        Y_pretrain = []
-
-        label_pretrain = []
-        if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
-            X_pretrain_unlabeled_list = []
-            Y_pretrain_unlabeled_list = []
-            label_pretrain_unlabeled_list = []
-    
-        X_finetune = []
-        Y_finetune = []
-
-        label_finetune = []
-
-        if args.proportion_unlabeled_data_from_leftout_subject>0 and args.turn_on_unlabeled_domain_adaptation:
-
-            X_finetune_unlabeled_list = []
-            Y_finetune_unlabeled_list = []
-            label_finetune_unlabeled_list = []
-
-        for i in range(total_number_of_sessions * utils.num_subjects):
-            X_train_temp = data[i]
-            label_train_temp = labels[i]
-            if args.force_regression:
-                Y_train_temp = forces[i]
-            else:
-                Y_train_temp = label_train_temp
-
-            if i != left_out_subject_last_session_index and i not in left_out_subject_first_n_sessions_indices:
-                if args.proportion_data_from_training_subjects<1.0:
-                    X_train_temp, _, Y_train_temp, _, label_train_temp, _ = tts.train_test_split(X_train_temp, Y_train_temp, train_size=args.proportion_data_from_training_subjects, stratify=label_train_temp, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
-                        
-                if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
-                    X_pretrain_labeled, X_pretrain_unlabeled, Y_pretrain_labeled, Y_pretrain_unlabeled, label_pretrain_labeled, label_pretrain_unlabeled  = tts.train_test_split(
-                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
-                    X_pretrain.append(np.array(X_pretrain_labeled))
-                    Y_pretrain.append(np.array(Y_pretrain_labeled))
-                    label_pretrain.append(np.array(label_pretrain_labeled))
-                    X_pretrain_unlabeled_list.append(np.array(X_pretrain_unlabeled))
-                    Y_pretrain_unlabeled_list.append(np.array(Y_pretrain_unlabeled))
-                    label_pretrain_unlabeled_list.append(np.array(label_pretrain_unlabeled))
-                else:
-                    X_pretrain.append(np.array(X_train_temp))
-                    Y_pretrain.append(np.array(Y_train_temp))
-                    label_pretrain.append(np.array(label_train_temp))
-            elif i in left_out_subject_first_n_sessions_indices:
-                if args.proportion_unlabeled_data_from_leftout_subject>0 and args.turn_on_unlabeled_domain_adaptation:
-                    X_finetune_labeled, X_finetune_unlabeled, Y_finetune_labeled, Y_finetune_unlabeled, label_finetune_labeled, label_finetune_unlabeled = tts.train_test_split(
-                        X_train_temp, Y_train_temp, train_size=1-args.proportion_unlabeled_data_from_leftout_subject, stratify=labels[i], random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
-                    X_finetune.append(np.array(X_finetune_labeled))
-                    Y_finetune.append(np.array(Y_finetune_labeled))
-                    label_finetune.append(np.array(label_finetune_labeled))
-                    X_finetune_unlabeled_list.append(np.array(X_finetune_unlabeled))
-                    Y_finetune_unlabeled_list.append(np.array(Y_finetune_unlabeled))
-                    label_finetune_unlabeled_list.append(np.array(label_finetune_unlabeled))
-                else:
-                    X_finetune.append(np.array(X_train_temp))
-                    Y_finetune.append(np.array(Y_train_temp))
-                    label_finetune.append(np.array(label_train_temp))
-
-        if args.load_unlabeled_data_flexwearhd:
-            assert(not args.force_regression)
-            X_finetune_unlabeled_list.append(unlabeled_data)
-            Y_finetune_unlabeled_list.append(np.zeros(unlabeled_data.shape[0]))
-            assert not args.force_regression, "Regression only for DB2/3"
-            label_finetune_unlabeled_list.append(np.zeros(unlabeled_data.shape[0])) 
-
-        if utils.num_subjects == 1:
-            assert not args.pretrain_and_finetune, "Cannot pretrain and finetune with only one subject"
-
-        if utils.num_subjects > 1:
-            X_pretrain = np.concatenate(X_pretrain, axis=0, dtype=np.float16)
-            Y_pretrain = np.concatenate(Y_pretrain, axis=0, dtype=np.float16)
-            label_pretrain = np.concatenate(label_pretrain, axis=0, dtype=np.float16)
-        X_finetune = np.concatenate(X_finetune, axis=0, dtype=np.float16)
-        Y_finetune = np.concatenate(Y_finetune, axis=0, dtype=np.float16)
-        label_finetune = np.concatenate(label_finetune, axis=0, dtype=np.float16)
-        X_validation = np.array(data[left_out_subject_last_session_index])
-        if args.force_regression:
-            Y_validation = np.array(forces[left_out_subject_last_session_index])
-            label_validation = np.array(labels[left_out_subject_last_session_index])
-        else:
-            Y_validation = np.array(labels[left_out_subject_last_session_index])
-            label_validation = Y_validation
-
-        if args.proportion_unlabeled_data_from_training_subjects>0 and args.turn_on_unlabeled_domain_adaptation:
-            X_pretrain_unlabeled = np.concatenate(X_pretrain_unlabeled_list, axis=0, dtype=np.float16)
-            Y_pretrain_unlabeled = np.concatenate(Y_pretrain_unlabeled_list, axis=0, dtype=np.float16)
-            label_pretrain_unlabeled = np.concatenate(label_pretrain_unlabeled_list, axis=0, dtype=np.float16)
-
-        if (args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_flexwearhd) and args.turn_on_unlabeled_domain_adaptation:
-            X_finetune_unlabeled = np.concatenate(X_finetune_unlabeled_list, axis=0, dtype=np.float16)
-            Y_finetune_unlabeled = np.concatenate(Y_finetune_unlabeled_list, axis=0, dtype=np.float16)
-            label_finetune_unlabeled = np.concatenate(label_finetune_unlabeled_list, axis=0, dtype=np.float16)
-        
-        if utils.num_subjects > 1:
-            X_train = torch.from_numpy(X_pretrain).to(torch.float16)
-            Y_train = torch.from_numpy(Y_pretrain).to(torch.float16)
-            label_train = torch.from_numpy(label_pretrain).to(torch.float16)
-        X_train_finetuning = torch.from_numpy(X_finetune).to(torch.float16)
-        Y_train_finetuning = torch.from_numpy(Y_finetune).to(torch.float16)
-        label_train_finetuning = torch.from_numpy(label_finetune).to(torch.float16)
-        X_validation = torch.from_numpy(X_validation).to(torch.float16)
-        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-        label_validation = torch.from_numpy(label_validation).to(torch.float16)
-        if args.proportion_unlabeled_data_from_training_subjects>0:
-            X_train_unlabeled = torch.from_numpy(X_pretrain_unlabeled).to(torch.float16)
-            Y_train_unlabeled = torch.from_numpy(Y_pretrain_unlabeled).to(torch.float16)
-            label_train_unlabeled = torch.from_numpy(label_pretrain_unlabeled).to(torch.float16)
-        if (args.proportion_unlabeled_data_from_leftout_subject>0 or args.load_unlabeled_data_flexwearhd) and args.turn_on_unlabeled_domain_adaptation:
-            X_train_finetuning_unlabeled = torch.from_numpy(X_finetune_unlabeled).to(torch.float16)
-            Y_train_finetuning_unlabeled = torch.from_numpy(Y_finetune_unlabeled).to(torch.float16)
-            label_train_finetuning_unlabeled = torch.from_numpy(label_finetune_unlabeled).to(torch.float16)
-
-        del X_finetune
-        del Y_finetune
-        del label_finetune
-        
-        if args.turn_on_unlabeled_domain_adaptation: # while in leave one session out
-            proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
-            proportion_unlabeled_of_proportion_to_keep_of_leftout = args.proportion_unlabeled_data_from_leftout_subject
-            proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
-
-            if args.proportion_unlabeled_data_from_training_subjects>0:
-                # X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled = tts.train_test_split( # DELETE
-                #     X_train, Y_train, train_size=1-proportion_unlabeled_of_training_subjects, stratify=Y_train, random_state=args.seed, shuffle=True)
-                # X_train = torch.tensor(X_train_labeled)
-                # Y_train = torch.tensor(Y_train_labeled)
-                # X_train_unlabeled = torch.tensor(X_train_unlabeled)
-                # Y_train_unlabeled = torch.tensor(Y_train_unlabeled)
-                
-                # print("Size of X_train:     ", X_train.size())
-                # print("Size of Y_train:     ", Y_train.size())
-                print("Size of X_train_unlabeled:     ", X_train_unlabeled.size())
-                print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.size())
-
-            if args.proportion_unlabeled_data_from_leftout_subject>0:
-                # proportion_unlabeled_of_proportion_to_keep = args.proportion_unlabeled_data_from_leftout_subject # DELETE
-                # X_train_labeled_leftout_subject, X_train_unlabeled_leftout_subject, Y_train_labeled_leftout_subject, Y_train_unlabeled_leftout_subject = tts.train_test_split(
-                #     X_train_finetuning, Y_train_finetuning, train_size=1-proportion_unlabeled_of_proportion_to_keep, stratify=Y_finetune, random_state=args.seed, shuffle=False)
-                # X_train_finetuning = torch.tensor(X_train_labeled_leftout_subject)
-                # Y_train_finetuning = torch.tensor(Y_train_labeled_leftout_subject)
-                # X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_leftout_subject)
-                # Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_leftout_subject)
-                
-                print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
-                print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
-                print("Size of X_train_finetuning_unlabeled:     ", X_train_finetuning_unlabeled.shape)
-                print("Size of Y_train_finetuning_unlabeled:     ", Y_train_finetuning_unlabeled.shape)
-            else: 
-                X_train_finetuning = torch.tensor(X_train_finetuning)
-                Y_train_finetuning = torch.tensor(Y_train_finetuning)
-                label_train_finetuning = torch.tensor(label_train_finetuning)
-                X_train_finetuning_unlabeled = None
-                Y_train_finetuning_unlabeled = None
-                label_train_finetuning_unlabeled = None
-                
-                print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
-                print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
-            
-                
-            if not args.pretrain_and_finetune:
-                X_train = torch.concat((X_train, X_train_finetuning), axis=0)
-                Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
-                label_train = torch.concat((label_train, label_train_finetuning), axis=0)
-                
-        else: # not turn_on_unlabeled_domain_adaptation
-            if utils.num_subjects == 1:
-                X_train = X_train_finetuning
-                Y_train = Y_train_finetuning
-                label_train = label_train_finetuning
-            elif not args.pretrain_and_finetune:
-                X_train = torch.concat((X_train, X_train_finetuning), axis=0)
-                Y_train = torch.concat((Y_train, Y_train_finetuning), axis=0)
-                label_train = torch.concat((label_train, label_train_finetuning), axis=0)
-            
-        print("Size of X_train:     ", X_train.size())
-        print("Size of Y_train:     ", Y_train.size())
-        if not args.turn_on_unlabeled_domain_adaptation:
-            print("Size of X_train_finetuning:  ", X_train_finetuning.size())
-            print("Size of Y_train_finetuning:  ", Y_train_finetuning.size())
-
-        del data
-        del emg
-        del labels
-        if args.force_regression:
-            del forces
-        
-    elif args.leave_one_subject_out: # Running LOSO rather than leave one session out
-        if args.reduce_training_data_size:
-            reduced_size_per_subject = args.reduced_training_data_size // (utils.num_subjects - 1)
-
-        X_validation = np.array(data[leaveOut-1])
-        if args.force_regression: 
-            Y_validation = np.array(forces[leaveOut-1])
-            label_validation = np.array(labels[leaveOut-1]) # needed for stratify     
-        else: 
-            X_validation = np.array(data[leaveOut-1])
-            Y_validation = np.array(labels[leaveOut-1])
-            label_validation = Y_validation # needed for stratify
-
-        X_train_list = []
-        Y_train_list = []
-        label_train_list = []
-
-        if args.proportion_unlabeled_data_from_training_subjects>0:
-            X_train_unlabeled_list = []
-            Y_train_unlabeled_list = []
-            label_train_unlabeled_list = []
-        
-        for i in range(len(data)):
-            if i == leaveOut-1:
-                continue
-            current_data = np.array(data[i])
-            current_labels = np.array(labels[i])
-            if args.force_regression: 
-                current_forces = np.array(forces[i])
-
-            # NOTE: debug moving this force_regression casing out
-            if args.force_regression:
-                current_y = current_forces
-            else: 
-                current_y = current_labels
-
-            if args.reduce_training_data_size:
-                proportion_to_keep = reduced_size_per_subject / current_data.shape[0]
-                current_data, _, current_y, _, current_labels, _ = model_selection.train_test_split(current_data, current_y, current_labels, train_size=proportion_to_keep, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
-                    
-            if args.proportion_data_from_training_subjects<1.0:
-                current_data, _, current_y, _, current_labels, _ = tts.train_test_split(current_data, current_y, train_size=args.proportion_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
-
-            if args.proportion_unlabeled_data_from_training_subjects>0:
-                X_train_labeled, X_train_unlabeled, Y_train_labeled, Y_train_unlabeled, label_train_labeled, label_train_unlabeled = tts.train_test_split(
-                    current_data, current_y, train_size=1-args.proportion_unlabeled_data_from_training_subjects, stratify=current_labels, random_state=args.seed, shuffle=(not args.train_test_split_for_time_series), force_regression=args.force_regression)
-                
-                current_data = X_train_labeled
-                current_labels = label_train_labeled
-                if args.force_regression:
-                    current_forces = Y_train_labeled
-
-                X_train_unlabeled_list.append(X_train_unlabeled)
-                Y_train_unlabeled_list.append(Y_train_unlabeled)
-                label_train_unlabeled_list.append(label_train_unlabeled)
-
-            X_train_list.append(current_data)
-            Y_train_list.append(current_y)
-            label_train_list.append(current_labels)
-            
-        X_train = torch.from_numpy(np.concatenate(X_train_list, axis=0)).to(torch.float16)
-        Y_train = torch.from_numpy(np.concatenate(Y_train_list, axis=0)).to(torch.float16)
-        label_train = torch.from_numpy(np.concatenate(label_train_list, axis=0)).to(torch.float16)
-            
-        if args.proportion_unlabeled_data_from_training_subjects>0:
-            X_train_unlabeled = torch.from_numpy(np.concatenate(X_train_unlabeled_list, axis=0)).to(torch.float16)
-            Y_train_unlabeled = torch.from_numpy(np.concatenate(Y_train_unlabeled_list, axis=0)).to(torch.float16)
-            label_train_unlabeled = torch.from_numpy(np.concatenate(label_train_unlabeled_list, axis=0)).to(torch.float16)
-
-        X_validation = torch.from_numpy(X_validation).to(torch.float16)
-        Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-        label_validation = torch.from_numpy(label_validation).to(torch.float16)
-
-        proportion_unlabeled_of_training_subjects = args.proportion_unlabeled_data_from_training_subjects
-        if args.transfer_learning: # while in leave one subject out
-            proportion_to_keep_of_leftout_subject_for_training = args.proportion_transfer_learning_from_leftout_subject
-            proportion_unlabeled_of_proportion_to_keep_of_leftout = args.proportion_unlabeled_data_from_leftout_subject
-            
-            if proportion_to_keep_of_leftout_subject_for_training>0.0:
-                if args.train_test_split_for_time_series:
-                    X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject,label_validation_partial_leftout_subject= tts.train_test_split(
-                        X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
-    
-                else:
-                    X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject, label_validation_partial_leftout_subject = tts.train_test_split(
-                    X_validation, Y_validation, train_size=proportion_to_keep_of_leftout_subject_for_training, stratify=label_validation, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
-                        
-            else:
-                X_validation_partial_leftout_subject = X_validation
-                Y_validation_partial_leftout_subject = Y_validation
-                label_validation_partial_leftout_subject = label_validation
-
-                X_train_partial_leftout_subject = torch.tensor([])
-                Y_train_partial_leftout_subject = torch.tensor([])
-                label_train_partial_leftout_subject = torch.tensor([])
-
-                
-            if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
-                if args.train_test_split_for_time_series:
-                    X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
-                    Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
-                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
-        
-                else:
-                    X_train_labeled_partial_leftout_subject, X_train_unlabeled_partial_leftout_subject, \
-                    Y_train_labeled_partial_leftout_subject, Y_train_unlabeled_partial_leftout_subject, label_train_labeled_partial_leftout_subject, label_train_unlabeled_partial_leftout_subject = tts.train_test_split(
-                        X_train_partial_leftout_subject, Y_train_partial_leftout_subject, train_size=1-proportion_unlabeled_of_proportion_to_keep_of_leftout, stratify=label_train_partial_leftout_subject, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
-            
-            if args.load_unlabeled_data_flexwearhd:
-                assert not args.force_regression, "Regression only for Ninapro DB2/3"
-                if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
-                    X_train_unlabeled_partial_leftout_subject = np.concatenate([X_train_unlabeled_partial_leftout_subject, unlabeled_data], axis=0)
-                    Y_train_unlabeled_partial_leftout_subject = np.concatenate([Y_train_unlabeled_partial_leftout_subject, np.zeros((unlabeled_data.shape[0], utils.numGestures))], axis=0)
-                    label_train_unlabeled_partial_leftout_subject = Y_train_unlabeled_partial_leftout_subject
-
-                else:
-                    X_train_unlabeled_partial_leftout_subject = unlabeled_data
-                    Y_train_unlabeled_partial_leftout_subject = np.zeros((unlabeled_data.shape[0], utils.numGestures))
-                    label_train_unlabeled_partial_leftout_subject = Y_train_unlabeled_partial_leftout_subject
-
-            print("Size of X_train_partial_leftout_subject:     ", X_train_partial_leftout_subject.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-            print("Size of Y_train_partial_leftout_subject:     ", Y_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE/FORCE)
-            if args.force_regression:
-                print("Size of label_train_partial_leftout_subject:     ", label_train_partial_leftout_subject.shape) # (SAMPLE, GESTURE)
-
-            if not args.turn_on_unlabeled_domain_adaptation:
-                # Append the partial validation data to the training data
-                if proportion_to_keep_of_leftout_subject_for_training>0:
-                    if not args.pretrain_and_finetune:
-                        X_train = np.concatenate((X_train, X_train_partial_leftout_subject), axis=0)
-                        Y_train = np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0)
-                        label_train = np.concatenate((label_train, label_train_partial_leftout_subject), axis=0)
-                    else:
-                        X_train_finetuning = torch.tensor(X_train_partial_leftout_subject)
-                        Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
-                        label_train_finetuning = torch.tensor(label_train_partial_leftout_subject)
-                        
-
-            else: # unlabeled domain adaptation
-                if proportion_unlabeled_of_training_subjects>0:
-                    X_train = torch.tensor(X_train)
-                    Y_train = torch.tensor(Y_train)
-                    label_train = torch.tensor(label_train)
-                    X_train_unlabeled = torch.tensor(X_train_unlabeled)
-                    Y_train_unlabeled = torch.tensor(Y_train_unlabeled)
-                    label_train_unlabeled = torch.tensor(label_train_unlabeled)
-
-                if proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or args.load_unlabeled_data_flexwearhd:
-                    if proportion_unlabeled_of_proportion_to_keep_of_leftout==0:
-                        X_train_labeled_partial_leftout_subject = X_train_partial_leftout_subject
-                        Y_train_labeled_partial_leftout_subject = Y_train_partial_leftout_subject
-                        label_train_labeled_partial_leftout_subject = label_train_partial_leftout_subject
-                    if not args.pretrain_and_finetune:
-                        X_train = torch.tensor(np.concatenate((X_train, X_train_labeled_partial_leftout_subject), axis=0))
-                        Y_train = torch.tensor(np.concatenate((Y_train, Y_train_labeled_partial_leftout_subject), axis=0))
-                        label_train = torch.tensor(np.concatenate((label_train, label_train_labeled_partial_leftout_subject), axis=0))
-                        X_train_unlabeled = torch.tensor(np.concatenate((X_train_unlabeled, X_train_unlabeled_partial_leftout_subject), axis=0))
-                        Y_train_unlabeled = torch.tensor(np.concatenate((Y_train_unlabeled, Y_train_unlabeled_partial_leftout_subject), axis=0))
-                        label_train_unlabeled = torch.tensor(np.concatenate((label_train_unlabeled, label_train_unlabeled_partial_leftout_subject), axis=0))
-                    else:
-                        X_train_finetuning = torch.tensor(X_train_labeled_partial_leftout_subject)
-                        Y_train_finetuning = torch.tensor(Y_train_labeled_partial_leftout_subject)
-                        label_train_finetuning = torch.tensor(label_train_labeled_partial_leftout_subject)
-                        X_train_finetuning_unlabeled = torch.tensor(X_train_unlabeled_partial_leftout_subject)
-                        Y_train_finetuning_unlabeled = torch.tensor(Y_train_unlabeled_partial_leftout_subject)
-                        label_train_finetuning_unlabeled = torch.tensor(label_train_unlabeled_partial_leftout_subject)
-                else:
-                    if proportion_to_keep_of_leftout_subject_for_training>0:
-                        if not args.pretrain_and_finetune:
-                            X_train = torch.tensor(np.concatenate((X_train, X_train_partial_leftout_subject), axis=0))
-                            Y_train = torch.tensor(np.concatenate((Y_train, Y_train_partial_leftout_subject), axis=0))
-                            label_train = torch.tensor(np.concatenate((label_train, label_train_partial_leftout_subject), axis=0))
-                        else: 
-                            X_train_finetuning = torch.tensor(X_train_partial_leftout_subject)
-                            Y_train_finetuning = torch.tensor(Y_train_partial_leftout_subject)
-                            label_train_finetuning = torch.tensor(label_train_partial_leftout_subject)
-
-            # Update the validation data
-            X_train = torch.tensor(X_train).to(torch.float16)
-            Y_train = torch.tensor(Y_train).to(torch.float16)
-            label_train = torch.tensor(label_train).to(torch.float16)
-            X_validation = torch.tensor(X_validation_partial_leftout_subject).to(torch.float16)
-            Y_validation = torch.tensor(Y_validation_partial_leftout_subject).to(torch.float16)
-            label_validation = torch.tensor(label_validation_partial_leftout_subject).to(torch.float16)
-            
-            del X_train_partial_leftout_subject, X_validation_partial_leftout_subject, Y_train_partial_leftout_subject, Y_validation_partial_leftout_subject, label_train_partial_leftout_subject, label_validation_partial_leftout_subject
-
-        print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_train:     ", Y_train.shape) # (SAMPLE, GESTURE/FORCE) 
-        print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE.FORCE)
-        if args.force_regression:
-            print("Size of label_train:", label_train.shape) # (SAMPLE, GESTURE)
-            print("Size of label_validation:", label_validation.shape) # (SAMPLE, GESTURE)
-
-        
-        if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_training_subjects>0:
-            print("Size of X_train_unlabeled:     ", X_train_unlabeled.shape)
-            print("Size of Y_train_unlabeled:     ", Y_train_unlabeled.shape)
-        if args.turn_on_unlabeled_domain_adaptation and proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
-            print("Size of X_train_finetuning_unlabeled:     ", X_train_finetuning_unlabeled.shape)
-            print("Size of Y_train_finetuning_unlabeled:     ", Y_train_finetuning_unlabeled.shape)
-            
-        if args.pretrain_and_finetune:
-            print("Size of X_train_finetuning:     ", X_train_finetuning.shape)
-            print("Size of Y_train_finetuning:     ", Y_train_finetuning.shape)
-            if args.force_regression: 
-                print("Size of label_train_finetuning:     ", label_train_finetuning.shape)
-            
-
-    elif utils.num_subjects == 1:  
-        
-        assert not args.pretrain_and_finetune, "Cannot pretrain and finetune with only one subject"
-        
-        X_train = data[0]
-        label_train = labels[0]
-        if args.force_regression:
-            Y_train = forces[0]
-        else:
-            Y_train = labels[0]
-
-        if args.train_test_split_for_time_series:
-            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=False, force_regression=args.force_regression)
-        else:
-            X_train, X_validation, Y_train, Y_validation, label_train, label_validation = tts.train_test_split(X_train, Y_train, test_size=1-args.proportion_transfer_learning_from_leftout_subject, stratify=label_train, shuffle=True, force_regression=args.force_regression)
-
-        X_train = torch.tensor(X_train).to(torch.float16)
-        Y_train = torch.tensor(Y_train).to(torch.float16)
-        label_train = torch.tensor(label_train).to(torch.float16)
-        X_validation = torch.tensor(X_validation).to(torch.float16)
-        Y_validation = torch.tensor(Y_validation).to(torch.float16)
-        label_validation = torch.tensor(label_validation).to(torch.float16)
-
-        print("Size of X_train:     ", X_train.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-        print("Size of Y_train:     ", Y_train.shape)
-        print("Size of X_validation:", X_validation.shape)
-        print("Size of Y_validation:", Y_validation.shape)
-    
-    else: 
-        raise ValueError("Please specify the type of test you want to run")
-    
-# get X_test and Y_test from splitting validation 50-50 with stratify
-if args.train_test_split_for_time_series:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=False, force_regression=args.force_regression)
-else:
-    X_test, X_validation, Y_test, Y_validation, label_test, label_validation = tts.train_test_split(X_validation, Y_validation, test_size=0.5, stratify=label_validation, random_state=args.seed, shuffle=True, force_regression=args.force_regression)
-
-X_test = torch.from_numpy(X_test).to(torch.float16)
-Y_test = torch.from_numpy(Y_test).to(torch.float16)
-label_test = torch.from_numpy(label_test).to(torch.float16)
-X_validation = torch.from_numpy(X_validation).to(torch.float16)
-Y_validation = torch.from_numpy(Y_validation).to(torch.float16)
-label_validation = torch.from_numpy(label_validation).to(torch.float16)
-print("Size of X_validation:", X_validation.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-print("Size of Y_validation:", Y_validation.shape) # (SAMPLE, GESTURE/FORCE)
-print("Size of X_test:      ", X_test.shape) # (SAMPLE, CHANNEL_RGB, HEIGHT, WIDTH)
-print("Size of Y_test:      ", Y_test.shape) # (SAMPLE, GESTURE/FORCE)
 
 model_name = args.model
 
@@ -1797,18 +1033,6 @@ if (exercises):
         gesture_labels = utils.partial_gesture_labels
 else:
     gesture_labels = utils.gesture_labels
-    
-# if X_train, validation, test or Y_train validation, test are numpy arrays, convert them to tensors
-X_train = torch.from_numpy(X_train).to(torch.float16) if isinstance(X_train, np.ndarray) else X_train
-Y_train = torch.from_numpy(Y_train).to(torch.float16) if isinstance(Y_train, np.ndarray) else Y_train
-label_train = torch.from_numpy(label_train).to(torch.float16) if isinstance(label_train, np.ndarray) else label_train
-X_validation = torch.from_numpy(X_validation).to(torch.float16) if isinstance(X_validation, np.ndarray) else X_validation
-Y_validation = torch.from_numpy(Y_validation).to(torch.float16) if isinstance(Y_validation, np.ndarray) else Y_validation
-label_validation = torch.from_numpy(label_validation).to(torch.float16) if isinstance(label_validation, np.ndarray) else label_validation
-X_test = torch.from_numpy(X_test).to(torch.float16) if isinstance(X_test, np.ndarray) else X_test
-Y_test = torch.from_numpy(Y_test).to(torch.float16) if isinstance(Y_test, np.ndarray) else Y_test
-label_test = torch.from_numpy(label_test).to(torch.float16) if isinstance(label_test, np.ndarray) else label_test
-
 
 # Plot and log images
 if args.force_regression:
