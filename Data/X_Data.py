@@ -51,8 +51,8 @@ class X_Data(Data):
             with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
                 for exercise in self.args.exercises:
                     if (self.args.target_normalize > 0):
-                        mins, maxes = self.utils.getExtrema(self.args.leftout_subject, self.args.target_normalize, exercise, self.args)
-                        emg_async = pool.map_async(self.utils.getEMG, [(i+1, exercise, mins, maxes, self.args.leftout_subject, self.args) for i in range(self.utils.num_subjects)])
+                        mins, maxes = self.utils.getExtrema(self.args.target_normalize_subject, self.args.target_normalize, exercise, self.args)
+                        emg_async = pool.map_async(self.utils.getEMG, [(i+1, exercise, mins, maxes, self.args.target_normalize_subjet, self.args) for i in range(self.utils.num_subjects)])
 
                     else:
                         emg_async = pool.map_async(self.utils.getEMG, [(i+1, exercise, self.args) for i in range(self.utils.num_subjects)])
@@ -70,12 +70,11 @@ class X_Data(Data):
             emg = []
             if (self.args.target_normalize > 0):
                 with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-                    mins, maxes = self.utils.getExtrema(self.args.leftout_subject, self.args.target_normalize)
+                    mins, maxes = self.utils.getExtrema(self.args.target_normalize_subject, self.args.target_normalize)
                     if self.args.leave_one_session_out:
                         emg = []
-                        labels = []
                         for i in range(1, self.utils.num_sessions+1):
-                            emg_async = pool.map_async(self.utils.getEMG_separateSessions, [(j+1, i, mins, maxes, self.args.leftout_subject) for j in range(self.utils.num_subjects)])
+                            emg_async = pool.map_async(self.utils.getEMG_separateSessions, [(j+1, i, mins, maxes, self.args.target_normalize_subject) for j in range(self.utils.num_subjects)])
                             emg.extend(emg_async.get())
 
                     else:
