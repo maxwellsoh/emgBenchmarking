@@ -89,6 +89,7 @@ class Run_Setup():
 
     def setup_run(self):
 
+
         run = Parse_Arguments() # TODO: case if config
     
         run.set_args()
