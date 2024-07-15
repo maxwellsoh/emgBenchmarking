@@ -53,7 +53,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Include arguments for running different trials")
 
     parser.add_argument('--config', type=str, help="Path to the config file.")
-    parser.add_argument('--table', type=int, help="Specify which table to replicate.")
+    parser.add_argument('--table', type=str, help="Specify which table to replicate. (Ex: 1, 2, 3, 3_intersession)")
 
     # Add argument for dataset
     parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)

@@ -25,7 +25,8 @@ def load_config(args, config_path, return_table_args=False):
         table_args: argparse object with extra fields that config has
     """
 
-    table_fields = {1: ['starting_index', 'ending_index', 'current_dataset', 'number_windows'], 2: ['starting_index', 'ending_index', 'current_dataset', 'preprocessing'], 3: ['starting_index', 'ending_index', 'current_dataset', 'preprocessing', 'best_model'], 4: ['starting_index', 'ending_index', 'current_dataset', 'preprocessing', 'best_model']}
+    # Dict of fields that get updated in each line for each table. 
+    table_fields = {"1": ['starting_index', 'ending_index', 'current_dataset', 'number_windows'], "2": ['starting_index', 'ending_index', 'current_dataset', 'preprocessing'], "3": ['starting_index', 'ending_index', 'current_dataset', 'preprocessing', 'best_model'], "3_intersession": ['starting_index', 'ending_index', 'current_dataset', 'preprocessing', 'best_model']}
 
     with open(config_path, 'r') as file:
         config = yaml.safe_load(file)
@@ -62,9 +63,9 @@ def run_command(args):
 
     delattr(args, "config")
     delattr(args, "table")
-    CNN_EMG.use_config(args)
+    CNN_EMG.use_config(args) # special call to main that passes config args
 
-def replicate_table(args, table_args, table_num):
+def replicate_table(args, table_args, table_name):
     """Replicate a given table from the paper.
 
     Each line in the interation is stored in a separate config file. The line config file is loaded and the parameters that change for each iteration are updated. CNN_EMG.py is then run with the updated args.
@@ -72,30 +73,30 @@ def replicate_table(args, table_args, table_num):
     Args:
         args (argparse): Default arguments with table{i}.yaml values overridden
         table_args (argparse): Fields for the table
-        table_num (int): Table number to replicate
+        table_name (str): Table number to replicate
     """
 
     starting_index = table_args.starting_index
     ending_index = table_args.ending_index
 
-    if table_num == 4:
+    if table_name == "4":
         NUM_LINES = 1
     else:
         NUM_LINES = 4
     
-    for subj in range(1, ending_index+1):
+    for subj in range(starting_index, ending_index+1):
         args_copy = copy.deepcopy(args)
 
         for line in range(1, NUM_LINES+1):
             # Load in the config for the given line
-            line_args = load_config(args_copy, f'config/table{table_num}_line{line}.yaml') # defaults + config values + line values
+            line_args = load_config(args_copy, f'config/table{table_name}_line{line}.yaml') # defaults + config values + line values
 
-            # Update the parameters that change for each iteration 
+            # Any value that is variable (ex $best_model) per line should be updated here to the value in table_args config
             line_args.dataset = table_args.current_dataset
             line_args.leftout_subject = subj
-            if table_num == 1 and line == 2: 
+            if table_name == "1" and line == "2": 
                 line_args.number_windows = table_args.number_windows
-            if table_num == 3 or table_num == 4:
+            if table_name == "3" or table_name == "3_intersession":
                 line_args.model = table_args.best_model
             
             run_command(line_args)
