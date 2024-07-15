@@ -10,7 +10,7 @@ transfer_learning: True
 train_test_split_for_time_series: True 
 save_images: True 
 learning_rate: 5e-4 
-proportion_transfer_learning: 0.6 
+proportion_transfer_learning_from_leftout_subject: 0.6 
 proportion_data_from_training_subjects: 1.0 
 finetuning_epochs: 375 
 pretrain_and_finetune: True 
