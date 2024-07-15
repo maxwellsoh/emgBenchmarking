@@ -45,6 +45,7 @@ from Hook_Manager import Hook_Manager
 
 # Imports for Setup_Run
 from Setup.Parse_Arguments import Parse_Arguments
+from Setup.Parse_Config import Parse_Config
 
 # Imports for Data_Initializer
 from Data.X_Data import X_Data
@@ -72,11 +73,12 @@ class Run_Setup():
     """
    
 
-    def __init__(self):
-        pass
+    def __init__(self, config_args=None):
+        self.config_args = config_args
 
     def set_seeds_for_reproducibility(self, env):
-        """ Set seeds for reproducibility. 
+        """ 
+        Set seeds for reproducibility. 
         """
 
         seed = env.args.seed
@@ -89,9 +91,14 @@ class Run_Setup():
 
     def setup_run(self):
 
-        run = Parse_Arguments() # TODO: case if config
+
+        if self.config_args:
+            run = Parse_Config(self.config_args)
+        else:
+            run = Parse_Arguments() 
+        
     
-        run.setup_args()
+        run.set_args()
         run.setup_for_dataset()
         run.set_exercise()
         run.print_params()
@@ -195,24 +202,32 @@ class Run_Model():
         model_trainer.model_loop()
 
 
+def main(config_args=None):
+    hooks = Hook_Manager()
+    run_setup = Run_Setup(config_args)
+    hooks.register_hook("setup_run", run_setup.setup_run)
+    env = hooks.call_hook("setup_run")
 
-hooks = Hook_Manager()
-run_setup = Run_Setup()
-hooks.register_hook("setup_run", run_setup.setup_run)
-env = hooks.call_hook("setup_run")
-
-data_initializer = Data_Initializer(env)
-hooks.register_hook("initialize_data", data_initializer.initialize_data)
-X, Y, label = hooks.call_hook("initialize_data")
-
-
-
-data_splitter = Data_Splitter(env)
-hooks.register_hook("split_data", data_splitter.split_data)
-hooks.call_hook("split_data", X, Y, label)
-
-run_model = Run_Model(env)
-hooks.register_hook("run_model", run_model.run_model)
-hooks.call_hook("run_model", X, Y, label)
+    data_initializer = Data_Initializer(env)
+    hooks.register_hook("initialize_data", data_initializer.initialize_data)
+    X, Y, label = hooks.call_hook("initialize_data")
 
 
+
+    data_splitter = Data_Splitter(env)
+    hooks.register_hook("split_data", data_splitter.split_data)
+    hooks.call_hook("split_data", X, Y, label)
+
+    run_model = Run_Model(env)
+    hooks.register_hook("run_model", run_model.run_model)
+    hooks.call_hook("run_model", X, Y, label)
+
+
+def use_config(config_args):
+    """
+    If config is used, pass in the config_args to main.
+    """
+    main(config_args)
+
+if __name__ == "__main__":
+    main()

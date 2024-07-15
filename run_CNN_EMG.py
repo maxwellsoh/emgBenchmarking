@@ -5,6 +5,7 @@ import subprocess
 import utils_MCS_EMG as utils # needed for parser
 import CNN_EMG
 import copy
+from Setup.Setup import Setup # used to get
 
 def list_of_ints(arg):
         """Define a custom argument type for a list of integers"""
@@ -55,7 +56,8 @@ def load_config(args, config_path, return_table_args=False):
     return args
 
 def run_command(args):
-    """Pass args to CNN_EMG.py to run the program.
+    """
+    Pass args to CNN_EMG.py's use_config function to run the program using config influenced arg values. 
 
     Args:
         args (argparser): Arguments (updated with config values) to pass.
@@ -104,8 +106,13 @@ def replicate_table(args, table_args, table_name):
 def main():
     """
     Gets the default parse_args from CNN_EMG. If config exists, overrides its fields with the config values. If table exists, uses config to get the values of the parameters that change at each iteration. Otherwise, uses command line arguments to run CNN_EMG.
+
+    Important to get the parse args in order to keep default values. 
     """
-    args = CNN_EMG.parse_args() # keeps the arg parsers consistent
+
+    # Doing this ensures the default arg values are kept consistent between a manual CNN_EMG run and a config run_CNN_EMG run. 
+    setup = Setup()
+    args = setup.create_argparse() # keeps the arg parsers consistent between if manually set in CNN_EMG and if set here with a config
 
     if args.table:
         args, table_args = load_config(args, f'config/table{args.table}.yaml', return_table_args=True)
