@@ -54,9 +54,9 @@ from importlib import import_module
 
 # Imports for Run_Model
 from Model.CNN_Trainer import CNN_Trainer
-# from Model.Unlabeled_Domain_Adaptation_Trainer import Unlabeled_Domain_Adaptation_Trainer
-# from Model.MLP_Trainer import MLP_Trainer
-# from Model.SVC_RF_Trainer import SVC_RF_Trainer
+from Model.Unlabeled_Domain_Adaptation_Trainer import Unlabeled_Domain_Adaptation_Trainer
+from Model.MLP_Trainer import MLP_Trainer
+from Model.SVC_RF_Trainer import SVC_RF_Trainer
 
 class Setup():
     """
@@ -108,7 +108,7 @@ class Run_Setup():
         parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
         # Add argument for doing leave-one-subject-out
         parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
-        # Add argument for leftout subject
+        # Add argument for leftout subject (indexed from 1)
         parser.add_argument('--leftout_subject', type=int, help='number of subject that is left out for cross validation, starting from subject 1', default=0)
         # Add parser for seed
         parser.add_argument('--seed', type=int, help='seed for reproducibility. Set to 0 by default.', default=0)
@@ -197,6 +197,8 @@ class Run_Setup():
         # Add argument for loading unlabeled data from flexwear-hd dataset
         parser.add_argument('--load_unlabeled_data_flexwearhd', type=utils.str2bool, help='whether or not to load unlabeled data from FlexWear-HD dataset. Set to False by default.', default=False)
 
+        parser.add_argument('--target_normalize_subject', type=int, help='number of subject that is left out for target normalization, starting from subject 1', default=0)
+
         args = parser.parse_args()
         return args
         
@@ -206,6 +208,10 @@ class Run_Setup():
         
         exercises = False
         args.dataset = args.dataset.lower()
+
+        if args.target_normalize_subject == 0:
+            args.target_normalize_subject = args.leftout_subject
+            print("Target normalize subject defaulting to leftout subject.")
 
         if args.model == "MLP" or args.model == "SVC" or args.model == "RF":
             print("Warning: not using pytorch, many arguments will be ignored")

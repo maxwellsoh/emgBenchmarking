@@ -370,6 +370,9 @@ class Model_Trainer():
         if self.args.load_unlabeled_data_flexwearhd:
             wandb_runname += '_load-unlabel-data-flexwearhd'
 
+        if self.args.target_normalize_subject != self.args.leftout_subject:
+            wandb_runname += '_targ-norm-subj-' + str(self.args.target_normalize_subject)
+
         self.wandb_runname = wandb_runname
 
 
