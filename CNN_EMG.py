@@ -43,6 +43,13 @@ import VisualTransformer
 
 from Hook_Manager import Hook_Manager
 
+# Imports for Data_Initializer
+from Data.X_Data import X_Data
+from Data.Y_Data import Y_Data
+from Data.Label_Data import Label_Data
+from Data.Combined_Data import Combined_Data
+
+
 class Setup():
     """
     Object to store run information shared across all Data and Model classes. 
@@ -396,380 +403,315 @@ class Run_Setup():
         return env
 
 
+class Data_Initializer():
+    """
+    Loads in the data for the run. (EMG/labels/forces)
+    """
+
+    def __init__(self, env):
+        self.args = env.args
+        self.utils = env.utils
+        self.exercises = env.exercises
+        self.leaveOut = env.leaveOut
+        self.env = env
+        self.num_gestures = env.num_gestures
+                
+        self.X = None
+        self.Y = None
+        self.label = None
+
+    def initialize_data(self):
+        """
+        Loads data for X, Y, and Label classes. Scaler normalizes EMG data, sets leave out indices, creates new folder name for images, acquires images, and prints data information.
+        """
+
+        # Initialize class objects
+        self.X = X_Data(self.env)
+        self.Y = Y_Data(self.env)
+        self.label = Label_Data(self.env)
+
+        # Wrapper class to call operations on all three
+        all_data = Combined_Data(self.X, self.Y, self.label, self.env)
+        all_data.load_data(self.exercises)
+        all_data.scaler_normalize_emg()
+        
+        base_foldername_zarr = self.create_foldername_zarr()
+        self.X.load_images(base_foldername_zarr)
+        self.X.print_data_information()
+
+        return self.X, self.Y, self.label
+    
+    # Helper functions for Data_Initializer class
+
+    def create_foldername_zarr(self):
+        base_foldername_zarr = ""
+
+        if self.args.leave_n_subjects_out_randomly != 0:
+            base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{self.args.dataset}/leave_{self.args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{self.args.seed}/'
+        else:
+            if self.args.held_out_test:
+                base_foldername_zarr = f'heldout_images_zarr/{self.args.dataset}/'
+            elif self.args.leave_one_session_out:
+                base_foldername_zarr = f'Leave_one_session_out_images_zarr/{self.args.dataset}/'
+            elif self.args.turn_off_scaler_normalization:
+                base_foldername_zarr = f'LOSOimages_zarr/{self.args.dataset}/'
+            elif self.args.leave_one_subject_out:
+                base_foldername_zarr = f'LOSOimages_zarr/{self.args.dataset}/'
+
+        if self.args.turn_off_scaler_normalization:
+            if self.args.leave_n_subjects_out_randomly != 0:
+                base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
+            else: 
+                if self.args.held_out_test:
+                    base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
+                else: 
+                    base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
+            scaler = None
+        else:
+            base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(self.leaveOut) + '/'
+            if self.args.target_normalize > 0:
+                base_foldername_zarr += 'target_normalize_' + str(self.args.target_normalize) + '/'  
+
+        if self.args.turn_on_rms:
+            base_foldername_zarr += 'RMS_input_windowsize_' + str(self.args.rms_input_windowsize) + '/'
+        elif self.args.turn_on_spectrogram:
+            base_foldername_zarr += 'spectrogram/'
+        elif self.args.turn_on_cwt:
+            base_foldername_zarr += 'cwt/'
+        elif self.args.turn_on_hht:
+            base_foldername_zarr += 'hht/'
+        else:
+            base_foldername_zarr += 'raw/'
+
+        if self.exercises:
+            if self.args.partial_dataset_ninapro:
+                base_foldername_zarr += 'partial_dataset_ninapro/'
+            else:
+                exercises_numbers_filename = '-'.join(map(str, self.args.exercises))
+                base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
+            
+        if self.args.save_images: 
+            if not os.path.exists(base_foldername_zarr):
+                os.makedirs(base_foldername_zarr)
+
+        return base_foldername_zarr
+
+    
+
+
+
+
+# THIS SHOULD BE IN A MAIN FUNCTION
+
+
 hooks = Hook_Manager()
 run_setup = Run_Setup()
 hooks.register_hook("setup_run", run_setup.setup_run)
 env = hooks.call_hook("setup_run")
 
+data_initializer = Data_Initializer(env)
+hooks.register_hook("initialize_data", data_initializer.initialize_data)
+X, Y, label = hooks.call_hook("initialize_data")
 
+
+
+
+
+
+# TEMPORARY VALUES FOR TESTING (SHOULD EVENTUALLY TRANSITION OUT OF USING THEM SINCE THEY'RE INITIALIZED IN EACH CLASS)
 exercises = env.exercises
 project_name = env.project_name
 formatted_datetime = env.formatted_datetime
 utils = env.utils
 args = env.args
 num_gestures = env.num_gestures
+leaveOut = env.leaveOut
 
-
-
-# END OF MY ADDITIONS
+data = X.data
+labels = label.data
+if args.force_regression:
+    forces = Y.data
+else:
+    labels = Y.data
     
-if exercises:
-    emg = []
-    labels = []
-    if args.force_regression:
-        forces = []
 
-    if args.partial_dataset_ninapro:
-        if args.dataset == "ninapro-db2":
-            args.exercises = [1]
-        elif args.dataset == "ninapro-db5":
-            args.exercises = [2]
-        elif args.dataset == "ninapro-db3":
-            args.exercises = [1]
+numGestures = env.num_gestures
 
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-        for exercise in args.exercises:
-            if (args.target_normalize > 0):
-                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize, exercise, args)
-                emg_async = pool.map_async(utils.getEMG, [(i+1, exercise, mins, maxes, args.leftout_subject, args) for i in range(utils.num_subjects)])
+if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)):
+    leaveOutIndices = X.leaveOutIndices
 
-            else:
-                emg_async = pool.map_async(utils.getEMG, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
 
-            emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
-            
-            labels_async = pool.map_async(utils.getLabels, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int), [args]*utils.num_subjects)))
-
-            labels.append(labels_async.get())
-
-            if args.force_regression:
-                assert(exercise == 3), "Regression only implemented for exercise 3"
-                forces_async = pool.map_async(utils.getForces, list(zip([(i+1) for i in range(utils.num_subjects)], exercise*np.ones(utils.num_subjects).astype(int))))
-                forces.append(forces_async.get())
-                
-            assert len(emg[-1]) == len(labels[-1]), "Number of trials for EMG and labels do not match"
-            if args.force_regression:
-                assert len(emg[-1]) == len(forces[-1]), "Number of trials for EMG and forces do not match"
-            
-    
-    # Delete subject 10s data for DB3 force_regression
-    if args.force_regression and args.dataset == "ninapro-db3": 
-        utils.num_subjects -= 1
-
-        assert emg[0][MISSING_SUBJECT-1] == None
-        assert labels[0][MISSING_SUBJECT-1] == None
-        assert forces[0][MISSING_SUBJECT-1] == None
-
-        del emg[0][MISSING_SUBJECT-1]
-        del labels[0][MISSING_SUBJECT-1]
-        del forces[0][MISSING_SUBJECT-1]
-
-    # Append exercise sets together and add dimensions to labels if necessary
-    new_emg = []  # This will store the concatenated data for each subject
-    new_labels = []  # This will store the concatenated labels for each subject
-    numGestures = 0 # This will store the number of gestures for each subject
-    if args.force_regression: 
-        new_forces = []
-
-    for subject in range(utils.num_subjects): 
-        subject_trials = []  # List to store trials for this subject across all exercise sets
-        subject_labels = []  # List to store labels for this subject across all exercise sets
-        if args.force_regression:
-            subject_forces = [] # List to store forces for this subject across all exercise sets
-        
-        for exercise_set in range(len(emg)):  
-            # Append the trials of this subject in this exercise set
-            subject_trials.append(emg[exercise_set][subject])
-            subject_labels.append(labels[exercise_set][subject])
-            if args.force_regression:
-                subject_forces.append(forces[exercise_set][subject][:,:,0]) # take the first of the 500
-
-        concatenated_trials = np.concatenate(subject_trials, axis=0)  # Concatenate trials across exercise sets
-        if args.force_regression:
-            # assuming here that no further conversion needed for forces 
-            concatenated_forces = np.concatenate(subject_forces, axis=0)  # Concatenate forces across exercise sets
-        
-        total_number_labels = 0
-        for i in range(len(subject_labels)):
-            total_number_labels += subject_labels[i].shape[1]
-            
-        # Convert from one hot encoding to labels
-        # Assuming labels are stored separately and need to be concatenated end-to-end
-        labels_set = []
-        index_to_start_at = 0
-        for i in range(len(subject_labels)):
-            subject_labels_to_concatenate = [x + index_to_start_at if x != 0 else 0 for x in np.argmax(subject_labels[i], axis=1)]
-            if args.dataset == "ninapro-db5":
-                index_to_start_at = max(subject_labels_to_concatenate)
-            labels_set.append(subject_labels_to_concatenate)
-
-        if args.partial_dataset_ninapro:
-            desired_gesture_labels = utils.partial_gesture_indices
-        
-        # Assuming labels are stored separately and need to be concatenated end-to-end
-        concatenated_labels = np.concatenate(labels_set, axis=0) # (TRIAL)
-
-        if args.partial_dataset_ninapro:
-            indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
-            concatenated_labels = concatenated_labels[indices_for_partial_dataset]
-            concatenated_trials = concatenated_trials[indices_for_partial_dataset]
-            if args.force_regression:
-                concatenated_forces = concatenated_forces[indices_for_partial_dataset]
-            # convert labels to indices
-            label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
-            concatenated_labels = [label_to_index[label] for label in concatenated_labels]
-        
-        numGestures = len(np.unique(concatenated_labels))
-
-        # Convert to one hot encoding
-        concatenated_labels = np.eye(np.max(concatenated_labels) + 1)[concatenated_labels] # (TRIAL, GESTURE)
-
-        # labels are assigned corrctly depending on which exercise set 
-        # scale down depending on which exercise set you're on
-
-        # Append the concatenated trials to the new_emg list
-        new_emg.append(concatenated_trials)
-        new_labels.append(concatenated_labels)
-        if args.force_regression:
-            new_forces.append(concatenated_forces)
-
-    emg = [torch.from_numpy(emg_np) for emg_np in new_emg]
-    labels = [torch.from_numpy(labels_np) for labels_np in new_labels]
-    if args.force_regression:
-        forces = [torch.from_numpy(forces_np) for forces_np in new_forces]
-
-else: # Not exercises
-
-    if (args.target_normalize > 0):
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-            if args.leave_one_session_out:
-                total_number_of_sessions = 2
-                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize, lastSessionOnly=False)
-                emg = []
-                labels = []
-                for i in range(1, total_number_of_sessions+1):
-                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i, mins, maxes, args.leftout_subject) for j in range(utils.num_subjects)])
-
-                    emg.extend(emg_async.get())
-                    
-                    labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
-                    labels.extend(labels_async.get())
-            else:
-                mins, maxes = utils.getExtrema(args.leftout_subject, args.target_normalize)
-                
-                emg_async = pool.map_async(utils.getEMG, [(i+1, mins, maxes, args.leftout_subject) for i in range(utils.num_subjects)])
-
-                emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-                
-                labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(utils.num_subjects)])
-                labels = labels_async.get()
-    else: # Not target_normalize
-        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-            if args.leave_one_session_out: # based on 2 sessions for each subject
-                total_number_of_sessions = 2
-                emg = []
-                labels = []
-                for i in range(1, total_number_of_sessions+1):
-                    emg_async = pool.map_async(utils.getEMG_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
-                    emg.extend(emg_async.get())
-                    
-                    labels_async = pool.map_async(utils.getLabels_separateSessions, [(j+1, i) for j in range(utils.num_subjects)])
-                    labels.extend(labels_async.get())
-                
-            else: # Not leave one session out
-                dataset_identifiers = utils.num_subjects
-                    
-                emg_async = pool.map_async(utils.getEMG, [(i+1) for i in range(dataset_identifiers)])
-                emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-                
-                labels_async = pool.map_async(utils.getLabels, [(i+1) for i in range(dataset_identifiers)])
-                labels = labels_async.get()
-
-    print("subject 1 mean", torch.mean(emg[0]))
-    numGestures = utils.numGestures
-    
-if args.load_unlabeled_data_flexwearhd:
-    assert args.dataset == "flexwear-hd", "Can only load unlabeled online data from FlexWear-HD dataset"
-    print("Loading unlabeled online data from FlexWear-HD dataset")
-    unlabeled_online_data = utils.getOnlineUnlabeledData(args.leftout_subject)
-
-length = emg[0].shape[1]
-width = emg[0].shape[2]
-print("Number of Samples (across all participants): ", sum([e.shape[0] for e in emg]))
-print("Number of Electrode Channels: ", length)
-print("Number of Timesteps per Trial:", width)
 
 # These can be tuned to change the normalization
 # This is the coefficient for the standard deviation
 # used for the magnitude images. In practice, these
 # should be fairly small so that images have more
 # contrast
-if args.turn_on_rms:
-    # This tends to be small because in pracitice
-    # the RMS is usually much smaller than the raw EMG
-    # NOTE: Should check why this is the case
-    sigma_coefficient = 0.1
-else:
-    # This tends to be larger because the raw EMG
-    # is usually much larger than the RMS
-    sigma_coefficient = 0.5
+# if args.turn_on_rms:
+#     # This tends to be small because in pracitice
+#     # the RMS is usually much smaller than the raw EMG
+#     # NOTE: Should check why this is the case
+#     sigma_coefficient = 0.1
+# else:
+#     # This tends to be larger because the raw EMG
+#     # is usually much larger than the RMS
+#     sigma_coefficient = 0.5
     
-leaveOutIndices = []
-# Generate scaler for normalization
-if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # will have to run and test this again, or just remove
-    leaveOut = args.leave_n_subjects_out_randomly
-    print(f"Leaving out {leaveOut} subjects randomly")
-    # subject indices to leave out randomly
-    leaveOutIndices = np.random.choice(range(utils.num_subjects), leaveOut, replace=False)
-    print(f"Leaving out subjects {np.sort(leaveOutIndices)}")
-    emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg if i not in leaveOutIndices], axis=0, dtype=np.float32)
+# [MOVED TO SCALER_NORMALIZE_EMG IN DATA_INITALIZER CLASS]
+# leaveOutIndices = []
+# # Generate scaler for normalization
+# if args.leave_n_subjects_out_randomly != 0 and (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # will have to run and test this again, or just remove
+#     leaveOut = args.leave_n_subjects_out_randomly
+#     print(f"Leaving out {leaveOut} subjects randomly")
+#     # subject indices to leave out randomly
+#     leaveOutIndices = np.random.choice(range(utils.num_subjects), leaveOut, replace=False)
+#     print(f"Leaving out subjects {np.sort(leaveOutIndices)}")
+#     emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg if i not in leaveOutIndices], axis=0, dtype=np.float32)
     
-    global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
-    global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
+#     global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
+#     global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
     
-    # Normalize by electrode
-    emg_in_by_electrode = emg_in.reshape(-1, length, width)
+#     # Normalize by electrode
+#     emg_in_by_electrode = emg_in.reshape(-1, length, width)
     
-    # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
-    # Reshape data to (SAMPLES*50, 16)
-    emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
+#     # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+#     # Reshape data to (SAMPLES*50, 16)
+#     emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
     
-    # Initialize and fit the scaler on the reshaped data
-    # This will compute the mean and std dev for each electrode across all samples and features
-    scaler = preprocessing.StandardScaler()
-    scaler.fit(emg_reshaped)
+#     # Initialize and fit the scaler on the reshaped data
+#     # This will compute the mean and std dev for each electrode across all samples and features
+#     scaler = preprocessing.StandardScaler()
+#     scaler.fit(emg_reshaped)
     
-    # Repeat means and std_devs for each time point using np.repeat
-    scaler.mean_ = np.repeat(scaler.mean_, width)
-    scaler.scale_ = np.repeat(scaler.scale_, width)
-    scaler.var_ = np.repeat(scaler.var_, width)
-    scaler.n_features_in_ = width*utils.numElectrodes
+#     # Repeat means and std_devs for each time point using np.repeat
+#     scaler.mean_ = np.repeat(scaler.mean_, width)
+#     scaler.scale_ = np.repeat(scaler.scale_, width)
+#     scaler.var_ = np.repeat(scaler.var_, width)
+#     scaler.n_features_in_ = width*utils.numElectrodes
 
-    del emg_in
-    del emg_in_by_electrode
-    del emg_reshaped
+#     del emg_in
+#     del emg_in_by_electrode
+#     del emg_reshaped
 
-else: # Not leave n subjects out randomly
-    if (args.held_out_test): # can probably be deprecated and deleted
-        if args.turn_on_kfold:
-            skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
+# else: # Not leave n subjects out randomly
+#     if (args.held_out_test): # can probably be deprecated and deleted
+#         if args.turn_on_kfold:
+#             skf = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
             
-            emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
-            labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+#             emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
+#             labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
             
-            labels_for_folds = np.argmax(labels_in, axis=1)
+#             labels_for_folds = np.argmax(labels_in, axis=1)
             
-            fold_count = 1
-            for train_index, test_index in skf.split(emg_in, labels_for_folds):
-                if fold_count == args.fold_index:
-                    train_indices = train_index
-                    validation_indices = test_index
-                    break
-                fold_count += 1
+#             fold_count = 1
+#             for train_index, test_index in skf.split(emg_in, labels_for_folds):
+#                 if fold_count == args.fold_index:
+#                     train_indices = train_index
+#                     validation_indices = test_index
+#                     break
+#                 fold_count += 1
 
-            # Normalize by electrode
-            emg_in_by_electrode = emg_in[train_indices].reshape(-1, length, width)
-            # s = preprocessing.StandardScaler().fit(emg_in[train_indices])
-            global_low_value = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
-            global_high_value = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
+#             # Normalize by electrode
+#             emg_in_by_electrode = emg_in[train_indices].reshape(-1, length, width)
+#             # s = preprocessing.StandardScaler().fit(emg_in[train_indices])
+#             global_low_value = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
+#             global_high_value = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
 
-            # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
-            # Reshape data to (SAMPLES*50, 16)
-            emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
+#             # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+#             # Reshape data to (SAMPLES*50, 16)
+#             emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
 
-            # Initialize and fit the scaler on the reshaped data
-            # This will compute the mean and std dev for each electrode across all samples and features
-            scaler = preprocessing.StandardScaler()
-            scaler.fit(emg_reshaped)
+#             # Initialize and fit the scaler on the reshaped data
+#             # This will compute the mean and std dev for each electrode across all samples and features
+#             scaler = preprocessing.StandardScaler()
+#             scaler.fit(emg_reshaped)
             
-            # Repeat means and std_devs for each time point using np.repeat
-            scaler.mean_ = np.repeat(scaler.mean_, width)
-            scaler.scale_ = np.repeat(scaler.scale_, width)
-            scaler.var_ = np.repeat(scaler.var_, width)
-            scaler.n_features_in_ = width*utils.numElectrodes
+#             # Repeat means and std_devs for each time point using np.repeat
+#             scaler.mean_ = np.repeat(scaler.mean_, width)
+#             scaler.scale_ = np.repeat(scaler.scale_, width)
+#             scaler.var_ = np.repeat(scaler.var_, width)
+#             scaler.n_features_in_ = width*utils.numElectrodes
 
-            del emg_in
-            del labels_in
+#             del emg_in
+#             del labels_in
 
-            del emg_in_by_electrode
-            del emg_reshaped
+#             del emg_in_by_electrode
+#             del emg_reshaped
 
-        else: 
-            # Reshape and concatenate EMG data
-            # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
-            # Then concatenate along the subject dimension (axis=0)
-            emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
-            labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
+#         else: 
+#             # Reshape and concatenate EMG data
+#             # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
+#             # Then concatenate along the subject dimension (axis=0)
+#             emg_in = np.concatenate([np.array(i.reshape(-1, length*width)) for i in emg], axis=0, dtype=np.float32)
+#             labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
 
-            indices = np.arange(emg_in.shape[0])
-            train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
-            train_emg_in = emg_in[train_indices]  # Select only the train indices
-            # s = preprocessing.StandardScaler().fit(train_emg_in)
+#             indices = np.arange(emg_in.shape[0])
+#             train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
+#             train_emg_in = emg_in[train_indices]  # Select only the train indices
+#             # s = preprocessing.StandardScaler().fit(train_emg_in)
 
-            # Normalize by electrode
-            emg_in_by_electrode = train_emg_in.reshape(-1, length, width)
-            global_low_value = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
-            global_high_value = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
+#             # Normalize by electrode
+#             emg_in_by_electrode = train_emg_in.reshape(-1, length, width)
+#             global_low_value = emg_in[train_indices].mean() - sigma_coefficient*emg_in[train_indices].std()
+#             global_high_value = emg_in[train_indices].mean() + sigma_coefficient*emg_in[train_indices].std()
 
-            # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
-            # Reshape data to (SAMPLES*50, 16)
-            emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
+#             # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+#             # Reshape data to (SAMPLES*50, 16)
+#             emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
 
-            # Initialize and fit the scaler on the reshaped data
-            # This will compute the mean and std dev for each electrode across all samples and features
-            scaler = preprocessing.StandardScaler()
-            scaler.fit(emg_reshaped)
+#             # Initialize and fit the scaler on the reshaped data
+#             # This will compute the mean and std dev for each electrode across all samples and features
+#             scaler = preprocessing.StandardScaler()
+#             scaler.fit(emg_reshaped)
             
-            # Repeat means and std_devs for each time point using np.repeat
-            scaler.mean_ = np.repeat(scaler.mean_, width)
-            scaler.scale_ = np.repeat(scaler.scale_, width)
-            scaler.var_ = np.repeat(scaler.var_, width)
-            scaler.n_features_in_ = width*utils.numElectrodes
+#             # Repeat means and std_devs for each time point using np.repeat
+#             scaler.mean_ = np.repeat(scaler.mean_, width)
+#             scaler.scale_ = np.repeat(scaler.scale_, width)
+#             scaler.var_ = np.repeat(scaler.var_, width)
+#             scaler.n_features_in_ = width*utils.numElectrodes
 
-            del emg_in
-            del labels_in
+#             del emg_in
+#             del labels_in
 
-            del train_emg_in
-            del indices
+#             del train_emg_in
+#             del indices
 
-            del emg_in_by_electrode
-            del emg_reshaped
+#             del emg_in_by_electrode
+#             del emg_reshaped
 
-    elif (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # Running LOSO standardization
-        emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
-        # s = preprocessing.StandardScaler().fit(emg_in)
-        global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
-        global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
+#     elif (not args.turn_off_scaler_normalization and not (args.target_normalize > 0)): # Running LOSO standardization
+#         emg_in = np.concatenate([np.array(i.view(len(i), length*width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), length*width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
+#         # s = preprocessing.StandardScaler().fit(emg_in)
+#         global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
+#         global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
 
-        # Normalize by electrode
-        emg_in_by_electrode = emg_in.reshape(-1, length, width)
+#         # Normalize by electrode
+#         emg_in_by_electrode = emg_in.reshape(-1, length, width)
 
-        # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
-        # Reshape data to (SAMPLES*50, 16)
-        emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
+#         # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
+#         # Reshape data to (SAMPLES*50, 16)
+#         emg_reshaped = emg_in_by_electrode.reshape(-1, utils.numElectrodes)
 
-        # Initialize and fit the scaler on the reshaped data
-        # This will compute the mean and std dev for each electrode across all samples and features
-        scaler = preprocessing.StandardScaler()
-        scaler.fit(emg_reshaped)
+#         # Initialize and fit the scaler on the reshaped data
+#         # This will compute the mean and std dev for each electrode across all samples and features
+#         scaler = preprocessing.StandardScaler()
+#         scaler.fit(emg_reshaped)
         
-        # Repeat means and std_devs for each time point using np.repeat
-        scaler.mean_ = np.repeat(scaler.mean_, width)
-        scaler.scale_ = np.repeat(scaler.scale_, width)
-        scaler.var_ = np.repeat(scaler.var_, width)
-        scaler.n_features_in_ = width*utils.numElectrodes
+#         # Repeat means and std_devs for each time point using np.repeat
+#         scaler.mean_ = np.repeat(scaler.mean_, width)
+#         scaler.scale_ = np.repeat(scaler.scale_, width)
+#         scaler.var_ = np.repeat(scaler.var_, width)
+#         scaler.n_features_in_ = width*utils.numElectrodes
 
-        del emg_in
-        del emg_in_by_electrode
-        del emg_reshaped
+#         del emg_in
+#         del emg_in_by_electrode
+#         del emg_reshaped
 
-    else: 
-        global_low_value = None
-        global_high_value = None
-        scaler = None
+#     else: 
+#         global_low_value = None
+#         global_high_value = None
+#         scaler = None
 
-
-data = []
 
 class ToNumpy:
         """Custom transformation to convert PIL Images or Tensors to NumPy arrays."""
@@ -782,114 +724,115 @@ class ToNumpy:
             else:
                 raise TypeError("Unsupported image type")
 
-# add tqdm to show progress bar
-print("Width of EMG data: ", width)
-print("Length of EMG data: ", length)
 
-base_foldername_zarr = ""
+# [MOVED TO CREATE_FOLDERNAME_ZARR HELPER IN DATA_INITIALIZER CLASS]
+# base_foldername_zarr = ""
+# if args.leave_n_subjects_out_randomly != 0:
+#     base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
+# else:
+#     if args.held_out_test:
+#         base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
+#     elif args.leave_one_session_out:
+#         base_foldername_zarr = f'Leave_one_session_out_images_zarr/{args.dataset}/'
+#     elif args.turn_off_scaler_normalization:
+#         base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
+#     elif args.leave_one_subject_out:
+#         base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
 
-if args.leave_n_subjects_out_randomly != 0:
-    base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{args.dataset}/leave_{args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{args.seed}/'
-else:
-    if args.held_out_test:
-        base_foldername_zarr = f'heldout_images_zarr/{args.dataset}/'
-    elif args.leave_one_session_out:
-        base_foldername_zarr = f'Leave_one_session_out_images_zarr/{args.dataset}/'
-    elif args.turn_off_scaler_normalization:
-        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
-    elif args.leave_one_subject_out:
-        base_foldername_zarr = f'LOSOimages_zarr/{args.dataset}/'
+# if args.turn_off_scaler_normalization:
+#     if args.leave_n_subjects_out_randomly != 0:
+#         base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
+#     else: 
+#         if args.held_out_test:
+#             base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
+#         else: 
+#             base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
+#     scaler = None
+# else:
+#     base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(leaveOut) + '/'
+#     if args.target_normalize > 0:
+#         base_foldername_zarr += 'target_normalize_' + str(args.target_normalize) + '/'  
 
-if args.turn_off_scaler_normalization:
-    if args.leave_n_subjects_out_randomly != 0:
-        base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
-    else: 
-        if args.held_out_test:
-            base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
-        else: 
-            base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
-    scaler = None
-else:
-    base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(leaveOut) + '/'
-    if args.target_normalize > 0:
-        base_foldername_zarr += 'target_normalize_' + str(args.target_normalize) + '/'  
+# if args.turn_on_rms:
+#     base_foldername_zarr += 'RMS_input_windowsize_' + str(args.rms_input_windowsize) + '/'
+# elif args.turn_on_spectrogram:
+#     base_foldername_zarr += 'spectrogram/'
+# elif args.turn_on_cwt:
+#     base_foldername_zarr += 'cwt/'
+# elif args.turn_on_hht:
+#     base_foldername_zarr += 'hht/'
+# else:
+#     base_foldername_zarr += 'raw/'
 
-if args.turn_on_rms:
-    base_foldername_zarr += 'RMS_input_windowsize_' + str(args.rms_input_windowsize) + '/'
-elif args.turn_on_spectrogram:
-    base_foldername_zarr += 'spectrogram/'
-elif args.turn_on_cwt:
-    base_foldername_zarr += 'cwt/'
-elif args.turn_on_hht:
-    base_foldername_zarr += 'hht/'
-else:
-    base_foldername_zarr += 'raw/'
+# if exercises:
+#     if args.partial_dataset_ninapro:
+#         base_foldername_zarr += 'partial_dataset_ninapro/'
+#     else:
+#         exercises_numbers_filename = '-'.join(map(str, args.exercises))
+#         base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
 
-if exercises:
-    if args.partial_dataset_ninapro:
-        base_foldername_zarr += 'partial_dataset_ninapro/'
-    else:
-        exercises_numbers_filename = '-'.join(map(str, args.exercises))
-        base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
+
+# [MOVED TO LOAD_IMAGES HELPER IN DATA_INITIALIZER CLASS]  
+# if args.save_images: 
+#     if not os.path.exists(base_foldername_zarr):
+#         os.makedirs(base_foldername_zarr)
+
+# for x in tqdm(range(len(emg)), desc="Number of Subjects "):
+#     if args.held_out_test:
+#         subject_folder = f'subject{x}/'
+#     elif args.leave_one_session_out:
+#         subject_folder = f'session{x}/'
+#     else:
+#         subject_folder = f'LOSO_subject{x}/'
+#     foldername_zarr = base_foldername_zarr + subject_folder
     
-if args.save_images: 
-    if not os.path.exists(base_foldername_zarr):
-        os.makedirs(base_foldername_zarr)
+#     subject_or_session = "session" if args.leave_one_session_out else "subject"
+#     print(f"Attempting to load dataset for {subject_or_session}", x, "from", foldername_zarr)
 
-for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-    if args.held_out_test:
-        subject_folder = f'subject{x}/'
-    elif args.leave_one_session_out:
-        subject_folder = f'session{x}/'
-    else:
-        subject_folder = f'LOSO_subject{x}/'
-    foldername_zarr = base_foldername_zarr + subject_folder
-    
-    subject_or_session = "session" if args.leave_one_session_out else "subject"
-    print(f"Attempting to load dataset for {subject_or_session}", x, "from", foldername_zarr)
-
-    print("Looking in folder: ", foldername_zarr)
-    # Check if the folder (dataset) exists, load if yes, else create and save
-    if os.path.exists(foldername_zarr):
-        # Load the dataset
-        dataset = zarr.open(foldername_zarr, mode='r')
-        print(f"Loaded dataset for {subject_or_session} {x} from {foldername_zarr}")
-        if args.load_few_images:
-            data += [dataset[:10]]
-        else: 
-            data += [dataset[:]]
-    else:
-        print(f"Could not find dataset for {subject_or_session} {x} at {foldername_zarr}")
-        # Get images and create the dataset
-        if (args.target_normalize > 0):
-            scaler = None
-        images = utils.getImages(emg[x], scaler, length, width, 
-                                 turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
-                                 turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value, 
-                                 turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt, 
-                                 turn_on_hht=args.turn_on_hht)
-        images = np.array(images, dtype=np.float16)
+#     print("Looking in folder: ", foldername_zarr)
+#     # Check if the folder (dataset) exists, load if yes, else create and save
+#     if os.path.exists(foldername_zarr):
+#         # Load the dataset
+#         dataset = zarr.open(foldername_zarr, mode='r')
+#         print(f"Loaded dataset for {subject_or_session} {x} from {foldername_zarr}")
+#         if args.load_few_images:
+#             data += [dataset[:10]]
+#         else: 
+#             data += [dataset[:]]
+#     else:
+#         print(f"Could not find dataset for {subject_or_session} {x} at {foldername_zarr}")
+#         # Get images and create the dataset
+#         if (args.target_normalize > 0):
+#             scaler = None
+#         images = utils.getImages(emg[x], scaler, length, width, 
+#                                  turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize, 
+#                                  turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value, 
+#                                  turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt, 
+#                                  turn_on_hht=args.turn_on_hht)
+#         images = np.array(images, dtype=np.float16)
         
-        # Save the dataset
-        if args.save_images:
-            os.makedirs(foldername_zarr, exist_ok=True)
-            dataset = zarr.open(foldername_zarr, mode='w', shape=images.shape, dtype=images.dtype, chunks=True)
-            dataset[:] = images
-            print(f"Saved dataset for subject {x} at {foldername_zarr}")
-        else:
-            print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
-        data += [images]
+#         # Save the dataset
+#         if args.save_images:
+#             os.makedirs(foldername_zarr, exist_ok=True)
+#             dataset = zarr.open(foldername_zarr, mode='w', shape=images.shape, dtype=images.dtype, chunks=True)
+#             dataset[:] = images
+#             print(f"Saved dataset for subject {x} at {foldername_zarr}")
+#         else:
+#             print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
+#         data += [images]
         
-if args.load_unlabeled_data_flexwearhd:
-    unlabeled_images = utils.getImages(unlabeled_online_data, scaler, length, width,
-                                                turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize,
-                                                turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value,
-                                                turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt,
-                                                turn_on_hht=args.turn_on_hht)
-    unlabeled_images = np.array(unlabeled_images, dtype=np.float16)
-    unlabeled_data = unlabeled_images
-    del unlabeled_images, unlabeled_online_data
+# if args.load_unlabeled_data_flexwearhd:
+#     unlabeled_images = utils.getImages(unlabeled_online_data, scaler, length, width,
+#                                                 turn_on_rms=args.turn_on_rms, rms_windows=args.rms_input_windowsize,
+#                                                 turn_on_magnitude=args.turn_on_magnitude, global_min=global_low_value, global_max=global_high_value,
+#                                                 turn_on_spectrogram=args.turn_on_spectrogram, turn_on_cwt=args.turn_on_cwt,
+#                                                 turn_on_hht=args.turn_on_hht)
+#     unlabeled_images = np.array(unlabeled_images, dtype=np.float16)
+#     unlabeled_data = unlabeled_images
+#     del unlabeled_images, unlabeled_online_data
 
+
+# DATA_SPLITTER CLASS BELOW 
 if args.leave_n_subjects_out_randomly != 0:
     
     # Instead of the below code, leave n subjects out randomly to be used as the 
