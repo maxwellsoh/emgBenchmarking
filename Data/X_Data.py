@@ -109,9 +109,6 @@ class X_Data(Data):
 
         print("Number of Samples (across all participants): ", sum([e.shape[0] for e in self.data]))
 
-
-        self.length = self.data[0].shape[1]
-        self.width = self.data[0].shape[2]
         print("Number of Electrode Channels (length of EMG): ", self.length)
         print("Number of Timesteps per Trial (width of EMG):", self.width)
 
@@ -141,6 +138,10 @@ class X_Data(Data):
         Returns:
             flexwear_unlabeled_data: unlabeled data if self.args.load_unlabeled_data_flexwearhd
         """
+
+        self.length = self.data[0].shape[1]
+        self.width = self.data[0].shape[2]
+        
         assert self.utils is not None, "self.utils is not defined. Please run initialize() first."
 
         flexwear_unlabeled_data = None

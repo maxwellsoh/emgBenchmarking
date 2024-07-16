@@ -51,16 +51,30 @@ class Y_Data(Data):
             return labels
 
         def load_labels_other_datasets():
-            with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
+
+
+            if self.args.multiprocessing:
+                with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
+                    if self.args.leave_one_session_out:
+                        labels = []
+                        for i in range(1, self.utils.num_sessions+1):
+                            labels_async = pool.map_async(self.utils.getLabels_separateSessions, [(j+1, i) for j in range(self.utils.num_subjects)])
+                            labels.extend(labels_async.get())
+                    else:
+                        labels_async = pool.map_async(self.utils.getLabels, [(i+1) for i in range(self.utils.num_subjects)])
+                        labels = labels_async.get()
+
+            else:
                 if self.args.leave_one_session_out:
                     labels = []
                     for i in range(1, self.utils.num_sessions+1):
-                        labels_async = pool.map_async(self.utils.getLabels_separateSessions, [(j+1, i) for j in range(self.utils.num_subjects)])
-                        labels.extend(labels_async.get())
+                        for j in range(self.utils.num_subjects):
+                            label = self.utils.getLabels_separateSessions(j+1, i)
+                            labels.append(label)
                 else:
-                    labels_async = pool.map_async(self.utils.getLabels, [(i+1) for i in range(self.utils.num_subjects)])
-                    labels = labels_async.get()
-            
+                    labels = [self.utils.getLabels(i+1) for i in range(self.utils.num_subjects)]
+                
+                
             return labels
 
         def load_labels():
