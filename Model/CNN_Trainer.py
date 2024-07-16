@@ -138,9 +138,6 @@ class CNN_Trainer(Model_Trainer):
             training_metrics, validation_metrics, testing_metrics = super().get_metrics()
         else: 
             training_metrics, validation_metrics = super().get_metrics(testing=False)
-
-        for metric in training_metrics:
-            print("metric_name:", metric.name)
         
         for epoch in tqdm(range(self.num_epochs), desc="Epoch"):
             self.model.train()
@@ -331,7 +328,6 @@ class CNN_Trainer(Model_Trainer):
 
             # Print confusion matrix before plotting
             # Convert lists to numpy arrays
-            
             if not self.args.force_regression: 
                 true_labels = np.argmax(self.Y.test.cpu().detach().numpy(), axis=1)
                 test_predictions = np.array(test_predictions)

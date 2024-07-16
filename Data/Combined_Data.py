@@ -10,6 +10,8 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn import preprocessing, model_selection
 import numpy as np
 
+import multiprocessing
+
 class Combined_Data():
     """Wrapper class that repeats a given functions for all the data. 
     """
@@ -66,13 +68,109 @@ class Combined_Data():
         del self.X.new_data, self.Y.new_data, self.label.new_data
         del self.X.subject_trials, self.Y.subject_trials, self.label.subject_trials
 
+    def load_ninapro(self):
+        emg = []
+        labels = []
+
+        if self.args.force_regression:
+            forces = []
+
+        with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
+            for exercise in self.args.exercises:
+                if (self.args.target_normalize > 0):
+                    mins, maxes = self.utils.getExtrema(self.args.target_normalize_subject, self.args.target_normalize, exercise, self.args)
+                    emg_async = pool.map_async(self.utils.getEMG, [(i+1, exercise, mins, maxes, self.args.target_normalize_subject, self.args) for i in range(self.utils.num_subjects)])
+
+                else:
+                    emg_async = pool.map_async(self.utils.getEMG, list(zip([(i+1) for i in range(self.utils.num_subjects)], exercise*np.ones(self.utils.num_subjects).astype(int), [self.args]*self.utils.num_subjects)))
+
+                emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
+                
+                labels_async = pool.map_async(self.utils.getLabels, list(zip([(i+1) for i in range(self.utils.num_subjects)], exercise*np.ones(self.utils.num_subjects).astype(int), [self.args]*self.utils.num_subjects)))
+
+                labels.append(labels_async.get())
+
+                if self.args.force_regression:
+                    assert(exercise == 3), "Regression only implemented for exercise 3"
+                    forces_async = pool.map_async(self.utils.getForces, list(zip([(i+1) for i in range(self.utils.num_subjects)], exercise*np.ones(self.utils.num_subjects).astype(int))))
+                    forces.append(forces_async.get())
+                    
+                assert len(emg[-1]) == len(labels[-1]), "Number of trials for EMG and labels do not match"
+                if self.args.force_regression:
+                    assert len(emg[-1]) == len(forces[-1]), "Number of trials for EMG and forces do not match"
+
+        self.X.data = emg
+        if self.args.force_regression:
+            self.Y.data = forces
+        else:
+            self.Y.data = labels
+        self.label.data = labels
+
+    def load_other_datasets(self):
+
+        emg = []
+        labels = []
+       
+        if (self.args.target_normalize > 0):
+            with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
+                if self.args.leave_one_session_out:
+                    total_number_of_sessions = 2
+                    mins, maxes = self.utils.getExtrema(self.args.target_normalize_subject, self.args.target_normalize, lastSessionOnly=False)
+                    emg = []
+                    labels = []
+                    for i in range(1, total_number_of_sessions+1):
+                        emg_async = pool.map_async(self.utils.getEMG_separateSessions, [(j+1, i, mins, maxes, self.args.target_normalize_subject) for j in range(self.utils.num_subjects)])
+
+                        emg.extend(emg_async.get())
+                        
+                        labels_async = pool.map_async(self.utils.getLabels_separateSessions, [(j+1, i) for j in range(self.utils.num_subjects)])
+                        labels.extend(labels_async.get())
+                else:
+                    mins, maxes = self.utils.getExtrema(self.args.target_normalize_subject, self.args.target_normalize)
+                    
+                    emg_async = pool.map_async(self.utils.getEMG, [(i+1, mins, maxes, self.args.target_normalize_subject) for i in range(self.utils.num_subjects)])
+
+                    emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+                    
+                    labels_async = pool.map_async(self.utils.getLabels, [(i+1) for i in range(self.utils.num_subjects)])
+                    labels = labels_async.get()
+        else: # Not target_normalize
+            with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
+                if self.args.leave_one_session_out: # based on 2 sessions for each subject
+                    total_number_of_sessions = 2
+                    emg = []
+                    labels = []
+                    for i in range(1, total_number_of_sessions+1):
+                        emg_async = pool.map_async(self.utils.getEMG_separateSessions, [(j+1, i) for j in range(self.utils.num_subjects)])
+                        emg.extend(emg_async.get())
+                        
+                        labels_async = pool.map_async(self.utils.getLabels_separateSessions, [(j+1, i) for j in range(self.utils.num_subjects)])
+                        labels.extend(labels_async.get())
+                    
+                else: # Not leave one session out
+                    dataset_identifiers = self.utils.num_subjects
+                        
+                    emg_async = pool.map_async(self.utils.getEMG, [(i+1) for i in range(dataset_identifiers)])
+                    emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
+                    
+                    labels_async = pool.map_async(self.utils.getLabels, [(i+1) for i in range(dataset_identifiers)])
+                    labels = labels_async.get()
+
+        self.X.data = emg
+        self.Y.data = labels
+        self.label.data = labels
+
+
+
     def load_data(self):
-        self.X.load_data()
-        self.Y.load_data()
-        self.label.load_data()
 
         if self.exercises:
+            self.load_ninapro()
             self.process_ninapro()
+        else:
+            self.load_other_datasets()
+
+            
 
         assert len(self.X.data[-1]) == len(self.Y.data[-1]), "Number of trials for X and Y do not match."
         assert len(self.Y.data[-1]) == len(self.label.data[-1]), "Number of trials for Y and Labels do not match."
