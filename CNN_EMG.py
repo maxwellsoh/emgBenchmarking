@@ -93,8 +93,13 @@ class Run_Setup():
 
         ## Argument parser with optional argumenets
 
+        
+
         # Create the parser
         parser = argparse.ArgumentParser(description="Include arguments for running different trials")
+
+        parser.add_argument('--target_normalize_subject', type=int, help='number of subject that is left out for target normalization, starting from subject 1', default=0)
+
         parser.add_argument("--multiprocessing", type=utils.str2bool, help="Whether or not to use multiprocessing when acquiring data. Set to True by default.", default=True)
         parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
         parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
@@ -508,6 +513,10 @@ hooks = Hook_Manager()
 run_setup = Run_Setup()
 hooks.register_hook("setup_run", run_setup.setup_run)
 env = hooks.call_hook("setup_run")
+
+if env.args.target_normalize_subject == 0:
+    env.args.target_normalize_subject = env.args.leftout_subject
+
 
 data_initializer = Data_Initializer(env)
 hooks.register_hook("initialize_data", data_initializer.initialize_data)

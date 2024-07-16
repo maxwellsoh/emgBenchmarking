@@ -37,72 +37,71 @@ class X_Data(Data):
         self.validation_indices = None
 
     # Load EMG Data
-    def load_data(self, exercises):
-        """ Sets self.data to EMG data. (emg) """
+    # def load_data(self, exercises):
+    #     """ Sets self.data to EMG data. (emg) """
 
-        def load_EMG_ninapro():
-            """Gets the EMG data for Ninapro datasets.
+    #     def load_EMG_ninapro():
+    #         """Gets the EMG data for Ninapro datasets.
 
-            Returns:
-                emg (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME): EMG data for the dataset with target_normalization (if applicable).
-            """
+    #         Returns:
+    #             emg (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME): EMG data for the dataset with target_normalization (if applicable).
+    #         """
 
-            emg = []
-            with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-                for exercise in self.args.exercises:
-                    if (self.args.target_normalize > 0):
-                        mins, maxes = self.utils.getExtrema(self.args.leftout_subject, self.args.target_normalize, exercise, self.args)
-                        emg_async = pool.map_async(self.utils.getEMG, [(i+1, exercise, mins, maxes, self.args.leftout_subject, self.args) for i in range(self.utils.num_subjects)])
+    #         emg = []
+    #         with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
+    #             for exercise in self.args.exercises:
+    #                 if (self.args.target_normalize > 0):
+    #                     mins, maxes = self.utils.getExtrema(self.args.leftout_subject, self.args.target_normalize, exercise, self.args)
+    #                     emg_async = pool.map_async(self.utils.getEMG, [(i+1, exercise, mins, maxes, self.args.leftout_subject, self.args) for i in range(self.utils.num_subjects)])
 
-                    else:
-                        emg_async = pool.map_async(self.utils.getEMG, [(i+1, exercise, self.args) for i in range(self.utils.num_subjects)])
+    #                 else:
+    #                     emg_async = pool.map_async(self.utils.getEMG, [(i+1, exercise, self.args) for i in range(self.utils.num_subjects)])
 
-                    emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
+    #                 emg.append(emg_async.get()) # (EXERCISE SET, SUBJECT, TRIAL, CHANNEL, TIME)
 
-            return emg
+    #         return emg
 
-        def load_EMG_other_datasets(): 
-            """Loads the EMG data for other, non Ninapro datasets.
 
-            Returns:
-                emg (SUBJECT, TRIAL, CHANNEL, TIME STEP): EMG data for the dataset with target_normalization (if applicable). 
-            """
-            emg = []
-            if (self.args.target_normalize > 0):
-                with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-                    mins, maxes = self.utils.getExtrema(self.args.leftout_subject, self.args.target_normalize)
-                    if self.args.leave_one_session_out:
-                        emg = []
-                        labels = []
-                        for i in range(1, self.utils.num_sessions+1):
-                            emg_async = pool.map_async(self.utils.getEMG_separateSessions, [(j+1, i, mins, maxes, self.args.leftout_subject) for j in range(self.utils.num_subjects)])
-                            emg.extend(emg_async.get())
-
-                    else:
-                        emg_async = pool.map_async(self.utils.getEMG, [(i+1, mins, maxes, self.args.leftout_subject + 1) for i in range(self.utils.num_subjects)])
-
-                        emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-            else: 
-                with multiprocessing.Pool(processes=multiprocessing.cpu_count()//8) as pool:
-                    if self.args.leave_one_session_out:
+    #     def load_EMG_other_datasets():
+    #         print("loading x data...")
+    #         emg = []
             
-                        emg = []
-                        labels = []
-                        for i in range(1, self.utils.num_sessions+1):
-                            emg_async = pool.map_async(self.utils.getEMG_separateSessions, [(j+1, i) for j in range(self.utils.num_subjects)])
-                            emg.extend(emg_async.get())
-                
-                    else: # Not leave one session out
-                        emg_async = pool.map_async(self.utils.getEMG, [(i+1) for i in range(self.utils.num_subjects)])
-                        emg = emg_async.get() # (SUBJECT, TRIAL, CHANNEL, TIME)
-            return emg
+    #         if self.args.target_normalize > 0:
+    #             if self.args.leave_one_session_out:
+    #                 total_number_of_sessions = 2
+    #                 mins, maxes = self.utils.getExtrema(self.args.leftout_subject, self.args.target_normalize, lastSessionOnly=False)
+    #                 for i in range(1, total_number_of_sessions+1):
+    #                     session_emg = []
+    #                     # session_labels = []
+    #                     for j in range(self.utils.num_subjects):
 
-        if exercises:
-            # Ninapro datasets have to be processed.
-            self.data = load_EMG_ninapro()
-        else:
+    #                         emg_data = self.utils.getEMG_separateSessions(j+1, i, mins, maxes, self.args.leftout_subject)
+    #                         session_emg.append(emg_data)
+                            
+    #                         # labels_data = self.utils.getLabels_separateSessions(j+1, i)
+    #                         # session_labels.append(labels_data)
+                        
+    #                     emg.extend(session_emg)
+    #                     # labels.extend(session_labels)
+    #             else:
+    #                 mins, maxes = self.utils.getExtrema(self.args.leftout_subject, self.args.target_normalize)
+    #                 for i in range(self.utils.num_subjects):
+    #                     emg_data = self.utils.getEMG((i+1, mins, maxes, self.args.leftout_subject))
+    #                     emg.append(emg_data)
+                        
+    #                     # labels_data = self.utils.getLabels(i+1)
+    #                     # labels.append(labels_data)
+    #         else:
+    #             raise NotImplementedError("Normalization method not implemented")
+            
+    #         return emg
 
-            self.data = load_EMG_other_datasets()
+    #     if exercises:
+    #         # Ninapro datasets have to be processed.
+    #         self.data = load_EMG_ninapro()
+    #     else:
+
+    #         self.data = load_EMG_other_datasets()
 
 
     def print_data_information(self):
@@ -110,8 +109,7 @@ class X_Data(Data):
         print("Number of Samples (across all participants): ", sum([e.shape[0] for e in self.data]))
 
 
-        self.length = self.data[0].shape[1]
-        self.width = self.data[0].shape[2]
+        
         print("Number of Electrode Channels (length of EMG): ", self.length)
         print("Number of Timesteps per Trial (width of EMG):", self.width)
 
@@ -144,6 +142,8 @@ class X_Data(Data):
         assert self.utils is not None, "self.utils is not defined. Please run initialize() first."
 
         flexwear_unlabeled_data = None
+        self.length = self.data[0].shape[1]
+        self.width = self.data[0].shape[2]
 
         emg = self.data # should already be defined as emg using load_data
         image_data = []
