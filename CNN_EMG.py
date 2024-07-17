@@ -28,19 +28,11 @@ from torch.utils.data import Dataset
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
-from joblib import dump
-from sklearn.metrics import accuracy_score, log_loss
-from sklearn.metrics import confusion_matrix, classification_report 
 import torch.nn.functional as F
-import subprocess
-import get_datasets
 from semilearn import get_dataset, get_data_loader, get_net_builder, get_algorithm, get_config, Trainer, split_ssl_data, BasicDataset
 from semilearn.core.utils import send_model_cuda
 import torchmetrics
 import ml_metrics_utils as ml_utils
-from sklearn.metrics import confusion_matrix, classification_report
-import VisualTransformer
-
 from Hook_Manager import Hook_Manager
 
 # Imports for Setup_Run
