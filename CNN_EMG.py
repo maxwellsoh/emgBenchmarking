@@ -181,7 +181,6 @@ class Run_Model():
 
     def run_model(self, X, Y, label):
 
-        # get the model 
         if self.args.turn_on_unlabeled_domain_adaptation:
             model_trainer = Unlabeled_Domain_Adaptation_Trainer(X, Y, label, self.env)
         else:

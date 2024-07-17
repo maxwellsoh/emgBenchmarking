@@ -32,6 +32,8 @@ class CNN_Trainer(Model_Trainer):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
+        
+
     def set_model(self):
 
         if self.args.model == 'resnet50_custom':
@@ -118,7 +120,6 @@ class CNN_Trainer(Model_Trainer):
     def set_optimizer(self):
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
 
-
     def setup_model(self):
         super().set_pretrain_path()
         self.set_model()
@@ -131,14 +132,247 @@ class CNN_Trainer(Model_Trainer):
 
         super().shared_setup()
 
-    def model_loop(self):
-    
-        # Initialize metrics
-        if self.args.held_out_test or self.args.pretrain_and_finetune:
-            training_metrics, validation_metrics, testing_metrics = super().get_metrics()
-        else: 
-            training_metrics, validation_metrics = super().get_metrics(testing=False)
+    def print_classification_metrics(self):
+        """
+        Batches data for test, train, and validation and plots confusion matrix and classification report.
+        """
+
+        # Test Batch
+        self.model.eval()
+        with torch.no_grad():
+            test_predictions = []
+            for X_batch, Y_batch in tqdm(self.test_loader, desc="Test Batch Loading for Confusion Matrix"):
+                X_batch = X_batch.to(self.device).to(torch.float32)
+                outputs = self.model(X_batch)
+                if isinstance(outputs, dict):
+                    outputs = outputs['logits']
+                preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+                test_predictions.extend(preds)
+
+        true_labels = np.argmax(self.Y.test.cpu().detach().numpy(), axis=1)
+        test_predictions = np.array(test_predictions)
+
+        # Calculate and print the confusion matrix
+        conf_matrix = confusion_matrix(true_labels, test_predictions)
+        print("Confusion Matrix:")
+        print(conf_matrix)
+
+        print("Classification Report:")
+        print(classification_report(true_labels, test_predictions))
         
+        self.utils.plot_confusion_matrix(np.argmax(self.Y.test.cpu().detach().numpy(), axis=1), np.array(test_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'test')  
+
+        torch.cuda.empty_cache()  # Clear cache if needed 
+
+        # Validation Metrics
+        self.model.eval()
+        with torch.no_grad():
+            validation_predictions = []
+            for X_batch, Y_batch in tqdm(self.val_loader, desc="Validation Batch Loading for Confusion Matrix"):
+                X_batch = X_batch.to(self.device).to(torch.float32)
+                outputs = self.model(X_batch)
+                if isinstance(outputs, dict):
+                    outputs = outputs['logits']
+                preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
+                validation_predictions.extend(preds)
+        
+        self.utils.plot_confusion_matrix(np.argmax(self.Y.validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'validation')   
+        torch.cuda.empty_cache()
+
+        # Load training in smaller batches for memory purposes
+        torch.cuda.empty_cache()  # Clear cache if needed
+
+        self.model.eval()
+        self.train_loader_unshuffled = DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True)
+        
+        # Train Metrics
+        with torch.no_grad():
+            train_predictions = []
+            for X_batch, Y_batch in tqdm(self.train_loader_unshuffled, desc="Training Batch Loading for Confusion Matrix"):
+                X_batch = X_batch.to(self.device).to(torch.float32)
+                outputs = self.model(X_batch)
+                if isinstance(outputs, dict):
+                        outputs = outputs['logits']
+                preds = torch.argmax(outputs, dim=1)
+                train_predictions.extend(preds.cpu().detach().numpy())
+        
+        self.utils.plot_confusion_matrix(np.argmax(self.Y.train.cpu().detach().numpy(), axis=1), np.array(train_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'train')
+    
+    def pretrain_and_finetune(self, testing_metrics):
+        """
+        Finish current run and start a new run for finetuning.
+        """
+
+        # Evaluate performance on test metrics
+        ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, testing_metrics)
+        
+        ## START NEW RUN FOR FINETUNING 
+
+        self.ft_run = wandb.init(name=self.wandb_runname+"_finetune", project=self.project_name) 
+        ft_epochs = self.args.finetuning_epochs
+        finetune_dataset = super().CustomDataset(self.X.train_finetuning,self.Y.train_finetuning, transform=self.resize_transform)
+        finetune_loader = DataLoader(finetune_dataset, batch_size=self.batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True)
+
+        # Initialize metrics for finetuning training and validation
+        ft_training_metrics, ft_validation_metrics, testing_metrics = super().get_metrics()
+
+        # Finetuning Loop 
+        for epoch in tqdm(range(ft_epochs), desc="Finetuning Epoch"):
+            self.model.train()
+            train_loss = 0.0
+
+            for ft_train_metric in ft_training_metrics:
+                ft_train_metric.reset()
+
+            with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{ft_epochs}", leave=False) as t:
+                for X_batch, Y_batch in t:
+                    X_batch = X_batch.to(self.device).to(torch.float32)
+                    Y_batch =Y_batch.to(self.device).to(torch.float32)
+                    if self.args.force_regression:
+                        Y_batch_long =Y_batch
+                    else: 
+                        Y_batch_long = torch.argmax(Y_batch, dim=1)
+
+                    self.optimizer.zero_grad()
+                    output = self.model(X_batch)
+                    if isinstance(output, dict):
+                        output = output['logits']
+                    loss = self.criterion(output,Y_batch_long)
+                    loss.backward()
+                    self.optimizer.step()
+
+                    train_loss += loss.item()
+
+                    for ft_train_metric in ft_training_metrics:
+                        ft_train_metric(output,Y_batch_long)
+
+                    if not self.args.force_regression: 
+                        if t.n % 10 == 0:
+                            ft_accuracy_metric = next(metric for metric in ft_training_metrics if metric.name =="Micro_Accuracy")
+
+                            t.set_postfix({
+                                "Batch Loss": loss.item(), 
+                                "Batch Acc": ft_accuracy_metric.compute().item()
+                            })
+
+            # Finetuning Validation
+            self.model.eval()
+            val_loss = 0.0
+
+            for ft_val_metric in ft_validation_metrics:
+                ft_val_metric.reset()
+
+            if not self.args.force_regression:
+                all_val_outputs = []
+                all_val_labels = []
+
+            with torch.no_grad():
+                for X_batch, Y_batch in self.val_loader:
+                    X_batch = X_batch.to(self.device).to(torch.float32)
+                    Y_batch = Y_batch.to(self.device).to(torch.float32)
+                    if self.args.force_regression:
+                        Y_batch_long =Y_batch
+                    else: 
+                        Y_batch_long = torch.argmax(Y_batch, dim=1)
+
+                    output = self.model(X_batch)
+                    if isinstance(output, dict):
+                        output = output['logits']
+                    val_loss += self.criterion(output,Y_batch).item()
+
+                    for ft_val_metric in ft_validation_metrics:
+                        if ft_val_metric.name != "Macro_AUROC" and ft_val_metric.name != "Macro_AUPRC":
+                            ft_val_metric(output,Y_batch_long)
+
+                    if not self.args.force_regression:
+                        all_val_outputs.append(output)
+                        all_val_labels.append(Y_batch_long)
+
+            
+            if not self.args.force_regression:
+                all_val_outputs = torch.cat(all_val_outputs, dim=0)
+                all_val_labels = torch.cat(all_val_labels, dim=0)  
+                Y_validation_long = torch.argmax(self.Y.validation, dim=1).to(self.device)
+
+                true_labels =Y_validation_long.cpu().detach().numpy()
+                test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+                conf_matrix = confusion_matrix(true_labels, test_predictions)
+                print("Confusion Matrix:")
+                print(conf_matrix)
+
+                finetune_val_macro_auroc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_AUROC")
+                finetune_val_macro_auprc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_AUPRC")
+
+                finetune_val_macro_auroc_metric(all_val_outputs,Y_validation_long)
+                finetune_val_macro_auprc_metric(all_val_outputs,Y_validation_long)
+
+            # Calculate average loss and metrics
+            train_loss /= len(finetune_loader)
+            val_loss /= len(self.val_loader)
+            if not self.args.force_regression: 
+                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_gestures)
+                fpr_results = ml_utils.evaluate_model_fpr_at_tpr(self.model, self.val_loader, self.device, self.num_gestures)
+                confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
+
+            # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
+            ft_training_metrics_values = {ft_metric.name: ft_metric.compute() for ft_metric in ft_training_metrics}
+            ft_validation_metrics_values = {ft_metric.name: ft_metric.compute() for ft_metric in ft_validation_metrics}
+
+            # Print metric values
+            print(f"Finetuning Epoch {epoch+1}/{ft_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+
+            ft_train_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in ft_training_metrics_values.items())
+            print(f"Train Metrics | {ft_train_metrics_str}")
+
+            ft_val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in ft_validation_metrics_values.items())
+            print(f"Val Metrics | {ft_val_metrics_str}")
+
+            wandb.log({
+                "train/Loss": train_loss,
+                **{
+                    f"train/{name}": value.item() 
+                    for name, value in ft_training_metrics_values.items() 
+                    if name != 'R2Score_RawValues'
+                },
+                **{
+                    f"train/R2Score_RawValues_{i+1}": v.item() 
+                    for name, value in ft_training_metrics_values.items() 
+                    if name == 'R2Score_RawValues'
+                    for i, v in enumerate(value)
+                },
+                "train/Learning Rate": self.optimizer.param_groups[0]['lr'],
+                "train/Epoch": epoch+1,
+                "validation/Loss": val_loss,
+                **{
+                    f"validation/{name}": value.item() 
+                    for name, value in ft_validation_metrics_values.items() 
+                    if name != 'R2Score_RawValues'
+                },
+                **{
+                    f"validation/R2Score_RawValues_{i+1}": v.item() 
+                    for name, value in ft_validation_metrics_values.items() 
+                    if name == 'R2Score_RawValues'
+                    for i, v in enumerate(value)
+                },
+
+                **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not self.args.force_regression else {}),
+                **({f"fpr_at_fixed_tpr/Average Val FPR at {tpr} TPR": np.mean(fprs) for tpr, fprs in fpr_results.items()} if not self.args.force_regression else {}),
+                **({f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not self.args.force_regression else {}),
+                **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not self.args.force_regression else {})
+            })
+        
+        
+        torch.save(self.model.state_dict(), self.model_filename)
+        wandb.save(f'self.model/self.modelParameters_{self.formatted_datetime}.pth')
+
+        # Evaluate the self.model on the test set
+        ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, testing_metrics)
+
+    def train_and_validate(self, training_metrics, validation_metrics):
+        """
+        Train and validation loop. 
+        """
+
         for epoch in tqdm(range(self.num_epochs), desc="Epoch"):
             self.model.train()
             train_loss = 0.0
@@ -166,7 +400,7 @@ class CNN_Trainer(Model_Trainer):
                     output = self.model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
-                    loss = self.criterion(output,Y_batch)
+                    loss = self.criterion(output, Y_batch)
                     loss.backward()
                     self.optimizer.step()
 
@@ -311,296 +545,25 @@ class CNN_Trainer(Model_Trainer):
         torch.save(self.model.state_dict(), self.model_filename)
         wandb.save(f'model/modelParameters_{self.formatted_datetime}.pth')
 
-        if self.args.pretrain_and_finetune:
-            ### Finish the current run and start a new run for finetuning
-            ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, testing_metrics)
+    def model_loop(self):
 
-            self.model.eval()
-            with torch.no_grad():
-                test_predictions = []
-                for X_batch, Y_batch in tqdm(self.test_loader, desc="Test Batch Loading for Confusion Matrix"):
-                    X_batch = X_batch.to(self.device).to(torch.float32)
-                    outputs = self.model(X_batch)
-                    if isinstance(outputs, dict):
-                        outputs = outputs['logits']
-                    preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-                    test_predictions.extend(preds)
+        # Get metrics
+        if self.args.held_out_test or self.args.pretrain_and_finetune:
+            training_metrics, validation_metrics, testing_metrics = super().get_metrics()
+        else: 
+            training_metrics, validation_metrics = super().get_metrics(testing=False)
 
-            # Print confusion matrix before plotting
-            # Convert lists to numpy arrays
-            if not self.args.force_regression: 
-                true_labels = np.argmax(self.Y.test.cpu().detach().numpy(), axis=1)
-                test_predictions = np.array(test_predictions)
-
-                # Calculate and print the confusion matrix
-                conf_matrix = confusion_matrix(true_labels, test_predictions)
-                print("Confusion Matrix:")
-                print(conf_matrix)
-
-                print("Classification Report:")
-                print(classification_report(true_labels, test_predictions))
-                
-                self.utils.plot_confusion_matrix(np.argmax(self.Y.test.cpu().detach().numpy(), axis=1), np.array(test_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'test')   
-
-            torch.cuda.empty_cache()  # Clear cache if needed
-
-            self.model.eval()
-            with torch.no_grad():
-                validation_predictions = []
-                for X_batch, Y_batch in tqdm(self.val_loader, desc="Validation Batch Loading for Confusion Matrix"):
-                    X_batch = X_batch.to(self.device).to(torch.float32)
-                    outputs = self.model(X_batch)
-                    if isinstance(outputs, dict):
-                        outputs = outputs['logits']
-                    preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-                    validation_predictions.extend(preds)
-            if not self.args.force_regression: 
-                self.utils.plot_confusion_matrix(np.argmax(self.Y.validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'validation')   
-
-            # Load training in smaller batches for memory purposes
-            torch.cuda.empty_cache()  # Clear cache if needed
-
-            self.model.eval()
-            self.train_loader_unshuffled = DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True)
-            
-            with torch.no_grad():
-                train_predictions = []
-                for X_batch, Y_batch in tqdm(self.train_loader_unshuffled, desc="Training Batch Loading for Confusion Matrix"):
-                    X_batch = X_batch.to(self.device).to(torch.float32)
-                    outputs = self.model(X_batch)
-                    if isinstance(outputs, dict):
-                            outputs = outputs['logits']
-                    preds = torch.argmax(outputs, dim=1)
-                    train_predictions.extend(preds.cpu().detach().numpy())
-            
-            if not self.args.force_regression:
-                self.utils.plot_confusion_matrix(np.argmax(self.Y.train.cpu().detach().numpy(), axis=1), np.array(train_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'train')
-                self.run.finish()
-
-            ### Initiate new logging of finetuning phase
-            self.run = wandb.init(name=self.wandb_runname+"_finetune", project=self.project_name) 
-            self.num_epochs = self.args.finetuning_epochs
-            # train more on fine tuning dataset
-            finetune_dataset = super().CustomDataset(self.X.train_finetuning,self.Y.train_finetuning, transform=self.resize_transform)
-            finetune_loader = DataLoader(finetune_dataset, batch_size=self.batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True)
-
-            # Initialize metrics for finetuning training and validation
-            ft_training_metrics, ft_validation_metrics, testing_metrics = super().get_metrics()
-    
-            for epoch in tqdm(range(self.num_epochs), desc="Finetuning Epoch"):
-                self.model.train()
-                train_loss = 0.0
-
-                # Reset finetuning training metrics at the start of each epoch
-                for ft_train_metric in ft_training_metrics:
-                    ft_train_metric.reset()
-                print()
-
-                with tqdm(finetune_loader, desc=f"Finetuning Epoch {epoch+1}/{self.num_epochs}", leave=False) as t:
-                    for X_batch, Y_batch in t:
-                        X_batch = X_batch.to(self.device).to(torch.float32)
-                        Y_batch =Y_batch.to(self.device).to(torch.float32)
-                        if self.args.force_regression:
-                           Y_batch_long =Y_batch
-                        else: 
-                           Y_batch_long = torch.argmax(Y_batch, dim=1)
-
-                        self.optimizer.zero_grad()
-                        output = self.model(X_batch)
-                        if isinstance(output, dict):
-                            output = output['logits']
-                        loss = self.criterion(output,Y_batch_long)
-                        loss.backward()
-                        self.optimizer.step()
-
-                        train_loss += loss.item()
-
-                        for ft_train_metric in ft_training_metrics:
-                            ft_train_metric(output,Y_batch_long)
-
-                        if not self.args.force_regression: 
-                            if t.n % 10 == 0:
-                                ft_accuracy_metric = next(metric for metric in ft_training_metrics if metric.name =="Micro_Accuracy")
-
-                                t.set_postfix({
-                                    "Batch Loss": loss.item(), 
-                                    "Batch Acc": ft_accuracy_metric.compute().item()
-                                })
-
-                # Finetuning Validation
-                self.model.eval()
-                val_loss = 0.0
-
-                for ft_val_metric in ft_validation_metrics:
-                    ft_val_metric.reset()
-
-                if not self.args.force_regression:
-                    all_val_outputs = []
-                    all_val_labels = []
-    
-                with torch.no_grad():
-                    for X_batch, Y_batch in self.val_loader:
-                        X_batch = X_batch.to(self.device).to(torch.float32)
-                        Y_batch = Y_batch.to(self.device).to(torch.float32)
-                        if self.args.force_regression:
-                           Y_batch_long =Y_batch
-                        else: 
-                           Y_batch_long = torch.argmax(Y_batch, dim=1)
-
-                        output = self.model(X_batch)
-                        if isinstance(output, dict):
-                            output = output['logits']
-                        val_loss += self.criterion(output,Y_batch).item()
-
-                        for ft_val_metric in ft_validation_metrics:
-                            if ft_val_metric.name != "Macro_AUROC" and ft_val_metric.name != "Macro_AUPRC":
-                                ft_val_metric(output,Y_batch_long)
-
-                        if not self.args.force_regression:
-                            all_val_outputs.append(output)
-                            all_val_labels.append(Y_batch_long)
-
-                
-                if not self.args.force_regression:
-                    all_val_outputs = torch.cat(all_val_outputs, dim=0)
-                    all_val_labels = torch.cat(all_val_labels, dim=0)  
-                    Y_validation_long = torch.argmax(self.Y.validation, dim=1).to(self.device)
-
-                    true_labels =Y_validation_long.cpu().detach().numpy()
-                    test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
-                    conf_matrix = confusion_matrix(true_labels, test_predictions)
-                    print("Confusion Matrix:")
-                    print(conf_matrix)
-
-                    finetune_val_macro_auroc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_AUROC")
-                    finetune_val_macro_auprc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_AUPRC")
-
-                    finetune_val_macro_auroc_metric(all_val_outputs,Y_validation_long)
-                    finetune_val_macro_auprc_metric(all_val_outputs,Y_validation_long)
-
-                # Calculate average loss and metrics
-                train_loss /= len(finetune_loader)
-                val_loss /= len(self.val_loader)
-                if not self.args.force_regression: 
-                    tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_gestures)
-                    fpr_results = ml_utils.evaluate_model_fpr_at_tpr(self.model, self.val_loader, self.device, self.num_gestures)
-                    confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
-
-                # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
-                ft_training_metrics_values = {ft_metric.name: ft_metric.compute() for ft_metric in ft_training_metrics}
-                ft_validation_metrics_values = {ft_metric.name: ft_metric.compute() for ft_metric in ft_validation_metrics}
-
-                # Print metric values
-                print(f"Finetuning Epoch {epoch+1}/{self.num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
-
-                ft_train_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in ft_training_metrics_values.items())
-                print(f"Train Metrics | {ft_train_metrics_str}")
-
-                ft_val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in ft_validation_metrics_values.items())
-                print(f"Val Metrics | {ft_val_metrics_str}")
-
-                wandb.log({
-                    "train/Loss": train_loss,
-                    **{
-                        f"train/{name}": value.item() 
-                        for name, value in ft_training_metrics_values.items() 
-                        if name != 'R2Score_RawValues'
-                    },
-                    **{
-                        f"train/R2Score_RawValues_{i+1}": v.item() 
-                        for name, value in ft_training_metrics_values.items() 
-                        if name == 'R2Score_RawValues'
-                        for i, v in enumerate(value)
-                    },
-                    "train/Learning Rate": self.optimizer.param_groups[0]['lr'],
-                    "train/Epoch": epoch+1,
-                    "validation/Loss": val_loss,
-                    **{
-                        f"validation/{name}": value.item() 
-                        for name, value in ft_validation_metrics_values.items() 
-                        if name != 'R2Score_RawValues'
-                    },
-                    **{
-                        f"validation/R2Score_RawValues_{i+1}": v.item() 
-                        for name, value in ft_validation_metrics_values.items() 
-                        if name == 'R2Score_RawValues'
-                        for i, v in enumerate(value)
-                    },
-
-                    **({f"tpr_at_fixed_fpr/Average Val TPR at {fpr} FPR": np.mean(tprs) for fpr, tprs in tpr_results.items()} if not self.args.force_regression else {}),
-                    **({f"fpr_at_fixed_tpr/Average Val FPR at {tpr} TPR": np.mean(fprs) for tpr, fprs in fpr_results.items()} if not self.args.force_regression else {}),
-                    **({f"confidence_level_accuracies/Val Accuracy at {int(confidence_level*100)}% confidence": acc for confidence_level, acc in confidence_levels.items()} if not self.args.force_regression else {}),
-                    **({f"proportion_above_confidence_threshold/Val Proportion above {int(confidence_level*100)}% confidence": prop for confidence_level, prop in proportions_above_confidence_threshold.items()} if not self.args.force_regression else {})
-                })
-            
-            torch.save(self.model.state_dict(), self.model_filename)
-            wandb.save(f'self.model/self.modelParameters_{self.formatted_datetime}.pth')
-
-            # Evaluate the self.model on the test set
-            ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, testing_metrics)
-
-        torch.cuda.empty_cache()  # Clear cache if needed
-
-        self.model.eval()
-        with torch.no_grad():
-            assert self.args.force_regression == False
-            test_predictions = []
-            for X_batch, Y_batch in tqdm(self.test_loader, desc="Test Batch Loading for Confusion Matrix"):
-                X_batch = X_batch.to(self.device).to(torch.float32)
-                outputs = self.model(X_batch)
-                if isinstance(outputs, dict):
-                    outputs = outputs['logits']
-                preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-                test_predictions.extend(preds)
-
-        # Print confusion matrix before plotting
-        # Convert lists to numpy arrays
-        if not self.args.force_regression: 
-            true_labels = np.argmax(self.Y.test.cpu().detach().numpy(), axis=1)
-            test_predictions = np.array(test_predictions)
-
-            # Calculate and print the confusion matrix
-            conf_matrix = confusion_matrix(true_labels, test_predictions)
-            print("Confusion Matrix:")
-            print(conf_matrix)
-
-            print("Classification Report:")
-            print(classification_report(true_labels, test_predictions))
-                
-            self.utils.plot_confusion_matrix(np.argmax(self.Y.test.cpu().detach().numpy(), axis=1), np.array(test_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'test')   
-
-        torch.cuda.empty_cache()  # Clear cache if needed
-
-        self.model.eval()
-        with torch.no_grad():
-            validation_predictions = []
-            for X_batch, Y_batch in tqdm(self.val_loader, desc="Validation Batch Loading for Confusion Matrix"):
-                X_batch = X_batch.to(self.device).to(torch.float32)
-                outputs = self.model(X_batch)
-                if isinstance(outputs, dict):
-                    outputs = outputs['logits']
-                preds = np.argmax(outputs.cpu().detach().numpy(), axis=1)
-                validation_predictions.extend(preds)
-
+        # Train and Validation Loop 
+        self.train_and_validate_run = self.run
+        self.train_and_validate(training_metrics, validation_metrics)
         if not self.args.force_regression:
-            self.utils.plot_confusion_matrix(np.argmax(self.Y.validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'validation')   
+            self.print_classification_metrics()
+        self.train_and_validate_run.finish() 
 
-        # Load training in smaller batches for memory purposes
-        torch.cuda.empty_cache()  # Clear cache if needed
+        # Finetune Loop 
+        if self.args.pretrain_and_finetune:
+            self.pretrain_and_finetune(testing_metrics)
+            if not self.args.force_regression:
+                self.print_classification_metrics()
+            self.ft_run.finish() 
 
-        self.model.eval()
-        self.train_loader_unshuffled = DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True)
-        with torch.no_grad():
-            train_predictions = []
-            for X_batch, Y_batch in tqdm(self.train_loader_unshuffled, desc="Training Batch Loading for Confusion Matrix"):
-                X_batch = X_batch.to(self.device).to(torch.float32)
-                outputs = self.model(X_batch)
-                if isinstance(outputs, dict):
-                        outputs = outputs['logits']
-                preds = torch.argmax(outputs, dim=1)
-                train_predictions.extend(preds.cpu().detach().numpy())
-
-        if not self.args.force_regression: 
-            self.utils.plot_confusion_matrix(np.argmax(self.Y.train.cpu().detach().numpy(), axis=1), np.array(train_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'train')
-        
-        self.run.finish()

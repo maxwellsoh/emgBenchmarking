@@ -120,7 +120,6 @@ class Combined_Data():
                     labels = []
                     for i in range(1, total_number_of_sessions+1):
                         emg_async = pool.map_async(self.utils.getEMG_separateSessions, [(j+1, i, mins, maxes, self.args.target_normalize_subject) for j in range(self.utils.num_subjects)])
-
                         emg.extend(emg_async.get())
                         
                         labels_async = pool.map_async(self.utils.getLabels_separateSessions, [(j+1, i) for j in range(self.utils.num_subjects)])
