@@ -393,7 +393,7 @@ class Model_Trainer():
 
     def initialize_wandb(self):
 
-        self.run = wandb.init(name=self.wandb_runname, project=self.project_name)
+        self.train_and_validate_run = wandb.init(name=self.wandb_runname, project=self.project_name)
         wandb.config.lr = self.args.learning_rate
         if self.args.leave_n_subjects_out_randomly != 0:
             wandb.config.left_out_subjects = self.leaveOutIndices

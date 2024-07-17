@@ -205,6 +205,10 @@ class CNN_Trainer(Model_Trainer):
 
         # Evaluate performance on test metrics
         ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, testing_metrics)
+
+        if not self.args.force_regression:
+            self.print_classification_metrics()
+        self.train_and_validate_run.finish()
         
         ## START NEW RUN FOR FINETUNING 
 
@@ -366,7 +370,13 @@ class CNN_Trainer(Model_Trainer):
         wandb.save(f'self.model/self.modelParameters_{self.formatted_datetime}.pth')
 
         # Evaluate the self.model on the test set
-        ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, testing_metrics)
+        ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.
+        device, self.num_gestures, self.criterion, self.args, testing_metrics)
+
+        if not self.args.force_regression:
+            self.print_classification_metrics()
+        self.ft_run.finish() 
+
 
     def train_and_validate(self, training_metrics, validation_metrics):
         """
@@ -545,6 +555,13 @@ class CNN_Trainer(Model_Trainer):
         torch.save(self.model.state_dict(), self.model_filename)
         wandb.save(f'model/modelParameters_{self.formatted_datetime}.pth')
 
+        # If pretrain and finetune, continue. Otherwise, here.
+        if not self.args.pretrain_and_finetune:
+
+            if not self.args.force_regression: 
+                self.print_classification_metrics()
+            self.train_and_validate_run.finish()
+
     def model_loop(self):
 
         # Get metrics
@@ -554,16 +571,9 @@ class CNN_Trainer(Model_Trainer):
             training_metrics, validation_metrics = super().get_metrics(testing=False)
 
         # Train and Validation Loop 
-        self.train_and_validate_run = self.run
         self.train_and_validate(training_metrics, validation_metrics)
-        if not self.args.force_regression:
-            self.print_classification_metrics()
-        self.train_and_validate_run.finish() 
 
         # Finetune Loop 
         if self.args.pretrain_and_finetune:
             self.pretrain_and_finetune(testing_metrics)
-            if not self.args.force_regression:
-                self.print_classification_metrics()
-            self.ft_run.finish() 
-
+            

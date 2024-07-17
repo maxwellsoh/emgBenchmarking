@@ -309,7 +309,6 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         wandb.finish()
 
     def pretrain_and_finetune_model(self):
-
         
         print("Finetuning the model...")
         self.run = wandb.init(name=self.wandb_runname+"_unlab_finetune", project=self.project_name)
