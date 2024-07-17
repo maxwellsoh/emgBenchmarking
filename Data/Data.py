@@ -142,7 +142,7 @@ class Data():
             self.train_unlabeled = self.pretrain_unlabeled
 
         self.train_finetuning = self.finetune
-        if self.args.proportion_unlabeled_data_from_leftout_subject or self.args.load_unlabeled_data_flexwearhd:
+        if self.args.proportion_unlabeled_data_from_leftout_subject:
             self.train_finetuning_unlabeled = self.finetune_unlabeled
 
         self.validation = self.validation

@@ -64,27 +64,16 @@ class X_Data(Data):
     def create_foldername_zarr(self):
         base_foldername_zarr = ""
 
-        if self.args.leave_n_subjects_out_randomly != 0:
-            base_foldername_zarr = f'leave_n_subjects_out_randomly_images_zarr/{self.args.dataset}/leave_{self.args.leave_n_subjects_out_randomly}_subjects_out_randomly_seed-{self.args.seed}/'
-        else:
-            if self.args.held_out_test:
-                base_foldername_zarr = f'heldout_images_zarr/{self.args.dataset}/'
-            elif self.args.leave_one_session_out:
-                base_foldername_zarr = f'Leave_one_session_out_images_zarr/{self.args.dataset}/'
-            elif self.args.turn_off_scaler_normalization:
-                base_foldername_zarr = f'LOSOimages_zarr/{self.args.dataset}/'
-            elif self.args.leave_one_subject_out:
-                base_foldername_zarr = f'LOSOimages_zarr/{self.args.dataset}/'
+        if self.args.leave_one_session_out:
+            base_foldername_zarr = f'Leave_one_session_out_images_zarr/{self.args.dataset}/'
+        elif self.args.turn_off_scaler_normalization:
+            base_foldername_zarr = f'LOSOimages_zarr/{self.args.dataset}/'
+        elif self.args.leave_one_subject_out:
+            base_foldername_zarr = f'LOSOimages_zarr/{self.args.dataset}/'
 
         if self.args.turn_off_scaler_normalization:
-            if self.args.leave_n_subjects_out_randomly != 0:
-                base_foldername_zarr = base_foldername_zarr + 'leave_n_subjects_out_randomly_no_scaler_normalization/'
-            else: 
-                if self.args.held_out_test:
-                    base_foldername_zarr = base_foldername_zarr + 'no_scaler_normalization/'
-                else: 
-                    base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
-            scaler = None
+            base_foldername_zarr = base_foldername_zarr + 'LOSO_no_scaler_normalization/'
+            self.scaler = None
         else:
             base_foldername_zarr = base_foldername_zarr + 'LOSO_subject' + str(self.leaveOut) + '/'
             if self.args.target_normalize > 0:
@@ -113,30 +102,22 @@ class X_Data(Data):
                 os.makedirs(base_foldername_zarr)
 
         return base_foldername_zarr
-
-
     
     def load_images(self):
-        """Updates self.data to be the loaded images for EMG data. Returns flexwear_unlabeled_data if self.args.load_unlabeled_data_flexwearhd.
+        """Updates self.data to be the loaded images for EMG data.
         
         If dataset exists, loads images. Otherwise, creates imaeges and saves in directory. 
-
-        Returns:
-            flexwear_unlabeled_data: unlabeled data if self.args.load_unlabeled_data_flexwearhd
         """
         assert self.utils is not None, "self.utils is not defined. Please run initialize() first."
 
         base_foldername_zarr = self.create_foldername_zarr()
         self.length = self.data[0].shape[1]
         self.width = self.data[0].shape[2]
-        flexwear_unlabeled_data = None
 
         emg = self.data # should already be defined as emg using load_data
         image_data = []
         for x in tqdm(range(len(emg)), desc="Number of Subjects "):
-            if self.args.held_out_test:
-                subject_folder = f'subject{x}/'
-            elif self.args.leave_one_session_out:
+            if self.args.leave_one_session_out:
                 subject_folder = f'session{x}/'
             else:
                 subject_folder = f'LOSO_subject{x}/'
@@ -151,10 +132,7 @@ class X_Data(Data):
                 # Load the dataset
                 dataset = zarr.open(foldername_zarr, mode='r')
                 print(f"Loaded dataset for {subject_or_session} {x} from {foldername_zarr}")
-                if self.args.load_few_images:
-                    image_data += [dataset[:10]]
-                else: 
-                    image_data += [dataset[:]]
+                image_data += [dataset[:]]
             else:
                 print(f"Could not find dataset for {subject_or_session} {x} at {foldername_zarr}")
                 # Get images and create the dataset
@@ -166,8 +144,7 @@ class X_Data(Data):
                     self.length, 
                     self.width,
                     turn_on_rms=self.args.turn_on_rms, 
-                    rms_windows=self.args.rms_input_windowsize,
-                    turn_on_magnitude=self.args.turn_on_magnitude, 
+                    rms_windows=self.args.rms_input_windowsize, 
                     global_min=self.global_low_value, 
                     global_max=self.global_high_value,
                     turn_on_spectrogram=self.args.turn_on_spectrogram, 
@@ -186,34 +163,5 @@ class X_Data(Data):
                     print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
                 image_data += [images]
                 
-        if self.args.load_unlabeled_data_flexwearhd:
-            unlabeled_images = self.utils.getImages(
-                unlabeled_online_data, 
-                self.scaler, 
-                self.length, 
-                self.width,
-                turn_on_rms=self.args.turn_on_rms, 
-                rms_windows=self.args.rms_input_windowsize,
-                turn_on_magnitude=self.args.turn_on_magnitude, 
-                global_min=self.global_low_value, 
-                global_max=self.global_high_value,
-                turn_on_spectrogram=self.args.turn_on_spectrogram, 
-                turn_on_cwt=self.args.turn_on_cwt,
-                turn_on_hht=self.args.turn_on_hht
-            )
-            unlabeled_images = np.array(unlabeled_images, dtype=np.float16)
-            flexwear_unlabeled_data = unlabeled_images
-            self.flexwear_unlabeled_data = flexwear_unlabeled_data
-            del unlabeled_images, unlabeled_online_data
-
         self.data = image_data
         
-
-        return flexwear_unlabeled_data
-        
-    # Helper for leave_one_session_out
-
-    def append_flexwear_unlabeled_to_finetune_unlabeled_list(self, flexwear_unlabeled_data):
-        assert self.args.load_unlabeled_data_flexwearhd, "Cannot append unlabeled data if load_unlabeled_data_flexwearhd is turned off."
-        self.finetune_unlabeled_list.append(flexwear_unlabeled_data)
-   

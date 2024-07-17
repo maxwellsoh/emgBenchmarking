@@ -198,18 +198,6 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                     force_regression=self.args.force_regression
                 )
 
-        # Flexwear unlabeled domain adaptatoin
-        if self.args.load_unlabeled_data_flexwearhd:
-            if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
-                X_train_unlabeled_partial_leftout_subject = np.concatenate([X_train_unlabeled_partial_leftout_subject, self.X.flexwear_unlabeled_data], axis=0)
-                Y_train_unlabeled_partial_leftout_subject = np.concatenate([Y_train_unlabeled_partial_leftout_subject, np.zeros((self.X.flexwear_unlabeled_data.shape[0], self.utils.numGestures))], axis=0)
-                label_train_unlabeled_partial_leftout_subject = Y_train_unlabeled_partial_leftout_subject
-
-            else:
-                X_train_unlabeled_partial_leftout_subject = self.X.flexwear_unlabeled_data
-                Y_train_unlabeled_partial_leftout_subject = np.zeros((self.X.flexwear_unlabeled_data.shape[0], self.utils.numGestures))
-                label_train_unlabeled_partial_leftout_subject = Y_train_unlabeled_partial_leftout_subject
-
         # Add the partial from leftout subject to train/finetune
         if not self.args.turn_on_unlabeled_domain_adaptation:
             # Append the partial validation data to the training data
@@ -227,7 +215,7 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                 self.train_unlabeled_from_self_tensor()
 
 
-            if proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or self.args.load_unlabeled_data_flexwearhd:
+            if proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
                 if proportion_unlabeled_of_proportion_to_keep_of_leftout==0:
                     X_train_labeled_partial_leftout_subject = X_train_partial_leftout_subject
                     Y_train_labeled_partial_leftout_subject = Y_train_partial_leftout_subject

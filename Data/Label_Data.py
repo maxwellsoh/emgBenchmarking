@@ -71,6 +71,3 @@ class Label_Data(Data):
         return indices_for_partial_dataset
         
 
-    def append_flexwear_unlabeled_to_finetune_unlabeled_list(self, flexwear_unlabeled_data):
-        assert self.args.load_unlabeled_data_flexwearhd, "Cannot append unlabeled data if load_unlabeled_data_flexwearhd is turned off."
-        self.finetune_unlabeled_list.append(np.zeros(flexwear_unlabeled_data.shape[0]))

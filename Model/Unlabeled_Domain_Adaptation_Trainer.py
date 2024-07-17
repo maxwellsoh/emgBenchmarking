@@ -124,7 +124,7 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
                 strong_transform=semilearn_transform
             )
 
-        elif self.proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or self.args.load_unlabeled_data_flexwearhd:
+        elif self.proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
             
             unlabeled_dataset = BasicDataset(
                 self.semilearn_config,
@@ -228,7 +228,7 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
             num_iters=self.iters_for_loader
         )
 
-        if self.proportion_unlabeled_of_training_subjects>0 or self.proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or self.args.load_unlabeled_data_flexwearhd:
+        if self.proportion_unlabeled_of_training_subjects>0 or self.proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
             self.train_unlabeled_loader = get_data_loader(
                 self.semilearn_config, 
                 unlabeled_dataset, 
@@ -250,7 +250,7 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
             
         if self.args.pretrain_and_finetune:
             # NOTE i think this is wrong call 
-            labeled_batch_size, unlabeled_batch_size, self.iters_for_loader = self.calculate_batch_size(finetune_unlabeled_datset, labeled_dataset, is_finetuning=True)
+            labeled_batch_size, unlabeled_batch_size, self.iters_for_loader = self.calculate_batch_size(self.finetune_unlabeled_dataset, labeled_dataset, is_finetuning=True)
             
             self.train_finetuning_loader = get_data_loader(
                 self.semilearn_config, 
@@ -296,7 +296,7 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         print("Pretraining the model...")
         self.semilearn_algorithm.loader_dict = {}
         self.semilearn_algorithm.loader_dict['train_lb'] = self.train_labeled_loader
-        if self.proportion_unlabeled_of_training_subjects>0 or self.proportion_unlabeled_of_proportion_to_keep_of_leftout>0 or self.args.load_unlabeled_data_flexwearhd:
+        if self.proportion_unlabeled_of_training_subjects>0 or self.proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
             self.semilearn_algorithm.loader_dict['train_ulb'] = self.train_unlabeled_loader
         self.semilearn_algorithm.loader_dict['eval'] = self.validation_loader
         self.semilearn_algorithm.scheduler = None
@@ -334,7 +334,7 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         
         if self.proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
             self.semilearn_algorithm.loader_dict['train_ulb'] = self.train_finetuning_unlabeled_loader
-        elif self.proportion_unlabeled_of_training_subjects>0 or self.args.load_unlabeled_data_flexwearhd:
+        elif self.proportion_unlabeled_of_training_subjects>0:
             self.semilearn_algorithm.loader_dict['train_ulb'] = self.train_unlabeled_loader
 
         self.semilearn_algorithm.loader_dict['eval'] = self.validation_loader

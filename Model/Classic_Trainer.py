@@ -2,6 +2,8 @@ from .Model_Trainer import Model_Trainer
 import torch.nn as nn
 import torch
 import numpy as np
+from tqdm import tqdm
+
 
 class Classic_Trainer(Model_Trainer):
     """
@@ -34,7 +36,6 @@ class Classic_Trainer(Model_Trainer):
         self.set_model()
         super().set_resize_transform()
         super().set_loaders()
-        super().set_scheduler()
         super().clear_memory()
         super().shared_setup()
     

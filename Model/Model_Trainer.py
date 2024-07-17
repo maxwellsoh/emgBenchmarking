@@ -265,35 +265,6 @@ class Model_Trainer():
         else:
             self.criterion = nn.CrossEntropyLoss()
 
-    def set_scheduler(self):
-
-        assert not self.args.turn_on_unlabeled_domain_adaptation, "Scheduler only for non UDA models"
-
-        if self.args.turn_on_cosine_annealing:
-            number_cycles = 5
-            annealing_multiplier = 2
-            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-                self.optimizer, 
-                T_0=self.utils.periodLengthForAnnealing(self.num_epochs, annealing_multiplier, number_cycles),
-                T_mult=annealing_multiplier, 
-                eta_min=1e-5, 
-                last_epoch=-1
-            )
-
-        elif self.args.turn_on_cyclical_lr:
-            # Define the cyclical learning rate scheduler
-            step_size = len(self.train_loader) * 6  # Number of iterations in half a cycle
-            base_lr = 1e-4  # Minimum learning rate
-            max_lr = 1e-3  # Maximum learning rate
-            self.scheduler = torch.optim.lr_scheduler.CyclicLR(
-                self.optimizer, 
-                base_lr, 
-                max_lr, 
-                step_size_up=step_size, 
-                mode='triangular2', 
-                cycle_momentum=False
-            )
-
     def clear_memory(self):
         assert not self.args.turn_on_unlabeled_domain_adaptation, "clear_memory() only for non UDA models"
         # Training loop
@@ -303,16 +274,8 @@ class Model_Trainer():
     
     def set_wandb_runname(self):
         wandb_runname = 'CNN_seed-'+str(self.args.seed)
-        if self.args.turn_on_kfold:
-            wandb_runname += '_k-fold-'+str(self.args.kfold)+'_fold-index-'+str(self.args.fold_index)
-        if self.args.turn_on_cyclical_lr:
-            wandb_runname += '_cyclical-lr'
-        if self.args.turn_on_cosine_annealing: 
-            wandb_runname += '_cosine-annealing'
         if self.args.turn_on_rms:
             wandb_runname += '_rms-'+str(self.args.rms_input_windowsize)
-        if self.args.turn_on_magnitude:  
-            wandb_runname += '_mag-'
         if self.args.leftout_subject != 0:
             wandb_runname += '_LOSO-'+str(self.args.leftout_subject)
         wandb_runname += '_' + self.model_name
@@ -334,14 +297,10 @@ class Model_Trainer():
             wandb_runname += '_hht'
         if self.args.reduce_training_data_size:
             wandb_runname += '_reduced-training-data-size-' + str(self.args.reduced_training_data_size)
-        if self.args.leave_n_subjects_out_randomly != 0:
-            wandb_runname += '_leave_n_subjects_out-'+str(self.args.leave_n_subjects_out_randomly)
         if self.args.turn_off_scaler_normalization:
             wandb_runname += '_no-scal-norm'
         if self.args.target_normalize > 0:
             wandb_runname += '_targ-norm-' + str(self.args.target_normalize)
-        if self.args.load_few_images:
-            wandb_runname += '_load-few'
         if self.args.transfer_learning:
             wandb_runname += '_tran-learn'
             wandb_runname += '-prop-' + str(self.args.proportion_transfer_learning_from_leftout_subject)
@@ -355,8 +314,6 @@ class Model_Trainer():
             wandb_runname += '_loso'
         if self.args.one_subject_for_training_set_for_session_test:
             wandb_runname += '_one-subj-for-training-set'
-        if self.args.held_out_test:
-            wandb_runname += '_held-out'
         if self.args.pretrain_and_finetune:
             wandb_runname += '_pretrain-finetune'
         if self.args.turn_on_unlabeled_domain_adaptation:
@@ -367,8 +324,6 @@ class Model_Trainer():
             wandb_runname += '_train-subj-prop-' + str(self.args.proportion_data_from_training_subjects)
         if self.args.proportion_unlabeled_data_from_training_subjects>0:
             wandb_runname += '_unlabel-subj-prop-' + str(self.args.proportion_unlabeled_data_from_training_subjects)
-        if self.args.load_unlabeled_data_flexwearhd:
-            wandb_runname += '_load-unlabel-data-flexwearhd'
 
         if self.args.target_normalize_subject != self.args.leftout_subject:
             wandb_runname += '_targ-norm-subj-' + str(self.args.target_normalize_subject)
@@ -377,13 +332,7 @@ class Model_Trainer():
 
 
     def set_project_name(self):
-
-        if (self.args.held_out_test):
-            if self.args.turn_on_kfold:
-                self.project_name += '_k-fold-'+str(self.args.kfold)
-            else:
-                self.project_name += '_heldout'
-        elif self.args.leave_one_subject_out:
+        if self.args.leave_one_subject_out:
             self.project_name += '_LOSO'
         elif self.args.leave_one_session_out:
            self.project_name += '_leave-one-session-out'
@@ -395,8 +344,6 @@ class Model_Trainer():
 
         self.train_and_validate_run = wandb.init(name=self.wandb_runname, project=self.project_name)
         wandb.config.lr = self.args.learning_rate
-        if self.args.leave_n_subjects_out_randomly != 0:
-            wandb.config.left_out_subjects = self.leaveOutIndices
     
     def set_device(self):
         self.device = torch.device("cuda:" + str(self.args.gpu) if torch.cuda.is_available() else "cpu")

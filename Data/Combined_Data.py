@@ -183,13 +183,6 @@ class Combined_Data():
         """
         Sets the global_low_value, global_high_value, and scaler for X (EMG) data. Also shares the indices/split across all data sets (which is needed since randomly generated). 
 
-        Sets:
-            if self.args.leave_n_subjects_out_randomly:
-                leaveOutIndices: leave out indices
-                train_indices, validation_indices: None
-            if self.args.held_out_test:
-                leaveOutIndices: None
-                train_indices, validation_indices: train and validation indices
         """
 
         # These can be tuned to change the normalization
@@ -209,87 +202,32 @@ class Combined_Data():
 
         def compute_emg_in():
             """Prepares emg_in by concatenating EMG data and reshaping if neccessary. emg_in is a temporary variable used to compute the scaler.
-
-            If self.args.held_out_test, returns train and validation indices
-            If self.args.leave_n_subjects_out_randomly, returns leaveOutIndices
-
             """
             emg = self.X.data
-            labels = self.label.data
-
             leaveOutIndices = []
-
-            # train and validation indices only for self.args.held_out_test
-            train_indices = None
-            validation_indices = None
-            
-            if self.args.leave_n_subjects_out_randomly:
-                leaveOut = self.args.leave_n_subjects_out_randomly
-                print(f"Leaving out {leaveOut} subjects randomly")
-                # subject indices to leave out randomly
-                leaveOutIndices = np.random.choice(range(self.utils.num_subjects), leaveOut, replace=False)
-                print(f"Leaving out subjects {np.sort(leaveOutIndices)}")
-                emg_in = np.concatenate([np.array(i.view(len(i), self.X.length*self.X.width)) for i in emg if i not in leaveOutIndices], axis=0, dtype=np.float32)
-                
-            else:
-                if (self.args.held_out_test): # can probably be deprecated and deleted
-                    if self.args.turn_on_kfold:
+         
+            # Running LOSO standardization
+            emg_in = np.concatenate([np.array(i.view(len(i), self.X.length*self.X.width)) for i in emg[:(self.leaveOut-1)]] + [np.array(i.view(len(i), self.X.length*self.X.width)) for i in emg[self.leaveOut:]], axis=0, dtype=np.float32)
+        
                         
-                        skf = StratifiedKFold(n_splits=self.args.kfold, shuffle=True, random_state=self.args.seed)
-                    
-                        emg_in = np.concatenate([np.array(i.reshape(-1, self.X.length*self.X.width)) for i in emg], axis=0, dtype=np.float32)
-                        labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-                        
-                        labels_for_folds = np.argmax(labels_in, axis=1)
-                        
-                        fold_count = 1
-                        for train_index, test_index in skf.split(emg_in, labels_for_folds):
-                            if fold_count == self.args.fold_index:
-                                train_indices = train_index
-                                validation_indices = test_index
-                                break
-                            fold_count += 1
-
-                    else:
-                        # Reshape and concatenate EMG data
-                        # Flatten each subject's data from (TRIAL, CHANNEL, TIME) to (TRIAL, CHANNEL*TIME)
-                        # Then concatenate along the subject dimension (axis=0)
-                        emg_in = np.concatenate([np.array(i.reshape(-1, self.X.length*self.X.width)) for i in emg], axis=0, dtype=np.float32)
-                        labels_in = np.concatenate([np.array(i) for i in labels], axis=0, dtype=np.float16)
-
-                        indices = np.arange(emg_in.shape[0])
-                        train_indices, validation_indices = model_selection.train_test_split(indices, test_size=0.2, stratify=labels_in)
-
-                elif (not self.args.turn_off_scaler_normalization and not (self.args.target_normalize > 0)): # Running LOSO standardization
-                    emg_in = np.concatenate([np.array(i.view(len(i), self.X.length*self.X.width)) for i in emg[:(leaveOut-1)]] + [np.array(i.view(len(i), self.X.length*self.X.width)) for i in emg[leaveOut:]], axis=0, dtype=np.float32)
-                else:
-                    assert False, "Should not reach here. Need to catch none case earlier in scalar_normalize_emg()"
-                        
-            # if args.held_out_test, returns train and validation indices 
-            # if args.leave_n_subjects_out_randomly, returns leaveOutIndices
-            # if LOSO, uses leaveOut
-            return emg_in, train_indices, validation_indices, leaveOutIndices
+            return emg_in, leaveOutIndices
     
-        def compute_scaler(emg_in, train_indices=None):
+        def compute_scaler(emg_in):
             """Compues global low, global high, and scaler for EMG data.
 
             Args:
                 emg_in: incoming EMG data to scaler normalize
-                train_indices: list of training indices. Needed when self.args.held_out_test. Defaults to None.
 
             Returns:
                 global_low_value, global_high_value, scaler: global low value, global high value, and scaler for EMG data.
             """
-            if self.args.held_out_test:
-                selected_emg = emg_in[train_indices]
-            else:
-                selected_emg = emg_in
+  
 
-            global_low_value = selected_emg.mean() - sigma_coefficient*selected_emg.std()
-            global_high_value = selected_emg.mean() + sigma_coefficient*selected_emg.std()
+            global_low_value = emg_in.mean() - sigma_coefficient*emg_in.std()
+            global_high_value = emg_in.mean() + sigma_coefficient*emg_in.std()
 
             # Normalize by electrode
-            emg_in_by_electrode = selected_emg.reshape(-1, self.X.length, self.X.width)
+            emg_in_by_electrode = emg_in.reshape(-1, self.X.length, self.X.width)
 
             # Assuming emg is your initial data of shape (SAMPLES, 16, 50)
             # Reshape data to (SAMPLES*50, 16)
@@ -312,24 +250,12 @@ class Combined_Data():
 
             return global_low_value, global_high_value, scaler
     
-        train_indices, validation_indices, leaveOutIndices = None, None, None
         global_low_value, global_high_value, scaler = None, None, None
 
-        if self.args.leave_n_subjects_out_randomly != 0 and (not self.args.turn_off_scaler_normalization and not (self.args.target_normalize > 0)):
-            emg_in, _, _, leaveOutIndices = compute_emg_in()
+        if (not self.args.turn_off_scaler_normalization and not (self.args.target_normalize > 0)):
+            emg_in, leaveOutIndices = compute_emg_in()
             global_low_value, global_high_value, scaler = compute_scaler(emg_in)
             self.set_values(attr="leaveOutIndices", value=leaveOutIndices)
-
-        else:
-            if  self.args.held_out_test:
-                emg_in, train_indices, validation_indices, _ = compute_emg_in()
-                global_low_value, global_high_value, scaler = compute_scaler(emg_in, train_indices)
-                self.set_values(attr="train_indices", value=train_indices)
-                self.set_values(attr="validation_indices", value=validation_indices)
-                
-            elif (not self.args.turn_off_scaler_normalization and not (self.args.target_normalize > 0)): # Running LOSO standardization
-                emg_in, _, _, _ = compute_emg_in()
-                global_low_value, global_high_value, scaler = compute_scaler(emg_in)
 
         # Values needed to compute image
         self.set_values(attr="global_high_value", value=global_high_value)
@@ -357,8 +283,6 @@ class Combined_Data():
         self.label.set_new_data()
 
     def load_images(self, base_foldername_zarr):
-        flexwear_unlabeled_data = self.X.load_images(base_foldername_zarr)
-        # NOTE: can probably get rid of this unless I pass the value to Y and Label
-        if flexwear_unlabeled_data:
-            assert self.args.load_unlabeled_data_flexwearhd, "Unlabeled data should only be returned if load_unlabeled_data_flexwearhd is turned on."
+        self.X.load_images(base_foldername_zarr)
+        
    

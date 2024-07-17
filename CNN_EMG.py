@@ -150,12 +150,7 @@ class Data_Splitter():
         self.env = env
 
     def split_data(self, X_data, Y_data, label_data):
-
-        if self.args.leave_n_subjects_out_randomly:
-            split_strategy = "Leave_N_Subjects_Out_Randomly"
-        elif self.args.held_out_test:
-            split_strategy = "Held_Out_Test"
-        elif self.args.leave_one_session_out:
+        if self.args.leave_one_session_out:
             split_strategy = "Leave_One_Session_Out"
         elif self.args.leave_one_subject_out:
             split_strategy = "Leave_One_Subject_Out"

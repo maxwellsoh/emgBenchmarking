@@ -127,7 +127,6 @@ class CNN_Trainer(Model_Trainer):
         super().set_resize_transform()
         super().set_loaders()
         self.set_optimizer()
-        super().set_scheduler()
         super().clear_memory()
 
         super().shared_setup()
@@ -565,7 +564,7 @@ class CNN_Trainer(Model_Trainer):
     def model_loop(self):
 
         # Get metrics
-        if self.args.held_out_test or self.args.pretrain_and_finetune:
+        if self.args.pretrain_and_finetune:
             training_metrics, validation_metrics, testing_metrics = super().get_metrics()
         else: 
             training_metrics, validation_metrics = super().get_metrics(testing=False)

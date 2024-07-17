@@ -21,7 +21,8 @@ class Leave_One_Session_Out(Data_Split_Strategy):
         if self.args.proportion_unlabeled_data_from_training_subjects and self.args.turn_on_unlabeled_domain_adaptation:
             super().concatenate_sessions(set_to_assign="pretrain_unlabeled", set_to_concat="pretrain_unlabeled_list")
 
-        if (self.args.proportion_unlabeled_data_from_leftout_subject > 0 or self.args.load_unlabeled_data_flexwearhd) and self.args.turn_on_unlabeled_domain_adaptation:
+        if (self.args.proportion_unlabeled_data_from_leftout_subject > 0) and self.args.turn_on_unlabeled_domain_adaptation:
+            
             super().concatenate_sessions(set_to_assign="finetune_unlabeled", set_to_concat="finetune_unlabeled_list")
 
     def append_to_pretrain(self, X_new_data, Y_new_data, label_new_data):
@@ -189,10 +190,6 @@ class Leave_One_Session_Out(Data_Split_Strategy):
             elif i in left_out_subject_first_n_sessions_indices:
                 self.finetune_from_leftout_first_n(X_train_temp, Y_train_temp, label_train_temp)
 
-        if self.args.load_unlabeled_data_flexwearhd:
-            flexwear_unlabeled_data = self.X.flexwear_unlabeled_data
-            self.append_to_finetune_unlabeled_list(flexwear_unlabeled_data, flexwear_unlabeled_data, flexwear_unlabeled_data, flexear_unlabeled_data=True)
-
         self.validation_from_leftout_last(left_out_subject_last_session_index)
     
     def reassign_sets(self):
@@ -213,7 +210,7 @@ class Leave_One_Session_Out(Data_Split_Strategy):
         super().convert_to_16_tensors("validation")
         if self.args.proportion_unlabeled_data_from_training_subjects:
             super().convert_to_16_tensors("train_unlabeled")
-        if self.args.proportion_unlabeled_data_from_leftout_subject or self.args.load_unlabeled_data_flexwearhd:
+        if self.args.proportion_unlabeled_data_from_leftout_subject:
             super().convert_to_16_tensors("train_finetuning_unlabeled") 
 
     def finetuning_if_no_proportion(self):
