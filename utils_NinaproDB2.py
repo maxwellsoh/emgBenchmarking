@@ -216,16 +216,19 @@ def getRestim (n: int, exercise: int, unfold=True):
     return restim
 
 def target_normalize (data, target_min, target_max, restim):    
-    source_min = np.zeros(numElectrodes, dtype=np.float32)
+    source_min = np.zeros(numElectrodes, dtype=np.float32) # all gestures, each electrode; bug: should be gesture specific
     source_max = np.zeros(numElectrodes, dtype=np.float32)
 
     resize = min(len(data), len(restim))
     data = data[:resize]
     restim = restim[:resize]
     
+    
     for i in range(numElectrodes):
-        source_min[i] = np.min(data[:, i])
+        source_min[i] = np.min(data[:, i]) # is currently across all data
         source_max[i] = np.max(data[:, i])
+
+    # target is across all gestures, each electrode for the target subject 
 
     data_norm = np.zeros(data.shape, dtype=np.float32)
     for gesture in range(target_min.shape[1]):
@@ -234,6 +237,10 @@ def target_normalize (data, target_min, target_max, restim):
         for i in range(numElectrodes):
             data_norm[:, i] = data_norm[:, i] + (restim[:, 0] == gesture) * (((data[:, i] - source_min[i]) / (source_max[i] 
             - source_min[i])) * (target_max[i][gesture] - target_min[i][gesture]) + target_min[i][gesture])
+
+
+
+
     return data_norm
 
 def getEMG (input):
@@ -413,7 +420,9 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
 
 def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size, index, display_interval=1000):
     # Normalize and convert data to a usable color map
-    data = (data - data.min()) / (data.max() - data.min())
+    # Cannot normalize if all values are the same
+    if not len(np.unique(data)) == 1:
+        data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
     image_data = np.reshape(rgb_data, (length, width, 3))
