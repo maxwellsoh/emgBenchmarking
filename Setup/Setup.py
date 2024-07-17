@@ -18,7 +18,7 @@ class Setup():
         self.exercises = None
         self.project_name = None
         self.formatted_datetime = None
-        import utils_MCS_EMG as utils # default for argparse
+        from Utils import utils_MCS_EMG as utils # default for argparse
         self.utils = utils
 
     class Env():
@@ -28,7 +28,7 @@ class Setup():
 
         def __init__(self):
             self.args = None
-            import utils_MCS_EMG as utils
+            from Utils import utils_MCS_EMG as utils
             self.utils = utils
             self.exercises = None
             self.project_name = None
@@ -47,7 +47,7 @@ class Setup():
             ArgumentParser: argument parser 
         """
         
-        import utils_MCS_EMG as utils
+        from Utils import utils_MCS_EMG as utils
 
         def list_of_ints(arg):
             """Define a custom argument type for a list of integers"""
@@ -165,7 +165,7 @@ class Setup():
             if (not os.path.exists("./uciEMG")):
                 print("uciEMG dataset does not exist yet. Downloading now...")
                 subprocess.run(['sh', './Get_Datasets/get_UCI.sh'])
-            import utils_UCI as utils
+            from Utils import utils_UCI as utils
             self.project_name = 'emg_benchmarking_uci'
             self.args.dataset = "uciemg"
 
@@ -173,7 +173,7 @@ class Setup():
             if (not os.path.exists("./NinaproDB2")):
                 print("NinaproDB2 dataset does not exist yet. Downloading now...")
                 subprocess.run(['sh', './Get_Datasets/get_NinaproDB2.sh'])
-            import utils_NinaproDB2 as utils
+            from Utils import utils_NinaproDB2 as utils
             self.project_name = 'emg_benchmarking_ninapro-db2'
             self.exercises = True
             if self.args.leave_one_session_out:
@@ -187,7 +187,7 @@ class Setup():
                 print("NinaproDB5 dataset does not exist yet. Downloading now...")
                 subprocess.run(['sh', './Get_Datasets/get_NinaproDB5.sh'])
                 subprocess.run(['python', './Get_Datasets/process_NinaproDB5.py'])
-            import utils_NinaproDB5 as utils
+            from Utils import utils_NinaproDB5 as utils
             self.project_name = 'emg_benchmarking_ninapro-db5'
             self.exercises = True
             if self.args.leave_one_session_out:
@@ -200,7 +200,7 @@ class Setup():
                 print("NinaproDB3 dataset does not exist yet. Downloading now...")
                 subprocess.run(['sh', './Get_Datasets/get_NinaproDB3.sh'])
 
-            import utils_NinaproDB3 as utils
+            from Utils import utils_NinaproDB3 as utils
             assert self.args.exercises == [1] or self.args.partial_dataset_ninapro or (self.args.exercises == [3] and self.args.force_regression), "Exercise C cannot be used for classification due to missing data."
             self.project_name = 'emg_benchmarking_ninapro-db3'
             self.exercises = True
@@ -222,7 +222,7 @@ class Setup():
             if (not os.path.exists("./myoarmbanddataset")):
                 print("myoarmbanddataset does not exist yet. Downloading now...")
                 subprocess.run(['sh', './Get_Datasets/get_MyoArmbandDataset.sh'])
-            import utils_MyoArmbandDataset as utils
+            from Utils import utils_MyoArmbandDataset as utils
             self.project_name = 'emg_benchmarking_myoarmbanddataset'
             if self.args.leave_one_session_out:
                 raise ValueError("leave-one-session-out not implemented for myoarmbanddataset; only one session exists")
@@ -232,7 +232,7 @@ class Setup():
             if (not os.path.exists("./hyser")):
                 print("Hyser dataset does not exist yet. Downloading now...")
                 subprocess.run(['sh', './Get_Datasets/get_Hyser.sh'])
-            import utils_Hyser as utils
+            from Utils import utils_Hyser as utils
             self.project_name = 'emg_benchmarking_hyser'
             self.args.dataset = 'hyser'
 
@@ -240,7 +240,7 @@ class Setup():
             if (not os.path.exists("./CapgMyo_B")):
                 print("CapgMyo_B dataset does not exist yet. Downloading now...")
                 subprocess.run(['sh', './Get_Datasets/get_CapgMyo_B.sh'])
-            import utils_CapgMyo as utils
+            from Utils import utils_CapgMyo as utils
             self.project_name = 'emg_benchmarking_capgmyo'
             if self.args.leave_one_session_out:
                 utils.num_subjects = 10
@@ -250,14 +250,14 @@ class Setup():
             if (not os.path.exists("./FlexWear-HD")):
                 print("FlexWear-HD dataset does not exist yet. Downloading now...")
                 subprocess.run(['sh', './Get_Datasets/get_FlexWearHD_Dataset.sh'])
-            import utils_FlexWearHD as utils
+            from Utils import utils_FlexWearHD as utils
             self.project_name = 'emg_benchmarking_flexwear-hd_dataset'
             # if self.args.leave_one_session_out:
                 # raise ValueError("leave-one-session-out not implemented for FlexWear-HDDataset; only one session exists")
             self.args.dataset = 'flexwear-hd'
 
         elif (self.args.dataset.lower() == "sci"):
-            import utils_SCI as utils
+            from Utils import utils_SCI as utils
             self.project_name = 'emg_benchmarking_sci'
             self.args.dataset = 'sci'
             assert not self.args.transfer_learning, "Transfer learning not implemented for SCI dataset"
