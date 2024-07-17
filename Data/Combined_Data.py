@@ -21,6 +21,7 @@ class Combined_Data():
         self.utils = env.utils
         self.leaveOut = env.leaveOut
         self.exercises = env.exercises
+        self.env = env
 
         self.X = x_obj
         self.Y = y_obj
@@ -50,6 +51,8 @@ class Combined_Data():
         self.Y.new_data = []
         self.label.new_data = []
 
+
+
         for subject in range(self.utils.num_subjects):
             
             self.X.subject_trials = []
@@ -60,7 +63,8 @@ class Combined_Data():
             for exercise_set in range(len(self.X.data)):
                 self.append_to_trials(exercise_set, subject)
             
-            self.concat_across_exercises()
+            numGestures = self.concat_across_exercises()
+            self.env.num_gestures  = numGestures # different gesture count for Ninapro
             self.append_to_new_data(self.X.concatenated_trials, self.Y.concatenated_trials, self.label.concatenated_trials)
 
         self.set_new_data()
@@ -268,9 +272,13 @@ class Combined_Data():
         self.label.append_to_trials(exercise_set, subject)
 
     def concat_across_exercises(self):
-        indices_for_partial_dataset = self.label.concat_across_exercises()
+
+        # Labels always needs to go first to provide indices for partial dataset
+        numGestures, indices_for_partial_dataset = self.label.concat_across_exercises()
         self.X.concat_across_exercises(indices_for_partial_dataset)
         self.Y.concat_across_exercises(indices_for_partial_dataset)
+
+        return numGestures
     
     def append_to_new_data(self, X_concatenated_trials, Y_concatenated_trials, label_concatenated_trials):
         self.X.append_to_new_data(X_concatenated_trials)

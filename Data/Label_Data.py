@@ -62,12 +62,13 @@ class Label_Data(Data):
             label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
             concatenated_labels = [label_to_index[label] for label in concatenated_labels]
         
+        numGestures = len(np.unique(concatenated_labels))
 
         # Convert to one hot encoding
         concatenated_labels = np.eye(np.max(concatenated_labels) + 1)[concatenated_labels] # (TRIAL, GESTURE)
 
         self.concatenated_trials = concatenated_labels
 
-        return indices_for_partial_dataset
+        return numGestures, indices_for_partial_dataset
         
 

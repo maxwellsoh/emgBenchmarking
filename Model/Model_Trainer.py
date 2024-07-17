@@ -21,6 +21,8 @@ class Model_Trainer():
         self.Y = Y_data
         self.label = label_data
 
+        self.env = env
+
         self.args = env.args
         self.utils = env.utils
         self.num_gestures = env.num_gestures
