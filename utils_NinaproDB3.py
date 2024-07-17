@@ -434,7 +434,8 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
 
 def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size, index, display_interval=1000):
     # Normalize and convert data to a usable color map
-    data = (data - data.min()) / (data.max() - data.min())
+    if not len(np.unique(data)) == 1:
+        data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
     image_data = np.reshape(rgb_data, (length, width, 3))

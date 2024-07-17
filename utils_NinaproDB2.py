@@ -392,6 +392,7 @@ def getForces(input):
     
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
+   
     data = (data - global_min) / (global_max - global_min)
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
@@ -413,7 +414,10 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
 
 def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size, index, display_interval=1000):
     # Normalize and convert data to a usable color map
-    data = (data - data.min()) / (data.max() - data.min())
+
+    # Can't normalize if all one value
+    if not len(np.unique(data)) == 1:
+        data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
     image_data = np.reshape(rgb_data, (length, width, 3))
