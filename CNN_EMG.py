@@ -7,6 +7,7 @@ from Hook_Manager import Hook_Manager
 
 # Imports for Setup_Run
 from Setup.Parse_Arguments import Parse_Arguments
+from Setup.Parse_Config import Parse_Config
 
 # Imports for Data_Initializer
 from Data.X_Data import X_Data
@@ -34,8 +35,8 @@ class Run_Setup():
     """
    
 
-    def __init__(self):
-        pass
+    def __init__(self, config_args=None):
+        self.config_args = config_args
 
     def set_seeds_for_reproducibility(self, env):
         """ Set seeds for reproducibility. 
@@ -51,8 +52,10 @@ class Run_Setup():
 
     def setup_run(self):
 
-
-        run = Parse_Arguments() # TODO: case if config
+        if self.config_args:
+            run = Parse_Config(self.config_args)
+        else:
+            run = Parse_Arguments() # TODO: case if config
     
         run.set_args()
         run.setup_for_dataset()
@@ -152,10 +155,10 @@ class Run_Model():
         model_trainer.model_loop()
 
 
-def main():
+def main(config_args=None):
 
     hooks = Hook_Manager()
-    run_setup = Run_Setup()
+    run_setup = Run_Setup(config_args)
     hooks.register_hook("setup_run", run_setup.setup_run)
     env = hooks.call_hook("setup_run")
 
@@ -171,6 +174,12 @@ def main():
     hooks.register_hook("run_model", run_model.run_model)
     hooks.call_hook("run_model", X, Y, label)
 
+def use_config(config_args):
+    """
+    Called by run_CNN_EMG if a config file is passed.
+    """
+
+    main(config_args)
 
 if __name__ == "__main__":
     main()
