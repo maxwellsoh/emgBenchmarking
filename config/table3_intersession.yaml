@@ -1,0 +1,5 @@
+starting_index: 1
+ending_index: 10 # set to the maximum number of participants for the dataset
+current_dataset: capgmyo # set to the dataset you want to run with
+preprocessing: "--turn_on_cwt: True" # set to "" for raw, "--turn_on_cwt: True" for cwt, or "--turn_on_spectrogram: True" for stft depending on which preprocessing method was the best for the dataset
+best_model: resnet18 # set to the model that performed best for the dataset
