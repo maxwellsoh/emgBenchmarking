@@ -12,7 +12,7 @@ def list_of_ints(arg):
 def load_config(args, config_path, return_table_args=False): 
     """Load the config file and override the args values with the config values. 
 
-    If a key is used in table_fields value is not update in config but is stored in table_args. This is useful for paramaters that vary over different lines in the same table. 
+    If a key is used in table_fields value is not updated in config but is stored in table_args. This is useful for paramaters that vary over different lines in the same table. 
 
     Args:
         args (argparser): Default argument values
@@ -20,8 +20,8 @@ def load_config(args, config_path, return_table_args=False):
         return_extra (bool, optional): Whether or not to return the extra fields that config has. Useful for table configs. Defaults to False.
 
     Returns:
-        argparser: argparse object with updated values
-        table_args: argparse object with extra fields that config has
+        argparser: argparse object with updated values. values that are assumed to be the default line to line
+        table_args: argparse object with extra fields that config has (ex: start index, dataset)
     """
 
     # Dict of fields that get updated in each line for each table. 
@@ -41,8 +41,10 @@ def load_config(args, config_path, return_table_args=False):
         config['model'] = config['best_model']
 
     for key in config:
-        if key in table_fields[args.table]:
+        # If a table variable, update only the table_args
+        if return_table_args and (key in table_fields[args.table]):
             table_args[key] = config[key]
+        # If just a general variable that is the same across all lines, update "global" args
         else:
             args_dict[key] = config[key]
 
