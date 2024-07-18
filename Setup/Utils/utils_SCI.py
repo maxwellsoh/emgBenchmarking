@@ -15,7 +15,7 @@ import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm.contrib.concurrent import process_map  # Use process_map from tqdm.contrib
 import os
-from poly5_reader import Poly5Reader
+from Setup.Utils.poly5_reader import Poly5Reader
 import mne
 import fcwt
 from scipy.signal import stft
