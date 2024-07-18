@@ -2,7 +2,7 @@
 import argparse
 from .Setup import Setup
 
-class parse_arguments(Setup):
+class Parse_Arguments(Setup):
     
     def __init__(self):
         super().__init__()
