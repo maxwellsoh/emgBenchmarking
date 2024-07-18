@@ -1,5 +1,4 @@
 from .Model_Trainer import Model_Trainer
-from .Classic_Trainer import Classic_Trainer
 import torch
 import torch.nn as nn
 from tqdm import tqdm
@@ -9,7 +8,22 @@ import Model.ml_metrics_utils as ml_utils
 import numpy as np
 import torch.nn.functional as F
 
-class MLP_Trainer(Classic_Trainer):
+class MLP(nn.Module):
+    def __init__(self, input_size, hidden_sizes, output_size):
+        super(MLP, self).__init__()
+        self.hidden_layers = nn.ModuleList()
+        self.hidden_layers.append(nn.Linear(input_size, hidden_sizes[0]))
+        for i in range(1, len(hidden_sizes)):
+            self.hidden_layers.append(nn.Linear(hidden_sizes[i-1], hidden_sizes[i]))
+        self.output_layer = nn.Linear(hidden_sizes[-1], output_size)
+
+    def forward(self, x):
+        for hidden in self.hidden_layers:
+            x = F.relu(hidden(x))
+        x = self.output_layer(x)
+        return x
+
+class MLP_Trainer(Model_Trainer):
 
     def __init__(self, X_data, Y_data, label_data, env):
         super().__init__(X_data, Y_data, label_data, env)
@@ -23,20 +37,28 @@ class MLP_Trainer(Classic_Trainer):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    class MLP(nn.Module):
-        def __init__(self, input_size, hidden_sizes, output_size):
-            super(MLP, self).__init__()
-            self.hidden_layers = nn.ModuleList()
-            self.hidden_layers.append(nn.Linear(input_size, hidden_sizes[0]))
-            for i in range(1, len(hidden_sizes)):
-                self.hidden_layers.append(nn.Linear(hidden_sizes[i-1], hidden_sizes[i]))
-            self.output_layer = nn.Linear(hidden_sizes[-1], output_size)
+    def setup_model(self):
+        assert self.args.model in ['MLP', 'SVC', 'RF'], "Model not supported."
 
-        def forward(self, x):
-            for hidden in self.hidden_layers:
-                x = F.relu(hidden(x))
-            x = self.output_layer(x)
-            return x
+        super().set_pretrain_path()
+        self.set_model()
+        super().set_resize_transform()
+        super().set_loaders()
+        super().clear_memory()
+        super().shared_setup()
+
+    def get_data_from_loader(loader):
+        X = []
+        Y = []
+        for X_batch, Y_batch in tqdm(loader, desc="Batches convert to Numpy"):
+            # Flatten each image from [batch_size, 3, 224, 224] to [batch_size, 3*224*224]
+            # X_batch_flat = X_batch.view(X_batch.size(0), -1).cpu().numpy().astype(np.float64)
+            Y_batch_indices = torch.argmax(Y_batch, dim=1)  # Convert one-hot to class indices
+            X.append(X_batch)
+            Y.append(Y_batch_indices.cpu().numpy().astype(np.int64))
+        return np.vstack(X), np.hstack(Y)
+    
+    
 
     def set_model(self):
 
@@ -44,9 +66,8 @@ class MLP_Trainer(Classic_Trainer):
         input_size = 3 * 224 * 224  # Change according to your input size
         hidden_sizes = [512, 256]  # Example hidden layer sizes
         output_size = self.num_classes  # Number of classes
-        self.model = self.MLP(input_size, hidden_sizes, output_size).to(self.device)
+        self.model = MLP(input_size, hidden_sizes, output_size).to(self.device)
 
-        # TODO: add in own optimizer function (set_optimizer)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
 
 
