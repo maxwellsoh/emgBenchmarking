@@ -144,6 +144,16 @@ class Setup():
            
     
     def setup_for_dataset(self):
+
+
+        def get_dataset(dataset):
+            """
+            Downloads dataset in the root rather than in Setup directory.
+            """
+            setup_dir = os.path.dirname(__file__)
+            script_path = os.path.abspath(os.path.join(setup_dir, f"Get_Datasets/{dataset}.sh"))
+            subprocess.run(['sh', script_path])
+
         """ Conducts safety checks on the self.args, downloads needed datasets, and imports the correct self.utils file. """
         
         self.exercises = False
@@ -164,7 +174,7 @@ class Setup():
         if (self.args.dataset in {"uciemg", "uci"}):
             if (not os.path.exists("./uciEMG")):
                 print("uciEMG dataset does not exist yet. Downloading now...")
-                subprocess.run(['sh', './Get_Datasets/get_UCI.sh'])
+                get_dataset("get_UCI")
             from .Utils import utils_UCI as utils
             self.project_name = 'emg_benchmarking_uci'
             self.args.dataset = "uciemg"
@@ -172,7 +182,7 @@ class Setup():
         elif (self.args.dataset in {"ninapro-db2", "ninapro_db2"}):
             if (not os.path.exists("./NinaproDB2")):
                 print("NinaproDB2 dataset does not exist yet. Downloading now...")
-                subprocess.run(['sh', './Get_Datasets/get_NinaproDB2.sh'])
+                get_dataset("get_NinaproDB2")
             from .Utils import utils_NinaproDB2 as utils
             self.project_name = 'emg_benchmarking_ninapro-db2'
             self.exercises = True
@@ -185,8 +195,8 @@ class Setup():
         elif (self.args.dataset in { "ninapro-db5", "ninapro_db5"}):
             if (not os.path.exists("./NinaproDB5")):
                 print("NinaproDB5 dataset does not exist yet. Downloading now...")
-                subprocess.run(['sh', './Get_Datasets/get_NinaproDB5.sh'])
-                subprocess.run(['python', './Get_Datasets/process_NinaproDB5.py']) # this actualldy doesn't work 
+                get_dataset("get_NinaproDB5")
+                get_dataset("process_NinaproDB5")
             from .Utils import utils_NinaproDB5 as utils
             self.project_name = 'emg_benchmarking_ninapro-db5'
             self.exercises = True
@@ -198,7 +208,7 @@ class Setup():
 
             if (not os.path.exists("./NinaproDB3")):
                 print("NinaproDB3 dataset does not exist yet. Downloading now...")
-                subprocess.run(['sh', './Get_Datasets/get_NinaproDB3.sh'])
+                get_dataset("get_NinaproDB3")
 
             from .Utils import utils_NinaproDB3 as utils
             assert self.args.exercises == [1] or self.args.partial_dataset_ninapro or (self.args.exercises == [3] and self.args.force_regression), "Exercise C cannot be used for classification due to missing data."
@@ -220,8 +230,8 @@ class Setup():
 
         elif (self.args.dataset.lower() == "myoarmbanddataset"):
             if (not os.path.exists("./myoarmbanddataset")):
-                print("myoarmbanddataset does not exist yet. Downloading now...")
-                subprocess.run(['sh', './Get_Datasets/get_MyoArmbandDataset.sh'])
+                print("MyoArmbandDataset does not exist yet. Downloading now...")
+                get_dataset("get_MyoArmbandDataset")
             from .Utils import utils_MyoArmbandDataset as utils
             self.project_name = 'emg_benchmarking_myoarmbanddataset'
             if self.args.leave_one_session_out:
@@ -231,7 +241,7 @@ class Setup():
         elif (self.args.dataset.lower() == "hyser"):
             if (not os.path.exists("./hyser")):
                 print("Hyser dataset does not exist yet. Downloading now...")
-                subprocess.run(['sh', './Get_Datasets/get_Hyser.sh'])
+                get_dataset("get_Hyser")
             from .Utils import utils_Hyser as utils
             self.project_name = 'emg_benchmarking_hyser'
             self.args.dataset = 'hyser'
@@ -239,7 +249,7 @@ class Setup():
         elif (self.args.dataset.lower() == "capgmyo"):
             if (not os.path.exists("./CapgMyo_B")):
                 print("CapgMyo_B dataset does not exist yet. Downloading now...")
-                subprocess.run(['sh', './Get_Datasets/get_CapgMyo_B.sh'])
+                get_dataset("get_CapgMyo_B")
             from .Utils import utils_CapgMyo as utils
             self.project_name = 'emg_benchmarking_capgmyo'
             if self.args.leave_one_session_out:
@@ -249,7 +259,7 @@ class Setup():
         elif (self.args.dataset.lower() == "flexwear-hd"):
             if (not os.path.exists("./FlexWear-HD")):
                 print("FlexWear-HD dataset does not exist yet. Downloading now...")
-                subprocess.run(['sh', './Get_Datasets/get_FlexWearHD_Dataset.sh'])
+                get_dataset("get_FlexWearHD")
             from .Utils import utils_FlexWearHD as utils
             self.project_name = 'emg_benchmarking_flexwear-hd_dataset'
             # if self.args.leave_one_session_out:
@@ -266,9 +276,9 @@ class Setup():
         elif (self.args.dataset.lower() == "mcs"):
             if (not os.path.exists("./MCS_EMG")):
                 print("MCS dataset does not exist yet. Downloading now...")
-                subprocess.run(['sh', './Get_Datasets/get_MCS_EMG.sh'])
-                subprocess.run(['python', './Get_Datasets/process_MCS.py'])
-
+                get_dataset("get_MCS_EMG")
+                get_dataset("process_MCS")
+           
             self.project_name = 'emg_benchmarking_mcs'
             if self.args.full_dataset_mcs:
                 print(f"Using the full dataset for MCS EMG")

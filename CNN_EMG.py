@@ -10,7 +10,6 @@ import multiprocessing
 from tqdm import tqdm
 import argparse
 import random 
-import utils_MCS_EMG as utils
 from sklearn.model_selection import StratifiedKFold
 import os
 
