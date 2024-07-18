@@ -59,3 +59,5 @@ class SVC_RF_Trainer(Classic_Trainer):
             # "Test Acc": test_acc
         })
 
+        self.train_and_validate_run.finish()
+

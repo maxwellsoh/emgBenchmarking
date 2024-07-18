@@ -354,4 +354,6 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         if self.args.pretrain_and_finetune:
             self.pretrain_and_finetune_model()
 
+        self.train_and_validate_run()   
+
     

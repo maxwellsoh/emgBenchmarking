@@ -145,7 +145,6 @@ class Setup():
     
     def setup_for_dataset(self):
 
-
         def get_dataset(dataset):
             """
             Downloads dataset in the root rather than in Setup directory.
@@ -293,8 +292,7 @@ class Setup():
             self.args.dataset = 'mcs'
             
         else: 
-            raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," +
-                            "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
+            raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," + "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
             
         # Safety Checks
         if self.args.turn_off_scaler_normalization:

@@ -234,3 +234,6 @@ class MLP_Trainer(Classic_Trainer):
             
         torch.save(self.model.state_dict(), self.model_filename)
         wandb.save(f'model/modelParameters_{self.formatted_datetime}.pth')
+
+        self.train_and_validate_run.finish()
+    
