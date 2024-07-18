@@ -58,6 +58,12 @@ $ conda activate emgbench
 CNN_EMG.py will automatically download the necessary datasets for each run. Note that the Hyser dataset can take hours to download. 
 
 ## Replicating Tables
+
+### Using Config Files
+Configure dataset (either capgmyo, hyser, myoarmbanddataset, ninapro-db5, uciemg, flexwear-hd) and other parameters for each table using YAML files located in ./config/table{i}.yaml. Once configured, run:
+```
+python run_CNN_EMG.py --table{i}
+```
 To replicate the first table, run the following shell script for each of the 6 datasets (capgmyo, hyser, myoarmbanddataset, ninapro-db5, uciemg, flexwear-hd). The parameters that will need to be changed across runs are at the top
 ```
 starting_index=1
