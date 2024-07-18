@@ -7,7 +7,7 @@ import torch
 import multiprocessing
 from semilearn.core.utils import send_model_cuda
 import wandb
-import ml_metrics_utils as ml_utils
+import Model.ml_metrics_utils as ml_utils
 from torch.utils.data import DataLoader
 
 class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
