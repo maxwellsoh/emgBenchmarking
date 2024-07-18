@@ -64,6 +64,8 @@ Configure dataset (either capgmyo, hyser, myoarmbanddataset, ninapro-db5, uciemg
 ```
 python run_CNN_EMG.py --table{i}
 ```
+
+### Running Manually
 To replicate the first table, run the following shell script for each of the 6 datasets (capgmyo, hyser, myoarmbanddataset, ninapro-db5, uciemg, flexwear-hd). The parameters that will need to be changed across runs are at the top
 ```
 starting_index=1
