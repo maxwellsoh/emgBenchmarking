@@ -199,6 +199,10 @@ elif (args.dataset.lower() == "ninapro-db5" or args.dataset.lower() == "ninapro_
     args.dataset = 'ninapro-db5'
 
 elif (args.dataset.lower() == "ninapro-db3" or args.dataset.lower() == "ninapro_db3"):
+    if not os.path.exists("./NinaproDB3"):
+        print("NinaproDB3 dataset does not exist yet. Downloading now...")
+        subprocess.run(['python', './get_datasets.py', '--NinaproDB3'])
+
     import utils_NinaproDB3 as utils
     assert args.exercises == [1] or args.partial_dataset_ninapro or (args.exercises == [3] and args.force_regression), "Exercise C cannot be used for classification due to missing data."
     print(f"The dataset being tested is ninapro-db3")
