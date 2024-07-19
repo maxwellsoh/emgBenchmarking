@@ -32,7 +32,23 @@ class CNN_Trainer(Model_Trainer):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-        
+    def setup_model(self):
+        """
+        Main function that sets up the model 
+        """
+        super().set_pretrain_path()
+        self.set_model()
+        self.set_optimizer()
+        self.set_param_requires_grad()
+        super().set_resize_transform()
+        super().set_loaders()
+        super().set_criterion()
+        super().start_train_and_validate_run()
+        super().set_model_to_device()
+        super().set_testrun_foldername()
+        super().set_gesture_labels()
+        super().plot_images()
+
 
     def set_model(self):
 
@@ -120,16 +136,7 @@ class CNN_Trainer(Model_Trainer):
     def set_optimizer(self):
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
 
-    def setup_model(self):
-        super().set_pretrain_path()
-        self.set_model()
-        self.set_param_requires_grad()  
-        super().set_resize_transform()
-        super().set_loaders()
-        self.set_optimizer()
-        super().clear_memory()
-
-        super().shared_setup()
+    
 
     def print_classification_metrics(self):
         """

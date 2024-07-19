@@ -55,7 +55,7 @@ class Run_Setup():
         if self.config_args:
             run = Parse_Config(self.config_args)
         else:
-            run = Parse_Arguments() # TODO: case if config
+            run = Parse_Arguments() 
     
         run.set_args()
         run.setup_for_dataset()

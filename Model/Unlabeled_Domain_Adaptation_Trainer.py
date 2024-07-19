@@ -31,6 +31,17 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         self.proportion_unlabeled_of_training_subjects = self.args.proportion_unlabeled_data_from_training_subjects
         self.proportion_unlabeled_of_proportion_to_keep_of_leftout = self.args.proportion_unlabeled_data_from_leftout_subject
 
+
+    def setup_model(self):
+
+        super().set_pretrain_path()
+        self.set_loaders()
+        super().shared_setup()
+        super().start_train_and_validate_run()
+        super().set_testrun_foldername()
+        super().set_gesture_labels()
+        super().plot_images()
+
         
     def set_semilearn_config(self):
 
@@ -92,9 +103,12 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         self.semilearn_config = self.semilearn_config
 
     def create_datasets(self):
+        """
+        Helper for set loaders
+        """
 
 
-        labeled_dataset, unlabeled_dataset, finetune_dataset, validation_dataset = None, None, None, None
+        labeled_dataset, unlabeled_dataset, finetune_dataset, finetune_unlabeled_dataset, validation_dataset = None, None, None, None
         
         if self.args.model == 'vit_tiny_patch2_32':
             semilearn_transform = transforms.Compose([transforms.Resize((32,32)), self.ToNumpy()])
@@ -125,7 +139,6 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
             )
 
         elif self.proportion_unlabeled_of_proportion_to_keep_of_leftout>0:
-            
             unlabeled_dataset = BasicDataset(
                 self.semilearn_config,
                 self.X.train_finetuning_unlabeled,
@@ -146,7 +159,7 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
                 is_ulb=False
             )
 
-            self.finetune_unlabeled_dataset = BasicDataset(
+            finetune_unlabeled_dataset = BasicDataset(
                 self.semilearn_config, 
                 self.X.train_finetuning_unlabeled, 
                 torch.argmax(self.Y.train_finetuning_unlabeled, dim=1), 
@@ -168,9 +181,12 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         test_dataset = self.CustomDataset(self.X.test, self.Y.test, transform=semilearn_transform)
 
 
-        return labeled_dataset, unlabeled_dataset, finetune_dataset, validation_dataset, test_dataset
+        return labeled_dataset, unlabeled_dataset, finetune_dataset, finetune_unlabeled_dataset, validation_dataset, test_dataset
 
     def calculate_batch_size(self, unlabeled_dataset, labeled_dataset, is_finetuning=False):
+        """
+        Helper for set_loaders(). 
+        """
     
         if is_finetuning:
 
@@ -217,6 +233,7 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         self.set_semilearn_config()
 
         labeled_dataset, unlabeled_dataset, finetune_dataset, validation_dataset, test_dataset = self.create_datasets()
+
         labeled_batch_size, unlabeled_batch_size, self.iters_for_loader = self.calculate_batch_size(unlabeled_dataset, labeled_dataset)
         
         self.train_labeled_loader = get_data_loader(
@@ -249,7 +266,6 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         print("Batches per epoch:", self.semilearn_config.num_eval_iter)
             
         if self.args.pretrain_and_finetune:
-            # NOTE i think this is wrong call 
             labeled_batch_size, unlabeled_batch_size, self.iters_for_loader = self.calculate_batch_size(self.finetune_unlabeled_dataset, labeled_dataset, is_finetuning=True)
             
             self.train_finetuning_loader = get_data_loader(
@@ -285,12 +301,7 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
             pin_memory=True
         )
 
-    def setup_model(self):
-
-        super().set_pretrain_path()
-        self.set_loaders()
-        super().shared_setup()
-        
+    
 
     def pretrain_model(self):
         print("Pretraining the model...")
