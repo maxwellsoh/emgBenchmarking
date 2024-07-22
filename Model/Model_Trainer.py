@@ -42,9 +42,6 @@ class Model_Trainer():
         if hasattr(self.X, 'leaveOutIndices'):
             self.leaveOutIndices = self.X.leaveOutIndices
 
-        self.set_device() 
-        self.set_num_classes()
-
         self.pretrain_path = None
         self.criterion = None
         self.num_epochs = self.args.epochs
@@ -53,6 +50,7 @@ class Model_Trainer():
         self.testrun_foldername = None
         self.model_filename = None
         self.gesture_labels = None
+        self.num_classes = None
 
         # Defined in either CNN_Trainer, Classic_Trainer
         if not self.args.turn_on_unlabeled_domain_adaptation:
@@ -444,19 +442,23 @@ class Model_Trainer():
 
     def set_num_classes(self):
         if self.args.force_regression:
-            self.num_classes = self.Y.train.shape[1]
+            num_classes = self.Y.train.shape[1]
             # assert num_classes == 6
         else: 
-            self.num_classes = self.num_gestures
+            num_classes = self.num_gestures
+
+        self.num_classes = num_classes
 
     def shared_setup(self):
         # set up function calls shared for all models 
 
         self.set_wandb_runname()
         self.initialize_wandb()
+        self.set_device()
         self.set_testrun_folder()
         self.set_gesture_labels()
         self.plot_images()
+        self.set_num_classes()
         self.set_criterion()
 
     def model_loop(self):

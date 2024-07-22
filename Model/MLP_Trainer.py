@@ -51,6 +51,7 @@ class MLP_Trainer(Model_Trainer):
         self.set_model()
         self.set_optimizer() # Only for MLP not SV/RF
 
+
     def get_data_from_loader(loader):
         X = []
         Y = []
@@ -62,6 +63,7 @@ class MLP_Trainer(Model_Trainer):
             Y.append(Y_batch_indices.cpu().numpy().astype(np.int64))
         return np.vstack(X), np.hstack(Y)
     
+    
     def set_model(self):
 
         # PyTorch MLP model
@@ -69,7 +71,7 @@ class MLP_Trainer(Model_Trainer):
         hidden_sizes = [512, 256]  # Example hidden layer sizes
         output_size = self.num_classes  # Number of classes
         self.model = MLP(input_size, hidden_sizes, output_size).to(self.device)
-
+        
     def set_optimizer(self):
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
 

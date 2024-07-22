@@ -350,8 +350,6 @@ class Setup():
             env.num_gestures = self.utils.numGestures
         else:
             env.num_gestures = None 
-
-        env.num_classes = None
         env.seed = self.args.seed
 
         return env

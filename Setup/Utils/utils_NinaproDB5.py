@@ -393,9 +393,7 @@ def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, n
 def optimized_makeOneImage(data, cmap, length, width, resize_length_factor, native_resnet_size):
     # Contrast normalize and convert data
     # NOTE: Should this be contrast normalized? Then only patterns of data will be visible, not absolute values
-    #  Can't normalize if all one value
-    if not len(np.unique(data)) == 1:
-        data = (data - data.min()) / (data.max() - data.min())
+    data = (data - data.min()) / (data.max() - data.min())
     data_converted = cmap(data)
     rgb_data = data_converted[:, :3]
     image_data = np.reshape(rgb_data, (numElectrodes, width, 3))
