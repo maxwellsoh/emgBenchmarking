@@ -273,6 +273,8 @@ class Setup():
             assert not self.args.leave_one_subject_out, "Leave one subject out not implemented for SCI dataset"
 
         elif (self.args.dataset.lower() == "mcs"):
+
+            from .Utils import utils_MCS_EMG as utils
             if (not os.path.exists("./MCS_EMG")):
                 print("MCS dataset does not exist yet. Downloading now...")
                 get_dataset("get_MCS_EMG")

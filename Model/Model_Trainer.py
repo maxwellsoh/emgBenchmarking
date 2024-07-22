@@ -85,6 +85,11 @@ class Model_Trainer():
 
         self.wandb_runname = None
 
+        self.device = torch.device("cuda:" + str(self.args.gpu) if torch.cuda.is_available() else "cpu")
+        print("Device:", self.device)
+
+        self.set_num_classes()
+
     class CustomDataset(Dataset):
         def __init__(self, X, Y, transform=None):
             self.X = X
@@ -344,19 +349,22 @@ class Model_Trainer():
         self.project_name += self.args.project_name_suffix
 
 
-    def initialize_wandb(self):
+    def start_train_and_validate_run(self):
+
+        self.clear_memory()
+        self.set_wandb_runname()
+        self.set_project_name()
 
         self.train_and_validate_run = wandb.init(name=self.wandb_runname, project=self.project_name)
         wandb.config.lr = self.args.learning_rate
     
-    def set_device(self):
-        self.device = torch.device("cuda:" + str(self.args.gpu) if torch.cuda.is_available() else "cpu")
-        print("Device:", self.device)
+    def set_model_to_device(self):
+        
         if not self.args.turn_on_unlabeled_domain_adaptation and self.args.model not in ['MLP', 'SVC', 'RF']:
             self.model.to(self.device)
             wandb.watch(self.model)
 
-    def set_testrun_folder(self):
+    def set_testrun_foldername(self):
         self.testrun_foldername = f'test/{self.project_name}/{self.wandb_runname}/{self.formatted_datetime}/'
         # Make folder if it doesn't exist
         if not os.path.exists(self.testrun_foldername):

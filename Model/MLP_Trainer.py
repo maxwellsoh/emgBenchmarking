@@ -41,11 +41,15 @@ class MLP_Trainer(Model_Trainer):
         assert self.args.model in ['MLP', 'SVC', 'RF'], "Model not supported."
 
         super().set_pretrain_path()
-        self.set_model()
         super().set_resize_transform()
         super().set_loaders()
-        super().clear_memory()
-        super().shared_setup()
+        super().set_criterion()
+        super().start_train_and_validate_run()
+        super().set_gesture_labels()
+        super().set_testrun_foldername()
+        super().plot_images()
+        self.set_model()
+        self.set_optimizer() # Only for MLP not SV/RF
 
     def get_data_from_loader(loader):
         X = []
@@ -58,8 +62,6 @@ class MLP_Trainer(Model_Trainer):
             Y.append(Y_batch_indices.cpu().numpy().astype(np.int64))
         return np.vstack(X), np.hstack(Y)
     
-    
-
     def set_model(self):
 
         # PyTorch MLP model
@@ -68,8 +70,8 @@ class MLP_Trainer(Model_Trainer):
         output_size = self.num_classes  # Number of classes
         self.model = MLP(input_size, hidden_sizes, output_size).to(self.device)
 
+    def set_optimizer(self):
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
-
 
     def model_loop(self):
 
