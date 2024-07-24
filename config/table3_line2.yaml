@@ -1,0 +1,17 @@
+dataset: $current_dataset 
+seed: 0 
+model: $best_model  
+epochs: 50 
+project_name_suffix: __proportion-comparison 
+turn_off_scaler_normalization: True 
+leftout_subject: $subj 
+leave_one_subject_out: True 
+transfer_learning: True 
+train_test_split_for_time_series: True 
+save_images: True 
+learning_rate: 5.0e-4 
+proportion_transfer_learning_from_leftout_subject: 0.4 
+proportion_data_from_training_subjects: 1.0 
+finetuning_epochs: 375 
+pretrain_and_finetune: True 
+partial_dataset_ninapro: True
