@@ -148,6 +148,8 @@ run_CNN_EMG.py also takes in config files. Create a new yaml file with your argu
 python run_CNN_EMG.py --config config/example.yaml
 ```
 
+For example, by setting `model` to the name of a machine learning model that is supported by `timm` (Pytorch Image Models), you can train using that model instead. 
+
 # Troubleshooting
 If you run into an error, `OSError: [Errno 24] Too many open files`
 Run the command 
