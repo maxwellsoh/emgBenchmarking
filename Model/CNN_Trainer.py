@@ -189,7 +189,7 @@ class CNN_Trainer(Model_Trainer):
         torch.cuda.empty_cache()  # Clear cache if needed
 
         self.model.eval()
-        self.train_loader_unshuffled = DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True)
+        self.train_loader_unshuffled = DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True, drop_last=True)
         
         # Train Metrics
         with torch.no_grad():
@@ -221,7 +221,7 @@ class CNN_Trainer(Model_Trainer):
         self.ft_run = wandb.init(name=self.wandb_runname+"_finetune", project=self.project_name) 
         ft_epochs = self.args.finetuning_epochs
         finetune_dataset = super().CustomDataset(self.X.train_finetuning,self.Y.train_finetuning, transform=self.resize_transform)
-        finetune_loader = DataLoader(finetune_dataset, batch_size=self.batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True)
+        finetune_loader = DataLoader(finetune_dataset, batch_size=self.batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True, drop_last=True)
 
         # Initialize metrics for finetuning training and validation
         ft_training_metrics, ft_validation_metrics, testing_metrics = super().get_metrics()
@@ -230,6 +230,7 @@ class CNN_Trainer(Model_Trainer):
         for epoch in tqdm(range(ft_epochs), desc="Finetuning Epoch"):
             self.model.train()
             train_loss = 0.0
+            
 
             for ft_train_metric in ft_training_metrics:
                 ft_train_metric.reset()
