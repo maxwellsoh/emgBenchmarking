@@ -245,7 +245,8 @@ class Model_Trainer():
                 shuffle=True, 
                 num_workers=multiprocessing.cpu_count() // 8, 
                 worker_init_fn=self.utils.seed_worker, 
-                pin_memory=True
+                pin_memory=True,
+                drop_last=True
             )
             
             
@@ -254,7 +255,8 @@ class Model_Trainer():
                 batch_size=self.batch_size, 
                 num_workers=multiprocessing.cpu_count() // 8, 
                 worker_init_fn=self.utils.seed_worker, 
-                pin_memory=True
+                pin_memory=True, 
+                drop_last=True
             )
 
             self.test_loader = DataLoader(
@@ -262,7 +264,8 @@ class Model_Trainer():
                 batch_size=self.batch_size, 
                 num_workers=multiprocessing.cpu_count() // 8, 
                 worker_init_fn=self.utils.seed_worker, 
-                pin_memory=True
+                pin_memory=True, 
+                drop_last=True
             )
 
     def set_criterion(self):
