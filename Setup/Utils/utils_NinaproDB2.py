@@ -136,15 +136,14 @@ def balance(restimulus):
 
     Args:
         restimulus (tensor): restimulus tensor
-
     """
     numZero = 0
     indices = []
     count_dict = {}
     
     # First pass: count the occurrences of each unique tensor
-    for x in range(len(restimulus)):
-        unique_elements = torch.unique(restimulus[x])
+    for x in range(len(restimulus)): # for every window
+        unique_elements = torch.unique(restimulus[x]) # count the number of gestures in that window
         if len(unique_elements) == 1:
             element = unique_elements.item()
             if element in count_dict:
@@ -172,8 +171,10 @@ def balance(restimulus):
                 
     return indices
 
-def contract(restim, unfold=True):
+def contract(restim):
     """Converts restimulus tensor to one-hot encoded tensor.
+    
+    Returns labels which has one gesture per window. If a window has multiple gestures, the last gesture is chosen to allow for learning transitions. 
 
     Args:
         restim (tensor): restimulus data tensor
@@ -185,12 +186,16 @@ def contract(restim, unfold=True):
     numGestures = restim.max() + 1 # + 1 to account for rest gesture
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(restim), numGestures))
-    if unfold:
-        for x in range(len(restim)):
+
+    for x in range(len(restim)):
+        unique_gestures = torch.unique(restim[x][0])
+        if len(unique_gestures) == 1: 
+            # Pure window (only one gesture)
             labels[x][int(restim[x][0][0])] = 1.0
-    else:
-        for x in range(len(restim)):
-            labels[x][int(restim[x][0])] = 1.0
+        else:
+            # Mixed window (multiple gesture), count as last gesture to help in identifying transitions
+            labels[x][int(restim[x][0][-1])] = 1.0
+   
     return labels
 
 def filter(emg):
@@ -209,10 +214,17 @@ def getRestim (n: int, exercise: int, unfold=True):
         exercise (int): exercise. 
         unfold (bool, optional): whether or not to unfold data across time steps. Defaults to True.
     """
-    restim = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['restimulus'])
+    restim = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['restimulus']) # (TIME STEPS, GESTURE)
 
     if unfold:
-        return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+        return restim.unfold(dimension=0, size=wLenTimesteps, step=stepLen) # (WINDOWS, GESTURE, TIME STEP WITHIN THAT WINDOW)
+
+
+        # So now we have all data for an exercise windowed everyhings labeled
+
+
+
+
     return restim
 
 def target_normalize (data, target_min, target_max, restim):    
@@ -306,7 +318,7 @@ def make_gestures_sequential(balanced_restim, args):
     exercise_starts = {1: 1, 2: 18, 3: 41}
     decrements = get_decrements(args)
     for x in range(len(balanced_restim)): 
-        value = balanced_restim[x][0][0] # TODO: break here and check why its [x][0][0]
+        value = balanced_restim[x][0][0] 
 
         if value != 0:
             exercise = (max(ex for ex in exercise_starts if exercise_starts[ex] <= value))-1
@@ -329,7 +341,7 @@ def getLabels (input):
     """
 
     n, exercise, args = input
-    restim = getRestim(n, exercise)             
+    restim = getRestim(n, exercise)             # Window all gestures collected            
     balanced_restim = restim[balance(restim)]   # (WINDOW, GESTURE, TIME STEP) 
     ordered_restim = make_gestures_sequential(balanced_restim, args) 
     return contract(ordered_restim)
