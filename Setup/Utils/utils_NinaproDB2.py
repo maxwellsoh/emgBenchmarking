@@ -171,7 +171,7 @@ def balance(restimulus):
                 
     return indices
 
-def contract(restim, exercise_list):
+def contract(restim, args):
     """Converts restimulus tensor to one-hot encoded tensor.
     
     Returns labels which has one gesture per window. If a window has multiple gestures, the last gesture is chosen to allow for learning transitions. 
@@ -189,14 +189,19 @@ def contract(restim, exercise_list):
 
     for x in range(len(restim)):
         unique_gestures = torch.unique(restim[x][0])
-        if len(unique_gestures) == 1: 
-            # Pure window (only one gesture)
+
+        if args.include_transitions: 
+            if len(unique_gestures) == 1: 
+                # Pure window (only one gesture)
+                gesture = restim[x][0][0]
+            else:
+                # Mixed window (multiple gesture), count as last gesture to help in identifying transitions
+                gesture = restim[x][0][-1]
+        else: 
             gesture = restim[x][0][0]
-        else:
-            # Mixed window (multiple gesture), count as last gesture to help in identifying transitions
-            gesture = restim[x][0][-1]
-        # Make the gesture sequential
-        gesture = make_gestures_sequential(gesture=gesture, exercise_list=exercise_list)
+       
+        # Eliminate gaps in gesture labels
+        gesture = make_gestures_sequential(gesture=gesture, exercise_list=args.exercises)
         labels[x][gesture] = 1.0
    
     return labels
@@ -337,7 +342,7 @@ def getLabels (input):
     n, exercise, args = input
     restim = getRestim(n, exercise) # (WINDOW, GESTURE, TIME STEP), has mixed gestures per time step 
     balanced_restim = restim[balance(restim)]  # get rid of excess rest windows 
-    return contract(balanced_restim, args.exercises)
+    return contract(balanced_restim, args) # one gesture per time step, one hot encoded
 
    
 
