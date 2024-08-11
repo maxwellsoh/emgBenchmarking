@@ -246,7 +246,7 @@ class Model_Trainer():
                 num_workers=multiprocessing.cpu_count() // 8, 
                 worker_init_fn=self.utils.seed_worker, 
                 pin_memory=True,
-                drop_last=True
+                drop_last=self.args.force_regression
             )
             
             
@@ -256,7 +256,7 @@ class Model_Trainer():
                 num_workers=multiprocessing.cpu_count() // 8, 
                 worker_init_fn=self.utils.seed_worker, 
                 pin_memory=True, 
-                drop_last=True
+                drop_last=self.args.force_regression
             )
 
             self.test_loader = DataLoader(
@@ -265,7 +265,7 @@ class Model_Trainer():
                 num_workers=multiprocessing.cpu_count() // 8, 
                 worker_init_fn=self.utils.seed_worker, 
                 pin_memory=True, 
-                drop_last=True
+                drop_last=self.args.force_regression
             )
 
     def set_criterion(self):
