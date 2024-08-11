@@ -105,16 +105,16 @@ class CustomDataset(Dataset):
         
         return x, y
     
-def getPartialEMG (args):
-    n, exercise = args
+def getPartialEMG (inputs):
+    n, exercise, args = inputs
     restim = getRestim(n, exercise)
     emg = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['emg']).to(torch.float16)
-    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim, args)])
 
-def getPartialLabels (args):
-    n, exercise = args
+def getPartialLabels (inputs):
+    n, exercise, args = inputs
     restim = getRestim(n, exercise)
-    return contract(restim[balance(restim)], list(exercise))
+    return contract(restim[balance(restim, args)], args)
         
 def str2bool(v):
     if isinstance(v, bool):
@@ -131,11 +131,12 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance(restimulus):
+def balance(restimulus, args):
     """ Balances distribution of restimulus by minimizing zero (rest) gestures.
 
     Args:
         restimulus (tensor): restimulus tensor
+        args: argument parser object
     """
     numZero = 0
     indices = []
@@ -146,10 +147,19 @@ def balance(restimulus):
         unique_elements = torch.unique(restimulus[x]) # count the number of gestures in that window
         if len(unique_elements) == 1:
             element = unique_elements.item()
+            element = (element,)
+
             if element in count_dict:
                 count_dict[element] += 1
             else:
                 count_dict[element] = 1
+
+        else:
+            if args.include_transitions:
+                # Consider transitions as well 
+                elements = (restimulus[x][0][0].item(), restimulus[x][0][-1].item())
+
+                
     
     # Calculate average count of non-zero elements
     non_zero_counts = [count for key, count in count_dict.items() if key != 0]
@@ -167,6 +177,9 @@ def balance(restimulus):
                     indices.append(x)
                 numZero += 1
             else:
+                indices.append(x)
+        else:
+            if args.include_transitions:
                 indices.append(x)
                 
     return indices
@@ -196,12 +209,19 @@ def contract(restim, args):
                 gesture = restim[x][0][0]
             else:
                 # Mixed window (multiple gesture), count as last gesture to help in identifying transitions
+                # print("Mixed window found", restim[x][0])
                 gesture = restim[x][0][-1]
         else: 
             gesture = restim[x][0][0]
        
         # Eliminate gaps in gesture labels
+        original = gesture.item()
         gesture = make_gestures_sequential(gesture=gesture, exercise_list=args.exercises)
+        after = gesture.item()
+
+        print(f"Original: {original}, After: {after}")
+   
+
         labels[x][gesture] = 1.0
    
     return labels
@@ -288,7 +308,7 @@ def getEMG (input):
     
     restim = getRestim(n, exercise, unfold=True)
     emg = torch.from_numpy(emg).to(torch.float16)
-    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)]) # (WINDOWS, ELECTRODE, TIME STEP)
+    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim, args)]) # (WINDOWS, ELECTRODE, TIME STEP)
 
 def get_decrements(exercise_list):
     """
@@ -339,9 +359,12 @@ def getLabels (input):
         (TIME STEP, GESTURE): one-hot-encoded labels for participant n and exercise exercise
     """
 
+    # problem: balance only keeps the ones that are consistent throughout the window
+
     n, exercise, args = input
     restim = getRestim(n, exercise) # (WINDOW, GESTURE, TIME STEP), has mixed gestures per time step 
-    balanced_restim = restim[balance(restim)]  # get rid of excess rest windows 
+
+    balanced_restim = restim[balance(restim, args)]  # get rid of excess rest windows 
     return contract(balanced_restim, args) # one gesture per time step, one hot encoded
 
    
@@ -404,12 +427,12 @@ def getForces(input):
     Returns:
         _type_: _description_
     """
-    n, exercise = input
+    n, exercise, args = input
     assert exercise == 3, "Only exercise 3 has force data."
     force = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['force'])
     force = force.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
     restim = getRestim(n,exercise)
-    return force[balance(restim)]
+    return force[balance(restim, args)]
     
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
