@@ -167,7 +167,7 @@ def balance(restimulus, args):
  
     
     # Calculate average count of non-zero elements
-    non_zero_counts = [count for key, count in count_dict.items() if key != 0]
+    non_zero_counts = [count for key, count in count_dict.items() if key != (0,)]
     if non_zero_counts:
         avg_count = sum(non_zero_counts) / len(non_zero_counts)
     else:

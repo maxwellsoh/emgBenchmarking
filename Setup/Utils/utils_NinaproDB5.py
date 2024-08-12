@@ -116,7 +116,7 @@ def balance(restimulus, args):
         unique_elements = torch.unique(restimulus[x])
         if len(unique_elements) == 1:
             element = unique_elements.item()
-            element = (element, )
+            element = (element,)
             if element in count_dict:
                 count_dict[element] += 1
             else:
@@ -132,7 +132,7 @@ def balance(restimulus, args):
                     count_dict[elements] = 1
                 
     # Calculate average count of non-zero elements
-    non_zero_counts = [count for key, count in count_dict.items() if key != 0]
+    non_zero_counts = [count for key, count in count_dict.items() if key != (0,)]
     if non_zero_counts:
         avg_count = sum(non_zero_counts) / len(non_zero_counts)
     else:
