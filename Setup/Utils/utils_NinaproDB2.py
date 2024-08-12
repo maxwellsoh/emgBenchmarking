@@ -114,7 +114,7 @@ def getPartialEMG (args):
 def getPartialLabels (inputs):
     n, exercise, args = inputs
     restim = getRestim(n, exercise)
-    return contract(restim=restim[balance(restim)], args=args)
+    return contract(restim=restim[balance(restimulus=restim, args=args)], args=args)
         
 def str2bool(v):
     if isinstance(v, bool):
@@ -131,7 +131,7 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance(restimulus):
+def balance(restimulus, args):
     """ Balances distribution of restimulus by minimizing zero (rest) gestures.
 
     Args:
@@ -147,10 +147,13 @@ def balance(restimulus):
         unique_elements = torch.unique(restimulus[x])
         if len(unique_elements) == 1:
             element = unique_elements.item()
+            # element = (element,) # apparently doing this totally changes the shape of Y? it really shouldn't since they're both based off the same restimulus tensor 
             if element in count_dict:
                 count_dict[element] += 1
             else:
                 count_dict[element] = 1
+
+ 
     
     # Calculate average count of non-zero elements
     non_zero_counts = [count for key, count in count_dict.items() if key != 0]
@@ -271,10 +274,17 @@ def getEMG (input):
     # normalize data for non leftout participants 
     if (is_target_normalize and n != leftout):
         emg = target_normalize(emg, target_min, target_max, np.array(getRestim(n, exercise, unfold=False)))
+
+    emg = torch.from_numpy(emg).to(torch.float16)
+    emg = emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen) # (WINDOWS, ELECTRODE, TIME STEP)
     
     restim = getRestim(n, exercise, unfold=True)
-    emg = torch.from_numpy(emg).to(torch.float16)
-    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)]) # (WINDOWS, ELECTRODE, TIME STEP)
+    balanced_indices = balance(restimulus=restim, args=args)
+
+    emg = emg[balanced_indices]
+    
+    return filter(emg)
+
 
 def get_decrements(args):
     """
@@ -330,8 +340,7 @@ def getLabels (input):
 
     n, exercise, args = input
     restim = getRestim(n, exercise)             
-    balanced_restim = restim[balance(restim)]   # (WINDOW, GESTURE, TIME STEP) 
-    # ordered_restim = make_gestures_sequential(balanced_restim, args) 
+    balanced_restim = restim[balance(restimulus=restim, args=args)]   # (WINDOW, GESTURE, TIME STEP) 
     return contract(restim=balanced_restim, args=args)
 
 def getExtrema (n, proportion, exercise, args):
@@ -381,7 +390,7 @@ def getExtrema (n, proportion, exercise, args):
 
     return mins, maxes
             
-def getForces(input):
+def getForces(inputs):
     """Returns force data for a given participant and exercise. Forces are balanced (reduced rest gestures) and sequential (no gaps between gestures of different exercises).
 
     Args:
@@ -390,12 +399,13 @@ def getForces(input):
     Returns:
         _type_: _description_
     """
-    n, exercise = input
+    n, exercise, args = inputs
+   
     assert exercise == 3, "Only exercise 3 has force data."
     force = torch.from_numpy(io.loadmat(f'./NinaproDB2/DB2_s{n}/S{n}_E{exercise}_A1.mat')['force'])
     force = force.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
     restim = getRestim(n,exercise)
-    return force[balance(restim)]
+    return force[balance(restimuls=restim, args=args)]
     
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max

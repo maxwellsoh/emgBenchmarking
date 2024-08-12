@@ -96,7 +96,12 @@ class Combined_Data():
 
                 if self.args.force_regression:
                     assert(exercise == 3), "Regression only implemented for exercise 3"
-                    forces_async = pool.map_async(self.utils.getForces, list(zip([(i+1) for i in range(self.utils.num_subjects)], exercise*np.ones(self.utils.num_subjects).astype(int))))
+                    forces_async = pool.map_async(self.utils.getForces, list(
+                        
+                        zip(
+                            [(i+1) for i in range(self.utils.num_subjects)], exercise*np.ones(self.utils.num_subjects).astype(int), 
+                            [self.args]*np.ones(self.utils.num_subjects).astype(int)
+                    )))
                     forces.append(forces_async.get())
                     
                 assert len(emg[-1]) == len(labels[-1]), "Number of trials for EMG and labels do not match"
