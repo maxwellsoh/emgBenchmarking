@@ -136,6 +136,7 @@ def balance(restimulus, args):
 
     Args:
         restimulus (tensor): restimulus tensor
+        args: argument parser object
 
     """
     numZero = 0
@@ -147,12 +148,22 @@ def balance(restimulus, args):
         unique_elements = torch.unique(restimulus[x])
         if len(unique_elements) == 1:
             element = unique_elements.item()
-            # element = (element,) # apparently doing this totally changes the shape of Y? it really shouldn't since they're both based off the same restimulus tensor 
+            element = (element, )
             if element in count_dict:
                 count_dict[element] += 1
             else:
                 count_dict[element] = 1
 
+        else:
+            if args.include_transitions:
+                elements = (restimulus[x][0][0].item(), restimulus[x][0][-1].item()) # take first and last gesture (transition window)
+
+                # elements = int(str(restimulus[x][0][0].item()) + str(restimulus[x][0][-1].item())) # TODO: Figure out why dict keys have to be ints. Making them tuples or strings leads to different dimensions for X and Y for some reason. This is a hacky way to get around it. 
+                if elements in count_dict:
+                    count_dict[elements] += 1
+                else:
+                    count_dict[elements] = 1
+                
  
     
     # Calculate average count of non-zero elements
@@ -172,6 +183,9 @@ def balance(restimulus, args):
                 numZero += 1
             else:
                 indices.append(x)
+        else:
+            if args.include_transitions:
+                indices.append(x)
                 
     return indices
 
@@ -190,7 +204,12 @@ def contract(restim, args):
     labels = labels.new_zeros(size=(len(restim), numGestures))
   
     for x in range(len(restim)):
-        gesture = int(restim[x][0][0])
+
+        if args.include_transitions:
+            gesture = int(restim[x][0][-1]) # take the last gesture it belongs to (labels the transition as part of the gesture)
+        else:
+            gesture = int(restim[x][0][0])
+            
         gesture = make_gesture_sequential(gesture, args)
         labels[x][gesture] = 1.0
     
@@ -278,7 +297,7 @@ def getEMG (input):
     emg = torch.from_numpy(emg).to(torch.float16)
     emg = emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen) # (WINDOWS, ELECTRODE, TIME STEP)
     
-    restim = getRestim(n, exercise, unfold=True)
+    restim = getRestim(n, exercise)
     balanced_indices = balance(restimulus=restim, args=args)
 
     emg = emg[balanced_indices]
