@@ -142,6 +142,8 @@ New datasets can be benchmarked with `CNN_EMG.py` after being processed into HDF
 
 To run the new dataset, input the dataset name to the dataset argument of `CNN_EMG.py`. Every subject must have data for all of the gestures in order for the dataset to be processed by `utils_generic.py`.
 
+NOTE: Images should be deleted when utils are updated. 
+
 ## Creating Custom Runs
 run_CNN_EMG.py also takes in config files. Create a new yaml file with your arguments and run: 
 ```

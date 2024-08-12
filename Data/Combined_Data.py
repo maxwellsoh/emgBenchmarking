@@ -115,6 +115,9 @@ class Combined_Data():
             self.Y.data = labels
         self.label.data = labels
 
+        for i in range(len(self.X.data[0])):
+            assert(len(self.X.data[0][i]) == len(self.Y.data[0][i])), "Number of windows for X and Y do not match."
+
     def load_other_datasets(self):
 
         emg = []
