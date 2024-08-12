@@ -153,6 +153,16 @@ class Setup():
             script_path = os.path.abspath(os.path.join(setup_dir, f"Get_Datasets/{dataset}.sh"))
             subprocess.run(['sh', script_path])
 
+        def process_dataset(dataset, params=''):
+            """
+            Downloads dataset in the root rather than in Setup directory.
+            """
+            setup_dir = os.path.dirname(__file__)
+            script_path = os.path.abspath(os.path.join(setup_dir, f"Get_Datasets/{dataset}.py"))
+            subprocess.run(['python', script_path, params])
+
+
+
         """ Conducts safety checks on the self.args, downloads needed datasets, and imports the correct self.utils file. """
         
         self.exercises = False
@@ -278,7 +288,19 @@ class Setup():
             if (not os.path.exists("./MCS_EMG")):
                 print("MCS dataset does not exist yet. Downloading now...")
                 get_dataset("get_MCS_EMG")
-                get_dataset("process_MCS")
+            
+            if self.args.include_transitions: 
+                if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG_include_transitions/")):
+                    print("MCS dataset not yet processed. Processing now")
+                    process_dataset("process_MCS", "--include_transitions=True")
+
+                utils.include_transitions = True
+
+            else: 
+                if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG/")):
+                    print("MCS dataset not yet processed. Processing now")
+                    process_dataset("process_MCS", "--include_transitions=False")      
+                utils.include_transitions = False      
            
             self.project_name = 'emg_benchmarking_mcs'
             if self.args.full_dataset_mcs:

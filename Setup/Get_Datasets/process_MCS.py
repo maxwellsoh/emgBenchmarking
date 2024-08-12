@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# %%
+
 import numpy as np
 import scipy
 import scipy.io as sio
@@ -10,15 +10,26 @@ import os
 from glob import glob
 import torch
 
-# %%
+# introduce an arg parse
+import argparse
+parser = argparse.ArgumentParser(description="Include arguments for loading different data files")
+parser.add_argument("--include_transitions", type=bool, help="Start labeling gestures as soon as cue begins. Defaults to False.", default=True)
+args = parser.parse_args()
+
 # Sampling rate "Hz"
 fs = 2000
 gesture_names = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
 
 # Desired sEMG Segments Length in seconds
 # Erase old files to write new hdf5 files if you want to change this
-signal_segment_starting = 1 # amount of time delay after cue
+
+
+if args.include_transitions:
+    signal_segment_starting = 0 # start labeling as soon as the cue starts
+else:
+    signal_segment_starting = 1 # amount of time delay after cue
 signal_segment_ending = 6 # amount of time after signal. 6 seconds is the end of the cue, so 5 or 6 are good numbers
+
 
 # Get sEMG Records directory
 current_folder = './MCS_EMG/'  # Change with current folder
@@ -29,7 +40,11 @@ Files = glob(os.path.join(Base, '**/*.mat'), recursive=True)
                     
 # Automated segmentation and saving of all participant sEMG data to sEMG gesture segment in HDF5
 for file_path in Files:
-    foldername = 'DatasetsProcessed_hdf5/MCS_EMG/'
+    
+    if args.include_transitions:
+        foldername = 'DatasetsProcessed_hdf5/MCS_EMG_include_transitions/'
+    else:
+        foldername = 'DatasetsProcessed_hdf5/MCS_EMG/'
     mat_data = scipy.io.loadmat(file_path)
     data = mat_data['data']
     participant_id = mat_data['iD'][0][0]  # Modify based on where ID is stored in your .mat
@@ -70,9 +85,17 @@ for file_path in Files:
                 # Save the data in the group, formatted as (CHANNEL, TIME)
                 grp.create_dataset('sEMG', data=multi_channel_sEMG_data, compression="gzip")
 
+                # print(f"gesture: {gesture_names[gesture]}")
+                # print(f"    cycle: {rep + 1}")
+                # print(f"    start_idx: {start_idx}")
+                # print(f"    end_idx: {end_idx}")
+                # print(f"    data shape: {multi_channel_sEMG_data.shape}")
+                
+              
+
     print(f"Data for participant {participant_id} and all gestures saved in {hdf5_filename}.")
 
-# %%
+
 import h5py
 import numpy as np
 import os
@@ -82,7 +105,11 @@ import matplotlib.pyplot as plt
 #Flattened dataset with gestures as groups and numpy arrays of shape (CYCLE, CHANNEL, TIME)
 
 for i in range(1, 41):
-    foldername = 'DatasetsProcessed_hdf5/MCS_EMG/'
+    if args.include_transitions: 
+        foldername = 'DatasetsProcessed_hdf5/MCS_EMG_include_transitions/'
+    else:
+        foldername = 'DatasetsProcessed_hdf5/MCS_EMG/'
+
     foldername = os.path.join(foldername, 'p' + str(i) + '/')
     hdf5_input_filename = f'participant_{i}.hdf5'
     hdf5_input_filename = os.path.join(foldername, hdf5_input_filename)
@@ -131,9 +158,14 @@ for i in range(1, 41):
 
     print(f"Reprocessed data saved in {hdf5_output_filename}.")
 
-# %%
+
 gesture_names = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
-foldername = 'DatasetsProcessed_hdf5/MCS_EMG/p40/'
+
+if args.include_transitions:
+    foldername = 'DatasetsProcessed_hdf5/MCS_EMG_include_transitions/p40/'
+else:
+    foldername = 'DatasetsProcessed_hdf5/MCS_EMG/p40/'
+
 hdf5_filename = 'flattened_participant_40.hdf5'
 hdf5_filename = os.path.join(foldername, hdf5_filename)
 with h5py.File(hdf5_filename, 'r') as hdf_file:
@@ -145,7 +177,7 @@ with h5py.File(hdf5_filename, 'r') as hdf_file:
     for name in gesture_names:
         print(hdf_file["Gesture" + name].shape)
 
-# %%
+
 from scipy.signal import butter, filtfilt, iirnotch
 gesture_names = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
 numGestures = 10
@@ -164,7 +196,12 @@ def filter(emg):
 
 # Check flattened data
 def getEMG (n):
-    file = h5py.File('DatasetsProcessed_hdf5/MCS_EMG/p40/flattened_participant_40.hdf5', 'r')
+    # NOTE: Not sure if this function is being used 
+
+    if args.include_transitions:
+        file = h5py.File('DatasetsProcessed_hdf5/MCS_EMG_include_transitions/p40/flattened_participant_40.hdf5', 'r')
+    else:
+        file = h5py.File('DatasetsProcessed_hdf5/MCS_EMG/p40/flattened_participant_40.hdf5', 'r')
     emg = []
     for gesture in gesture_names:
         data = filter(torch.from_numpy(np.array(file["Gesture" + gesture]))).unfold(dimension=-1, size=wLenTimesteps, step=stepLen)
