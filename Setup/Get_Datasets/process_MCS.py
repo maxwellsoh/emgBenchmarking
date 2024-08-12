@@ -10,12 +10,24 @@ import os
 from glob import glob
 import torch
 
-# introduce an arg parse
+
+# introduce an arg parse to take in args.include_transitions
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+    
 import argparse
 parser = argparse.ArgumentParser(description="Include arguments for loading different data files")
-parser.add_argument("--include_transitions", type=bool, help="Start labeling gestures as soon as cue begins. Defaults to False.", default=True)
+parser.add_argument("--include_transitions", type=str2bool, help="Start labeling gestures as soon as cue begins. Defaults to False.", default=False)
 args = parser.parse_args()
-
+print("include_transitions is set to:", args.include_transitions)
 # Sampling rate "Hz"
 fs = 2000
 gesture_names = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
