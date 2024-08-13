@@ -81,8 +81,13 @@ def balance (restimulus):
             if include_transitions:
                 start_gesture = restimulus[x][0] - 1
                 end_gesture = restimulus[x][-1] - 1 
-                if (start_gesture >= 0 and start_gesture <= 6) and (end_gesture >= 0 and end_gesture <= 6):
-                    indices.append(x) 
+            
+                if end_gesture >= 0 and end_gesture <= 6:
+                    indices.append(x)
+
+                    # Uncertain what Unmarked represents. Will include windows that go from Unmarked -> Gesture but not windows that go from Gesture -> Unmarked. 
+                
+          
     return indices
 
 def contract(R, unfold=True):
