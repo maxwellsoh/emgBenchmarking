@@ -85,8 +85,7 @@ def balance (restimulus):
                 if end_gesture >= 0 and end_gesture <= 6:
                     indices.append(x)
 
-                    # Uncertain what Unmarked represents. Will include windows that go from Unmarked -> Gesture but not windows that go from Gesture -> Unmarked. 
-                
+                    # Uncertain what Unmarked represents. Will include windows that go from Unmarked -> Gesture but not windows that go from Gesture -> Unmarked. (Unmarked is -1)
           
     return indices
 
