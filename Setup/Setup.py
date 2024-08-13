@@ -187,6 +187,7 @@ class Setup():
             from .Utils import utils_UCI as utils
             self.project_name = 'emg_benchmarking_uci'
             self.args.dataset = "uciemg"
+            utils.include_transitions = True
 
         elif (self.args.dataset in {"ninapro-db2", "ninapro_db2"}):
             if (not os.path.exists("./NinaproDB2")):
