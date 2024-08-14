@@ -158,17 +158,12 @@ class Setup():
         self.exercises = False
         self.args.dataset = self.args.dataset.lower()
 
-        if self.args.target_normalize_subject == 0:
-            self.args.target_normalize_subject = self.args.leftout_subject
-            print("Target normalize subject defaulting to leftout subject.")
-
         if self.args.model == "MLP" or self.args.model == "SVC" or self.args.model == "RF":
             print("Warning: not using pytorch, many arguments will be ignored")
             if self.args.turn_on_unlabeled_domain_adaptation:
                 raise NotImplementedError("Cannot use unlabeled domain adaptation with MLP, SVC, or RF")
             if self.args.pretrain_and_finetune:
                 raise NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
-
 
         if (self.args.dataset in {"uciemg", "uci"}):
             if (not os.path.exists("./uciEMG")):
@@ -222,8 +217,8 @@ class Setup():
             assert not(self.args.force_regression and self.args.leftout_subject == 10), "Subject 10 is missing gesture data for exercise 3 and cannot be used. Please choose another subject."
 
             if self.args.force_regression and self.args.leftout_subject == 11: 
-                self.args.leftout_subject = 10
                 # subject 10 is missing force data and is deleted internally 
+                self.args.leftout_subject = 10
 
             self.args.dataset = 'ninapro-db3'
 
@@ -307,6 +302,10 @@ class Setup():
             assert self.args.dataset in {"ninapro-db2", "ninapro-db3"}, "Regression only implemented for Ninapro DB2 and DB3 dataset." 
             assert not self.args.partial_dataset_ninapro, "Cannot use partial dataset for regression. Set exercises=3." 
 
+        if (self.args.target_normalize > 0) and self.args.target_normalize_subject == 0:
+            self.args.target_normalize_subject = self.args.leftout_subject
+            print("Target normalize subject defaulting to leftout subject.")
+
         # Add date and time to filename
         current_datetime = datetime.datetime.now()
         self.formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
@@ -319,10 +318,16 @@ class Setup():
 
         
 
+        
+
     def print_params(self):
         for param, value in vars(self.args).items():
             if getattr(self.args, param):
-                print(f"The value of --{param} is {value}")
+                if param == "target_normalize_subject":
+                    if self.args.target_normalize != 0.0:
+                        print(f"The value of --{param} is {value}")
+                else:
+                    print(f"The value of --{param} is {value}")
 
     def set_exercise(self):
         """ Set the self.exercises for the partial dataset for Ninapro datasets. 
