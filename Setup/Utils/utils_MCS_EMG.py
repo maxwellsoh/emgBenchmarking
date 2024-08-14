@@ -199,9 +199,14 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     frequency_edges, frequency_centres = emd.spectra.define_hist_bins(start_frequency, end_frequency, num_frequencies, 'linear')
     frequencies, hht = emd.spectra.hilberthuang(instantaneous_frequencies, instantaneous_amplitudes, frequency_edges, 
                                                 mode='amplitude',sum_time=False)
+    
+    # get phase information instead
+    hht_phase = np.angle(hht)
+    hht_phase_normalized = (hht_phase + np.pi) / (2 * np.pi)
+    emg_sample = np.array_split(hht_phase_normalized, 4, axis=1)
 
     # Convert back to PyTorch tensor and reshape
-    emg_sample = np.array_split(hht, 4, axis=1)
+    # emg_sample = np.array_split(hht, 4, axis=1)
     # # Normalization
     # emg_sample -= torch.min(emg_sample)
     # emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
@@ -248,6 +253,21 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
 
     # Since no split occurs, we don't need to concatenate halves back together
     final_image = image_normalized.numpy().astype(np.float32)
+
+    # Plotting the spectrogram
+    plt.figure(figsize=(10, 6))
+
+    # Set the fixed amplitude scale
+    vmin = 0  # Replace with your desired minimum amplitude value
+    vmax = 0.3  # Replace with your desired maximum amplitude value
+
+    plt.pcolormesh(hht, shading='auto', vmin=vmin, vmax=vmax)
+    plt.colorbar(label='Phase')
+    plt.ylabel('Frequency (Hz)')
+    plt.xlabel('Time (s)')
+    plt.title('Hilbert-Huang Transform Spectrogram')
+    plt.savefig("hht.png")
+    plt.close()
 
     return final_image
 
@@ -508,6 +528,14 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         for i in tqdm(range(len(emg)), desc="Creating Phase Spectrogram Images"):
             images_spectrogram.append(optimized_makeOnePhaseSpectrogramImage(*args[i]))
         images = images_spectrogram
+
+    elif turn_on_hht:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_spectrogram = []
+        for i in tqdm(range(len(emg)), desc="Creating Phase HHT Images"):
+            images_spectrogram.append(optimized_makeOneHilbertHuangImage(*args[i]))
+        images = images_spectrogram
+    
     
     elif turn_on_cwt:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
@@ -516,6 +544,8 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         for i in tqdm(range(len(emg)), desc="Creating CWT Images"):
             images_cwt_list.append(optimized_makeOneCWTImage(*args[i]))
         images = images_cwt_list
+
+
         
     return images
 
