@@ -270,6 +270,8 @@ class Model_Trainer():
 
     def set_criterion(self):
 
+        # TODO: Add in CORAL/IRM
+
         if self.args.force_regression:
             self.criterion = nn.MSELoss()
         else:

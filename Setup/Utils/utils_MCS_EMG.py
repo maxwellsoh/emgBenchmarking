@@ -359,6 +359,54 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
 
     return final_image
 
+def optimized_makeOnePhaseSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
+    spectrogram_window_size = wLenTimesteps // 16
+    emg_sample_unflattened = data.reshape(numElectrodes, -1)
+        
+    benchmarking_window = scipy.signal.windows.hamming(spectrogram_window_size, sym=False) # https://www.sciencedirect.com/science/article/pii/S1746809422003093?via%3Dihub#f0020
+    benchmarking_number_fft_points = wLenTimesteps
+    frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, window=benchmarking_window, nfft=benchmarking_number_fft_points)
+
+    Sxx_phase = np.angle(Sxx)
+    Sxx_phase_normalize = (Sxx_phase + np.pi) / (2 * np.pi)
+    
+    # Split by the 4 channels/electrodes
+    e1, e2, e3, e4 = torch.from_numpy(Sxx_phase_normalize)
+
+    # Flip each part about the x-axis
+    e1_flipped = e1.flip(dims=[0])
+    e2_flipped = e2.flip(dims=[0])
+    e3_flipped = e3.flip(dims=[0])
+    e4_flipped = e4.flip(dims=[0])
+
+    # Combine the flipped parts into a 2x2 grid
+    top_row = torch.cat((e1_flipped, e2_flipped), dim=1)
+    bottom_row = torch.cat((e3_flipped, e4_flipped), dim=1)
+    combined_image = torch.cat((top_row, bottom_row), dim=0)
+
+    data_converted = cmap(normalize_for_colormap_benchmark(combined_image))
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+
+    resize_length_factor = len(frequencies)
+    width_to_rescale_to = min(native_resnet_size, width)
+    
+    resize = transforms.Resize([min(native_resnet_size, length * resize_length_factor), width_to_rescale_to],
+                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp between 0 and 1 using torch.clamp
+    image_clamped = torch.clamp(image_resized, 0, 1)
+
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    final_image = image_normalized.numpy().astype(np.float32)
+
+    return final_image
+
+
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
     data = (data - global_min) / (global_max - global_min)
@@ -411,8 +459,7 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_cwt=False,
-              turn_on_hht=False, global_min=None, global_max=None):
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_phase_spectrogram=False, turn_on_cwt=False, turn_on_hht=False, global_min=None, global_max=None):
 
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
@@ -453,6 +500,13 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         images_spectrogram = []
         for i in tqdm(range(len(emg)), desc="Creating Spectrogram Images"):
             images_spectrogram.append(optimized_makeOneSpectrogramImage(*args[i]))
+        images = images_spectrogram
+
+    elif turn_on_phase_spectrogram:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_spectrogram = []
+        for i in tqdm(range(len(emg)), desc="Creating Phase Spectrogram Images"):
+            images_spectrogram.append(optimized_makeOnePhaseSpectrogramImage(*args[i]))
         images = images_spectrogram
     
     elif turn_on_cwt:
