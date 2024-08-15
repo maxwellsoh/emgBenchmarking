@@ -186,7 +186,7 @@ def getLabels (n):
     return labels
 
 def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
-    normalize_for_colormap_benchmark_hht = mpl.colors.Normalize(vmin=-30, vmax=0)   
+    normalize_for_colormap_benchmark_hht = mpl.colors.Normalize(vmin=0, vmax=1)   
 
     emg_sample = data
     # Perform Empirical Mode Decomposition (EMD)
@@ -197,13 +197,13 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     start_frequency = 1; end_frequency = fs # Hz
     num_frequencies = 64
     frequency_edges, frequency_centres = emd.spectra.define_hist_bins(start_frequency, end_frequency, num_frequencies, 'linear')
+    
     frequencies, hht = emd.spectra.hilberthuang(instantaneous_frequencies, instantaneous_amplitudes, frequency_edges, 
                                                 mode='amplitude',sum_time=False)
     
-    # get phase information instead
-    hht_phase = np.angle(hht)
-    hht_phase_normalized = (hht_phase + np.pi) / (2 * np.pi)
-    emg_sample = np.array_split(hht_phase_normalized, 4, axis=1)
+
+    instantaneous_phase_norm = instantaneous_phase / (2 * np.pi)
+    emg_sample = np.array_split(instantaneous_phase_norm, 4, axis=0)
 
     # Convert back to PyTorch tensor and reshape
     # emg_sample = np.array_split(hht, 4, axis=1)
@@ -231,11 +231,11 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     bottom_row = torch.cat((e3_flipped, e4_flipped), dim=1)
     combined_image = torch.cat((top_row, bottom_row), dim=0)
 
-    combined_image_dB = 10 * torch.log10(torch.abs(combined_image) + 1e-6)  # Adding a small constant to avoid log(0)
+    # combined_image_dB = 10 * torch.log10(torch.abs(combined_image) + 1e-6)  # Adding a small constant to avoid log(0)
 
     # print("Min and max of combined_image: ", torch.min(combined_image_dB), torch.max(combined_image_dB))
 
-    data_converted = cmap((normalize_for_colormap_benchmark_hht(combined_image_dB)))
+    data_converted = cmap((normalize_for_colormap_benchmark_hht(combined_image)))
 
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
@@ -254,20 +254,20 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     # Since no split occurs, we don't need to concatenate halves back together
     final_image = image_normalized.numpy().astype(np.float32)
 
-    # Plotting the spectrogram
-    plt.figure(figsize=(10, 6))
 
-    # Set the fixed amplitude scale
-    vmin = 0  # Replace with your desired minimum amplitude value
-    vmax = 0.3  # Replace with your desired maximum amplitude value
+    # # Plot the image
+    # image_np = np.transpose(final_image, (1, 2, 0))
+    # plt.imshow(image_np)
+    # plt.colorbar(label='Phase')
+    # plt.ylabel('Frequency (Hz)')
+    # plt.xlabel('Time (s)')
+    # plt.title('Hilbert-Huang Transform Spectrogram')
+    # plt.savefig("mcs-hht.png")
+    # plt.close()
 
-    plt.pcolormesh(hht, shading='auto', vmin=vmin, vmax=vmax)
-    plt.colorbar(label='Phase')
-    plt.ylabel('Frequency (Hz)')
-    plt.xlabel('Time (s)')
-    plt.title('Hilbert-Huang Transform Spectrogram')
-    plt.savefig("hht.png")
-    plt.close()
+
+
+
 
     return final_image
 
@@ -336,6 +336,7 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     benchmarking_window = scipy.signal.windows.hamming(spectrogram_window_size, sym=False) # https://www.sciencedirect.com/science/article/pii/S1746809422003093?via%3Dihub#f0020
     benchmarking_number_fft_points = wLenTimesteps
     frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, window=benchmarking_window, nfft=benchmarking_number_fft_points)
+
     Sxx_dB = 10 * np.log10(Sxx + 1e-12) # small constant added to avoid log(0)
     # print("Min and max of Sxx_dB: ", np.min(Sxx_dB), np.max(Sxx_dB))
     # emg_sample = torch.from_numpy(Sxx_dB)
