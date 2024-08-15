@@ -370,13 +370,6 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
 
 def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
 
-    # Pre-allocate the array for the CWT coefficients
-    number_of_frequencies = wLenTimesteps
-    grid_width, grid_length = closest_factors(numElectrodes)
-
-    # length_to_resize_to = min(native_resnet_size, grid_width * number_of_frequencies)
-    # width_to_transform_to = min(native_resnet_size, grid_length * width)
-    
     emg_sample = data 
     max_imfs = 6
 
