@@ -378,12 +378,22 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     # width_to_transform_to = min(native_resnet_size, grid_length * width)
     
     emg_sample = data 
-    max_imfs = 5
+    max_imfs = 6
 
     # Perform Empirical Mode Decomposition (EMD)
-    intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=max_imfs) 
+    intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=max_imfs-1) 
     instantaneous_phase, instantaneous_frequencies, instantaneous_amplitudes = \
         emd.spectra.frequency_transform(imf=intrinsic_mode_functions, sample_rate=fs, method='nht')
+    
+    # Pad any missing IMFs with zeros
+    if instantaneous_phase.shape[-1] < max_imfs:
+        padded_instantaneous_phase = np.zeros((instantaneous_phase.shape[0], max_imfs))
+
+        for electrode_at_time in range(instantaneous_phase.shape[0]):
+            missing_imfs = max_imfs - instantaneous_phase.shape[-1]
+            padding = np.zeros(missing_imfs)
+            padded_instantaneous_phase[electrode_at_time] = np.append(instantaneous_phase[electrode_at_time], padding)
+        instantaneous_phase = padded_instantaneous_phase
 
     # Rearrange to be (WLENTIMESTEP, NUM_ELECTRODES, MAX_IMF+1 (includes a combined IMF))
     instantaneous_phase_norm = instantaneous_phase / (2 * np.pi) 
@@ -393,10 +403,10 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     emg_sample = emg_sample.permute(1, 0, 2) 
 
     # Stack the y axis to be all imfs per electrode
-    final_emg = torch.zeros(wLenTimesteps, numElectrodes*(max_imfs+1))
+    final_emg = torch.zeros(wLenTimesteps, numElectrodes*(max_imfs))
     for t in range(wLenTimesteps):
         for i in range(numElectrodes):
-            final_emg[t, i*(max_imfs+1):(i+1)*(max_imfs+1)] = emg_sample[t, i, :]
+            final_emg[t, i*(max_imfs):(i+1)*(max_imfs)] = emg_sample[t, i, :]
 
     combined_image = final_emg 
     combined_image -= torch.min(combined_image)
@@ -423,10 +433,10 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
 
     final_image = image_normalized.numpy().astype(np.float32)
 
-    # Plot
-    image_np = np.transpose(final_image, (1, 2, 0))
-    plt.imshow(image_np)
-    plt.savefig("capgmyo-hilbert-huang-image.png")
+    # # Plot
+    # image_np = np.transpose(final_image, (1, 2, 0))
+    # plt.imshow(image_np)
+    # plt.savefig("capgmyo-hilbert-huang-image.png")
 
     return final_image
  
