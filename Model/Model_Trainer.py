@@ -307,6 +307,8 @@ class Model_Trainer():
             wandb_runname += '_cwt'
         if self.args.turn_on_hht:
             wandb_runname += '_hht'
+        if self.args.turn_on_phase_spectrogram:
+            wandb_runname += '_phase-spect'
         if self.args.reduce_training_data_size:
             wandb_runname += '_reduced-training-data-size-' + str(self.args.reduced_training_data_size)
         if self.args.turn_off_scaler_normalization:

@@ -87,6 +87,8 @@ class X_Data(Data):
             base_foldername_zarr += 'cwt/'
         elif self.args.turn_on_hht:
             base_foldername_zarr += 'hht/'
+        elif self.args.turn_on_phase_spectrogram:
+            base_foldername_zarr += 'phase_spectrogram/'
         else:
             base_foldername_zarr += 'raw/'
 
