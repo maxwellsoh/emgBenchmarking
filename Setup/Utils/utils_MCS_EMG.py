@@ -225,7 +225,7 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     combined_image -= torch.min(combined_image)
     combined_image /= torch.max(combined_image) - torch.min(combined_image)
 
-
+    cmap = mpl.colormaps['viridis']
     data_converted = cmap(combined_image)
 
     rgb_data = data_converted[:, :, :3]
@@ -247,6 +247,11 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
 
     # Since no split occurs, we don't need to concatenate halves back together
     final_image = image_normalized.numpy().astype(np.float32)
+
+    # Plot
+    image_np = np.transpose(final_image, (2, 1, 0))
+    plt.imshow(image_np)
+    plt.savefig("mcs-hilbert-huang-image.png")
 
     return final_image
 
