@@ -490,13 +490,18 @@ def optimized_makeOnePhaseSpectrogramImage(data, length, width, resize_length_fa
     return final_image
 
 
-def optimized_makeOneHilbertHuangImage(i, data, length, width, resize_length_factor, native_resnet_size):
+
+def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
 
     emg_sample = data 
     max_imfs = 6
 
     # Perform Empirical Mode Decomposition (EMD)
-    intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=max_imfs-1) 
+    try:
+        intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=max_imfs-1) 
+    except NameError as e:
+        # If no IMFS can be sifted, pad with zeroes
+        intrinsic_mode_functions = np.zeros((emg_sample.shape[0], max_imfs))
 
     instantaneous_phase, instantaneous_frequencies, instantaneous_amplitudes = \
         emd.spectra.frequency_transform(imf=intrinsic_mode_functions, sample_rate=fs, method='nht')
@@ -659,7 +664,7 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
         images_spectrogram = []
         for i in tqdm(range(len(emg)), desc="Creating Phase HHT Images"):
-            images_spectrogram.append(optimized_makeOneHilbertHuangImage(i, *args[i]))
+            images_spectrogram.append(optimized_makeOneHilbertHuangImage(*args[i]))
         images = images_spectrogram
         
     elif turn_on_cwt:
