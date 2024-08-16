@@ -47,6 +47,9 @@ gesture_labels[3] = ['Flexion Of The Little Finger', 'Flexion Of The Ring Finger
 partial_gesture_labels = ['Rest', 'Finger Abduction', 'Fist', 'Finger Adduction', 'Middle Axis Supination', 
                           'Middle Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 'Ulnar Deviation']
 partial_gesture_indices = [0] + [gesture_labels[1].index(g) + len(gesture_labels['Rest']) for g in partial_gesture_labels[1:]] # 0 is for rest
+
+transition_labels = ['Not a Transition', 'Transition']
+
 class CustomDataset_swav(Dataset):
     def __init__(self, data, labels=None, transform=None):
         self.data = data
@@ -189,8 +192,8 @@ def balance(restimulus, args):
                 
     return indices
 
-def contract(restim, args):
-    """Converts restimulus tensor to one-hot encoded tensor.
+def contract_gesture_classifier(restim, args):
+    """Converts restimulus tensor to one-hot encoded tensor. Tensor is 1 at the gesture index it corresponds to. 
 
     Args:
         restim (tensor): restimulus data tensor
@@ -201,9 +204,14 @@ def contract(restim, args):
     """
     numGestures = restim.max() + 1 # + 1 to account for rest gesture
     labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(restim), numGestures))
+
+    if args.partial_dataset_ninapro:
+        labels = labels.new_zeros(size=(len(restim), len(partial_gesture_indices)))
+    else: 
+        labels = labels.new_zeros(size=(len(restim), numGestures))
   
     for x in range(len(restim)):
+
 
         if args.include_transitions:
             gesture = int(restim[x][0][-1]) # take the last gesture it belongs to (labels the transition as part of the gesture)
@@ -214,6 +222,40 @@ def contract(restim, args):
         labels[x][gesture] = 1.0
     
     return labels
+
+def contract_transition_classifier(restim, args):
+    """Converts restimulus tensor to one-hot encoded tensor. Tensor is 1 at 0 if Not a Transition and 1 at 1 if Transition.
+
+    Args:
+        restim (tensor): restimulus data tensor
+        unfold (bool, optional): whether data was unfolded according to time steps. Defaults to True.
+
+    Returns:
+        labels: restimulus data now one-hot encoded
+    """
+
+    num_classes = 2
+    labels = torch.tensor(())
+    labels = labels.new_zeros(size=(len(restim), num_classes))
+
+    
+
+    for x in range(len(restim)):
+
+        if restim[x][0][0].item() == restim[x][0][-1].item(): 
+            labels[x][0] = 1.0
+        else: 
+            labels[x][1] = 1.0
+    
+    return labels
+
+def contract(restim, args): 
+
+    if args.transition_classifier:
+        return contract_gesture_classifier(restim, args)
+    else:
+        return contract_transition_classifier(restim, args)
+
 
 def filter(emg):
     # sixth-order Butterworth highpass filter
