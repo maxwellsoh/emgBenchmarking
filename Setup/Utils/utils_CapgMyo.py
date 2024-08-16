@@ -370,7 +370,7 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
 
 def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
 
-    emg_sample = data 
+    emg_sample = data # (wLenTimesteps * numElectrodes)
     max_imfs = 6
 
     # Perform Empirical Mode Decomposition (EMD)
