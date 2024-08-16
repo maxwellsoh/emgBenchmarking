@@ -362,10 +362,6 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
 
     final_image = image_normalized.numpy().astype(np.float32)
 
-    image_np = np.transpose(final_image, (1, 2, 0))
-    plt.imshow(image_np)
-    plt.savefig("capgmyo-spectrogram-image.png")
-
     return final_image
 
 def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
@@ -425,11 +421,6 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     image_normalized = normalize(image_clamped)
 
     final_image = image_normalized.numpy().astype(np.float32)
-
-    # # Plot
-    # image_np = np.transpose(final_image, (1, 2, 0))
-    # plt.imshow(image_np)
-    # plt.savefig("capgmyo-hilbert-huang-image.png")
 
     return final_image
  

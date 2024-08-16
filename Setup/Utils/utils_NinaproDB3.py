@@ -724,11 +724,6 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
 
     final_image = image_normalized.numpy().astype(np.float32)
 
-    # Plot
-    # image_np = np.transpose(final_image, (2, 1, 0))
-    # plt.imshow(image_np)
-    # plt.savefig("db3-hilbert-huang-image.png")
-
     return final_image
  
 

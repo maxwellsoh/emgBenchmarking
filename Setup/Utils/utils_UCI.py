@@ -485,11 +485,6 @@ def optimized_makeOneHilbertHuangImage(i, data, length, width, resize_length_fac
 
     final_image = image_normalized.numpy().astype(np.float32)
 
-    # Plot
-    image_np = np.transpose(final_image, (2, 1, 0))
-    plt.imshow(image_np)
-    plt.savefig("uci-hilbert-huang-image.png")
-
     return final_image
 
  

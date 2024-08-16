@@ -187,56 +187,51 @@ def getLabels (n):
     return labels
 
 def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
-    normalize_for_colormap_benchmark_hht = mpl.colors.Normalize(vmin=-30, vmax=0)   
 
-    emg_sample = data
+    emg_sample = data # (wLenTimesteps * numElectrodes)
+    max_imfs = 6
+
     # Perform Empirical Mode Decomposition (EMD)
-    intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=5)
+    intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=max_imfs-1) 
     instantaneous_phase, instantaneous_frequencies, instantaneous_amplitudes = \
-        emd.spectra.frequency_transform(intrinsic_mode_functions, fs, 'nht')
-    # Compute Hilbert-Huang Transform (HHT)
-    start_frequency = 1; end_frequency = fs # Hz
-    num_frequencies = 64
-    frequency_edges, frequency_centres = emd.spectra.define_hist_bins(start_frequency, end_frequency, num_frequencies, 'linear')
-    frequencies, hht = emd.spectra.hilberthuang(instantaneous_frequencies, instantaneous_amplitudes, frequency_edges, 
-                                                mode='amplitude',sum_time=False)
+        emd.spectra.frequency_transform(imf=intrinsic_mode_functions, sample_rate=fs, method='nht')
+    
+    # Pad any missing IMFs with zeros
+    if instantaneous_phase.shape[-1] < max_imfs:
+        padded_instantaneous_phase = np.zeros((instantaneous_phase.shape[0], max_imfs))
 
-    # Convert back to PyTorch tensor and reshape
-    emg_sample = np.array_split(hht, 4, axis=1)
-    # # Normalization
-    # emg_sample -= torch.min(emg_sample)
-    # emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
-        
-    # emg_sample -= torch.min(emg_sample)
-    # emg_sample /= torch.max(emg_sample)
+        for electrode_at_time in range(instantaneous_phase.shape[0]):
+            missing_imfs = max_imfs - instantaneous_phase.shape[-1]
+            padding = np.zeros(missing_imfs)
+            padded_instantaneous_phase[electrode_at_time] = np.append(instantaneous_phase[electrode_at_time], padding)
+        instantaneous_phase = padded_instantaneous_phase
 
-    e1, e2, e3, e4 = emg_sample
-    e1 = e1[:num_frequencies//2, :]
-    e2 = e2[:num_frequencies//2, :]
-    e3 = e3[:num_frequencies//2, :]
-    e4 = e4[:num_frequencies//2, :]
+    # Rearrange to be (WLENTIMESTEP, NUM_ELECTRODES, MAX_IMF+1 (includes a combined IMF))
+    instantaneous_phase_norm = instantaneous_phase / (2 * np.pi) 
+    emg_sample = np.array_split(instantaneous_phase_norm, numElectrodes, axis=0) 
+    emg_sample = [torch.tensor(emg) for emg in emg_sample]
+    emg_sample = torch.stack(emg_sample)
+    emg_sample = emg_sample.permute(1, 0, 2) 
 
-    # Flip each part about the x-axis
-    e1_flipped = torch.tensor(np.flipud(e1).copy())
-    e2_flipped = torch.tensor(np.flipud(e2).copy())
-    e3_flipped = torch.tensor(np.flipud(e3).copy())
-    e4_flipped = torch.tensor(np.flipud(e4).copy())
+    # Stack the y axis to be all imfs per electrode
+    final_emg = torch.zeros(wLenTimesteps, numElectrodes*(max_imfs))
+    for t in range(wLenTimesteps):
+        for i in range(numElectrodes):
+            final_emg[t, i*(max_imfs):(i+1)*(max_imfs)] = emg_sample[t, i, :]
 
-    # Combine the flipped parts into a 2x2 grid
-    top_row = torch.cat((e1_flipped, e2_flipped), dim=1)
-    bottom_row = torch.cat((e3_flipped, e4_flipped), dim=1)
-    combined_image = torch.cat((top_row, bottom_row), dim=0)
+    combined_image = final_emg 
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
 
-    combined_image_dB = 10 * torch.log10(torch.abs(combined_image) + 1e-6)  # Adding a small constant to avoid log(0)
-
-    # print("Min and max of combined_image: ", torch.min(combined_image_dB), torch.max(combined_image_dB))
-
-    data_converted = cmap((normalize_for_colormap_benchmark_hht(combined_image_dB)))
-
+    data = combined_image.numpy()
+    data_converted = cmap(data) 
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
+
+    length_to_transform_to = min(native_resnet_size, image.shape[-2])
+    width_to_transform_to = min(native_resnet_size, image.shape[-1])
     
-    resize = transforms.Resize([min(num_frequencies, native_resnet_size), native_resnet_size],
+    resize = transforms.Resize([length_to_transform_to, width_to_transform_to],
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
@@ -247,11 +242,10 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     image_normalized = normalize(image_clamped)
 
-    # Since no split occurs, we don't need to concatenate halves back together
     final_image = image_normalized.numpy().astype(np.float32)
 
     return final_image
-
+ 
 def optimized_makeOneCWTImage(data, length, width, resize_length_factor, native_resnet_size):
     normalize_for_colormap_benchmark_cwt = mpl.colors.Normalize(vmin=-50, vmax=5)
     emg_sample = data
@@ -465,11 +459,6 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
 
     final_image = image_normalized.numpy().astype(np.float32)
 
-    # # Plot
-    # image_np = np.transpose(final_image, (1, 2, 0))
-    # plt.imshow(image_np)
-    # plt.savefig("generic-hilbert-huang-image.png")
-
     return final_image
  
 
@@ -525,8 +514,8 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_phase_spectrogram=False, turn_on_cwt=False,
-              turn_on_hht=False, global_min=None, global_max=None, turn_on_hht=False):
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None,
+              turn_on_spectrogram=False, turn_on_phase_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
 
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
