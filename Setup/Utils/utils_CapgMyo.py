@@ -422,7 +422,6 @@ def optimized_makeOnePhaseSpectrogramImage(data, length, width, resize_length_fa
 
     final_image = image_normalized.numpy().astype(np.float32)
 
-
     return final_image
 
 
