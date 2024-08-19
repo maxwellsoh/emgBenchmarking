@@ -202,9 +202,13 @@ def contract(restim, unfold=True):
     Returns:
         labels: restimulus data now one-hot encoded
     """
-    numGestures = restim.max() + 1 # + 1 to account for rest gesture
+    
     labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(restim), numGestures))
+    if args.partial_dataset_ninapro:
+        labels = labels.new_zeros(size=(len(restim), len(partial_gesture_indices)))
+    else:
+        numGestures = restim.max() + 1 # + 1 to account for rest gesture
+        labels = labels.new_zeros(size=(len(restim), numGestures))
     if unfold:
         for x in range(len(restim)):
 
