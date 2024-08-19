@@ -28,6 +28,7 @@ numElectrodes = 12 # number of EMG columns
 num_subjects = 11
 
 MISSING_SUBJECT = 10 # Subject 10 is missing from exercise 3
+args = None
 
 cmap = mpl.colormaps['viridis']
 # Gesture Labels
@@ -49,7 +50,16 @@ gesture_labels[3] = ['Flexion Of The Little Finger', 'Flexion Of The Ring Finger
 
 partial_gesture_labels = ['Rest', 'Finger Abduction', 'Fist', 'Finger Adduction', 'Middle Axis Supination', 
                           'Middle Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 'Ulnar Deviation']
+
+
 partial_gesture_indices = [0] + [gesture_labels[1].index(g) + len(gesture_labels['Rest']) for g in partial_gesture_labels[1:]] # 0 is for rest
+# partial_gestures_indices[i] = the index that the ith partial gesture is in the full gesture list (ex gesture[1] = 5 = 'Finger Abduction'. It's a list of full gestures that are in the partial gesture list)
+
+map_full_to_partial = {label: index for index, label in enumerate(partial_gesture_indices)}
+# label_to_partial_index[full gesture index] = partial gesture index (ex label_to_partial_index[5] = 1 = 'Finger Abduction'. It's a dictionary mapping full gestures to partial gestures.)
+
+
+
 class CustomDataset_swav(Dataset):
     def __init__(self, data, labels=None, transform=None):
         self.data = data
@@ -171,7 +181,14 @@ def balance (restimulus):
                     indices.append(x)
                 numZero += 1
             else:
-                indices.append(x)
+
+                # If partial dataset, only include the partial gestures
+                if args.partial_dataset_ninapro: 
+                    gesture = restimulus[x][0][0].item()
+                    if gesture in partial_gesture_indices:
+                        indices.append(x)
+                else: 
+                    indices.append(x)
                 
     return indices
 
@@ -190,7 +207,17 @@ def contract(restim, unfold=True):
     labels = labels.new_zeros(size=(len(restim), numGestures))
     if unfold:
         for x in range(len(restim)):
-            labels[x][int(restim[x][0][0])] = 1.0
+
+            if args.partial_dataset_ninapro: 
+                gesture = restim[x][0][0].item()
+                corresponding_partial_index = map_full_to_partial[gesture]
+                labels[x][corresponding_partial_index] = 1.0
+            
+            else:
+                labels[x][int(restim[x][0][0])] = 1.0
+
+        
+        
     else:
         for x in range(len(restim)):
             labels[x][int(restim[x][0])] = 1.0
@@ -405,7 +432,7 @@ def getForces(input):
     force = torch.from_numpy(io.loadmat(f'./NinaproDB3/DB3_s{n}/S{n}_E{exercise}_A1.mat')['force'])
     force = force.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
     restim = getRestim(n, exercise)
-    balanced_indices = balance(restim)
+    balanced_indices = balance(restim, args)
     return force[balanced_indices]
     
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):

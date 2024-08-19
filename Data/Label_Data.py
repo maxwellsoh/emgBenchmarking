@@ -47,20 +47,22 @@ class Label_Data(Data):
                 index_to_start_at = max(subject_labels_to_concatenate)
             labels_set.append(subject_labels_to_concatenate)
 
-        if self.args.partial_dataset_ninapro:
-            desired_gesture_labels = self.utils.partial_gesture_indices
+        # if self.args.partial_dataset_ninapro:
+        #     desired_gesture_labels = self.utils.partial_gesture_indices
 
         concatenated_labels = np.concatenate(labels_set, axis=0) # (TRIAL)
 
-        indices_for_partial_dataset = None
-        if self.args.partial_dataset_ninapro:
-            indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
+        # indices_for_partial_dataset = None
+        # if self.args.partial_dataset_ninapro:
+        #     indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
             
-            concatenated_labels = concatenated_labels[indices_for_partial_dataset]
+        #     concatenated_labels = concatenated_labels[indices_for_partial_dataset]
         
-            # convert labels to indices
-            label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
-            concatenated_labels = [label_to_index[label] for label in concatenated_labels]
+        #     # convert labels to indices
+        #     label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
+        #     concatenated_labels = [label_to_index[label] for label in concatenated_labels]
+
+        # why don't I print this and assert that the length is the same length
         
         numGestures = len(np.unique(concatenated_labels))
 
@@ -69,6 +71,7 @@ class Label_Data(Data):
 
         self.concatenated_trials = concatenated_labels
 
-        return numGestures, indices_for_partial_dataset
+        # return numGestures, indices_for_partial_dataset
+        return numGestures
         
 

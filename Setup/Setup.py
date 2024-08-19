@@ -311,6 +311,7 @@ class Setup():
         self.formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
 
         self.utils = utils
+        self.utils.args = self.args
 
         print("------------------------------------------------------------------------------------------------------------------------")
         print("Starting run at", self.formatted_datetime)

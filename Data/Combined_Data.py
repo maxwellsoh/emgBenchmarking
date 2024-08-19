@@ -64,6 +64,8 @@ class Combined_Data():
                 self.append_to_trials(exercise_set, subject)
             
             numGestures = self.concat_across_exercises()
+
+            print(f"Subject {subject}: has {numGestures} gestures and self.Y.data[0][subject] shape {self.Y.data[0][subject].shape} ")
             self.env.num_gestures  = numGestures # different gesture count for Ninapro
             self.append_to_new_data(self.X.concatenated_trials, self.Y.concatenated_trials, self.label.concatenated_trials)
 
@@ -274,9 +276,9 @@ class Combined_Data():
     def concat_across_exercises(self):
 
         # Labels always needs to go first to provide indices for partial dataset
-        numGestures, indices_for_partial_dataset = self.label.concat_across_exercises()
-        self.X.concat_across_exercises(indices_for_partial_dataset)
-        self.Y.concat_across_exercises(indices_for_partial_dataset)
+        numGestures = self.label.concat_across_exercises()
+        self.X.concat_across_exercises()
+        self.Y.concat_across_exercises()
 
         return numGestures
     

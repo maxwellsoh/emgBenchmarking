@@ -52,14 +52,11 @@ class X_Data(Data):
         self.subject_trials.append(self.data[exercise_set][subject])
 
     # Helper for loading EMG data for Ninapro
-    def concat_across_exercises(self, indices_for_partial_dataset=None):
+    def concat_across_exercises(self):
         """Concatenates EMG data across exercises for a given subject.
         Helper function for process_ninapro.
         """
         self.concatenated_trials = np.concatenate(self.subject_trials, axis=0)
-
-        if self.args.partial_dataset_ninapro:
-            self.concatenated_trials = self.concatenated_trials[indices_for_partial_dataset]
 
     def create_foldername_zarr(self):
         base_foldername_zarr = ""

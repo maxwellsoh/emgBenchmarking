@@ -33,7 +33,7 @@ class Y_Data(Data):
         else:
             self.subject_trials.append(self.data[exercise_set][subject])
 
-    def concat_across_exercises(self, indices_for_partial_dataset=None):
+    def concat_across_exercises(self):
         """Concatenates forces/labels across exercises for a given subject. 
         
         Helper function for process_ninapro. If self.args.force_regression, concatenates forces. Otherwise, processes labels from one hot encoding and concatenates. 
@@ -52,17 +52,15 @@ class Y_Data(Data):
                     index_to_start_at = max(subject_labels_to_concatenate)
                 labels_set.append(subject_labels_to_concatenate)
 
-            if self.args.partial_dataset_ninapro:
-                desired_gesture_labels = self.utils.partial_gesture_indices
 
             concatenated_labels = np.concatenate(labels_set, axis=0) # (TRIAL)
 
-            if self.args.partial_dataset_ninapro:
-                indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
-                concatenated_labels = concatenated_labels[indices_for_partial_dataset]
-                # convert labels to indices
-                label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
-                concatenated_labels = [label_to_index[label] for label in concatenated_labels]
+            # if self.args.partial_dataset_ninapro:
+            #     indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
+            #     concatenated_labels = concatenated_labels[indices_for_partial_dataset]
+            #     # convert labels to indices
+            #     label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
+            #     concatenated_labels = [label_to_index[label] for label in concatenated_labels]
 
             # Convert to one hot encoding
             concatenated_labels = np.eye(np.max(concatenated_labels) + 1)[concatenated_labels] # (TRIAL, GESTURE)
