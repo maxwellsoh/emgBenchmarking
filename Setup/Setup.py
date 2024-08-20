@@ -314,7 +314,13 @@ class Setup():
             self.args.dataset = 'mcs'
             
         else: 
-            raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," + "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
+            print(self.args.dataset)
+            if os.path.exists(f"DatasetsProcessed_hdf5/{self.args.dataset}/"):
+                from .Utils import utils_generic as utils
+                utils.initialize(self.args.dataset)
+                self.project_name = f'emg_benchmarking_{self.args.dataset}'
+            else:
+                raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," + "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
             
         # Safety Checks
         if self.args.turn_off_scaler_normalization:

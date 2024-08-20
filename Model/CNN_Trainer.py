@@ -119,6 +119,12 @@ class CNN_Trainer(Model_Trainer):
                 self.model = timm.create_model(self.model_name, pretrained=True, num_classes=self.Y.validation.shape[1])
             else: 
                 self.model = timm.create_model(self.model_name, pretrained=True, num_classes=self.num_gestures)
+                
+        # Calculate the number of parameters
+        total_params = sum(p.numel() for p in self.model.parameters())
+
+        # Print the total number of parameters
+        print(f'Total number of parameters: {total_params}')
 
 
     def set_param_requires_grad(self):
