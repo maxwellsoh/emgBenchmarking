@@ -62,6 +62,7 @@ class Setup():
         parser.add_argument('--config', type=str, help="Path to the config file.")
         parser.add_argument('--table', type=str, help="Specify which table to replicate. (Ex: 1, 2, 3, 3_intersession)")
         parser.add_argument("--include_transitions", type=utils.str2bool, help="Whether or not to include transitions windows and label them as the final gesture. Set to False by default.", default=False)
+        parser.add_argument("--transition_classifier", type=utils.str2bool, help="Whether or not to classify whether a window is a transition. Set to False by default.", default=False)
         parser.add_argument("--multiprocessing", type=utils.str2bool, help="Whether or not to use multiprocessing when acquiring data. Set to True by default.", default=True)
         parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
         parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
@@ -171,6 +172,14 @@ class Setup():
         if self.args.target_normalize_subject == 0:
             self.args.target_normalize_subject = self.args.leftout_subject
             print("Target normalize subject defaulting to leftout subject.")
+
+        if self.args.transition_classifier:
+            self.args.include_transitions = True
+
+        if self.args.include_transitions:
+
+            transition_datasets = {"ninapro-db2", "ninapro_db2", "ninapro-db5", "ninapro_db5", "ninapro-db3", "ninapro_db3", "uciemg", "uci", "mcs"}
+            assert self.args.dataset in transition_datasets, f"Transitions from rest to gesture are only preserved in {transition_datasets} datasets."
 
         if self.args.model == "MLP" or self.args.model == "SVC" or self.args.model == "RF":
             print("Warning: not using pytorch, many arguments will be ignored")
@@ -298,6 +307,7 @@ class Setup():
                     process_dataset("process_MCS", "--include_transitions=True")
 
                 utils.include_transitions = True
+                utils.transition_classifier = self.args.transition_classifier
 
             else: 
                 if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG/")):
@@ -332,11 +342,14 @@ class Setup():
             assert self.args.dataset in {"ninapro-db2", "ninapro-db3"}, "Regression only implemented for Ninapro DB2 and DB3 dataset." 
             assert not self.args.partial_dataset_ninapro, "Cannot use partial dataset for regression. Set exercises=3." 
 
+        
+
         # Add date and time to filename
         current_datetime = datetime.datetime.now()
         self.formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
 
         self.utils = utils
+        self.utils.args = self.args
 
         print("------------------------------------------------------------------------------------------------------------------------")
         print("Starting run at", self.formatted_datetime)
