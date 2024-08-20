@@ -87,6 +87,8 @@ class Model_Trainer():
         print("Device:", self.device)
 
         self.set_num_classes()
+        
+        
 
     class CustomDataset(Dataset):
         def __init__(self, X, Y, transform=None):

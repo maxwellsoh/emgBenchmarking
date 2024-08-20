@@ -142,7 +142,7 @@ def getEMG (args):
     file = h5py.File(f'DatasetsProcessed_hdf5/{dataset_name}/p{n}/participant_{n}.hdf5', 'r')
     emg = []
     for i, gesture in enumerate(gesture_labels):
-        assert "Gesture" + gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
+        assert gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
         # [# repetitions, # electrodes, # timesteps]
         data = np.array(file[gesture])
         
