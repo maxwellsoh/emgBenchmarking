@@ -142,7 +142,7 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance(restimulus, args):
+def balance_gesture_classifier(restimulus, args):
     """ Balances distribution of restimulus by minimizing zero (rest) gestures.
 
     Args:
@@ -173,8 +173,6 @@ def balance(restimulus, args):
                     count_dict[elements] += 1
                 else:
                     count_dict[elements] = 1
-                
- 
     
     # Calculate average count of non-zero elements
     non_zero_counts = [count for key, count in count_dict.items() if key != (0,)]
@@ -206,6 +204,70 @@ def balance(restimulus, args):
                         indices.append(x)
                 else:
                     indices.append(x)
+                
+    return indices
+
+
+def balance_transition_classifier(restimulus, args):
+    """ Balances distribution of restimulus by minimizing zero (rest) gestures.
+
+    Args:
+        restimulus (tensor): restimulus tensor
+        args: argument parser object
+
+    """
+
+    indices = []
+
+    transition_limit = 0 
+    non_transition_limit = 0
+
+    # First pass: count the occurences of transtion/non-transition tensors
+    for x in range(len(restimulus)):
+
+        unique_elements = torch.unique(restimulus[x])
+        if len(unique_elements) == 1:
+            non_transition_limit += 1
+        else:
+            transition_limit += 1
+    
+    equal_threshold = min(transition_limit, non_transition_limit)
+
+
+    # Second pass ensure that there are equal number of transition and non-transition tensors
+
+    transition_count = 0
+    non_transition_count = 0
+    for x in range(len(restimulus)):
+
+        unique_elements = torch.unique(restimulus[x])
+        if len(unique_elements) == 1:
+            gesture = unique_elements.item()
+
+            if args.partial_dataset_ninapro:
+                if gesture in partial_gesture_indices:
+                    if non_transition_count < equal_threshold:
+                        indices.append(x)
+                        non_transition_count += 1
+
+            else:
+                if non_transition_count < equal_threshold:
+                    indices.append(x)
+                    non_transition_count += 1
+
+        else:
+            if args.partial_dataset_ninapro: 
+                start_gesture = restimulus[x][0][0].item()
+                end_gesture = restimulus[x][0][-1].item()
+                if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
+                    if transition_count < equal_threshold:
+                        indices.append(x)
+                        transition_count += 1
+
+            else:
+                if transition_count < equal_threshold:
+                    indices.append(x)
+                    transition_count += 1
                 
     return indices
 
