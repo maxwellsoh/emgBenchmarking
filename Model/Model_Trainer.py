@@ -275,7 +275,6 @@ class Model_Trainer():
                 drop_last=self.args.force_regression
             )
             
-            
             self.val_loader = DataLoader(
                 val_dataset, 
                 batch_size=self.batch_size, 
@@ -316,6 +315,10 @@ class Model_Trainer():
         if self.args.turn_on_rms:
             wandb_runname += '_rms-'+str(self.args.rms_input_windowsize)
         if self.args.leftout_subject != 0:
+            if (self.args.force_regression and self.args.dataset == "ninapro-db3") and self.args.leftout_subject == 10:
+                # Subject 10 in DB3 is missing a lot of data. We delete it internally and subject 11 gets shifted to become subject 10. Naming it its the "external" subject number for consistency. 
+                wandb_runname += '_LOSO-11'
+
             wandb_runname += '_LOSO-'+str(self.args.leftout_subject)
         wandb_runname += '_' + self.model_name
         if (self.exercises and not self.args.partial_dataset_ninapro):
@@ -364,7 +367,7 @@ class Model_Trainer():
         if self.args.proportion_unlabeled_data_from_training_subjects>0:
             wandb_runname += '_unlabel-subj-prop-' + str(self.args.proportion_unlabeled_data_from_training_subjects)
 
-        if self.args.target_normalize_subject != self.args.leftout_subject:
+        if (self.args.target_normalize > 0) and (self.args.target_normalize_subject != self.args.leftout_subject):
             wandb_runname += '_targ-norm-subj-' + str(self.args.target_normalize_subject)
 
         if self.args.include_transitions: 

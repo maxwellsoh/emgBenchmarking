@@ -169,10 +169,6 @@ class Setup():
         self.exercises = False
         self.args.dataset = self.args.dataset.lower()
 
-        if self.args.target_normalize_subject == 0:
-            self.args.target_normalize_subject = self.args.leftout_subject
-            print("Target normalize subject defaulting to leftout subject.")
-
         if self.args.transition_classifier:
             self.args.include_transitions = True
 
@@ -187,7 +183,6 @@ class Setup():
                 raise NotImplementedError("Cannot use unlabeled domain adaptation with MLP, SVC, or RF")
             if self.args.pretrain_and_finetune:
                 raise NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
-
 
         if (self.args.dataset in {"uciemg", "uci"}):
             if (not os.path.exists("./uciEMG")):
@@ -244,8 +239,8 @@ class Setup():
             assert not(self.args.force_regression and self.args.leftout_subject == 10), "Subject 10 is missing gesture data for exercise 3 and cannot be used. Please choose another subject."
 
             if self.args.force_regression and self.args.leftout_subject == 11: 
-                self.args.leftout_subject = 10
                 # subject 10 is missing force data and is deleted internally 
+                self.args.leftout_subject = 10
 
             self.args.dataset = 'ninapro-db3'
 
@@ -300,10 +295,18 @@ class Setup():
             if (not os.path.exists("./MCS_EMG")):
                 print("MCS dataset does not exist yet. Downloading now...")
                 get_dataset("get_MCS_EMG")
-            
-            if self.args.include_transitions: 
-                if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG_include_transitions/")):
+
+            if self.args.transition_classifier:
+                if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG_transition_classifer/")):
                     print("MCS dataset not yet processed. Processing now")
+                    process_dataset("process_MCS", "--transition_classifier=True")
+
+                utils.include_transitions = True
+                utils.transition_classifier = True
+
+            elif self.args.include_transitions: 
+                if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG_include_transitions/")):
+                    print("MCS dataset not yet processed for include transitions. Processing now")
                     process_dataset("process_MCS", "--include_transitions=True")
 
                 utils.include_transitions = True
@@ -342,6 +345,10 @@ class Setup():
             assert self.args.dataset in {"ninapro-db2", "ninapro-db3"}, "Regression only implemented for Ninapro DB2 and DB3 dataset." 
             assert not self.args.partial_dataset_ninapro, "Cannot use partial dataset for regression. Set exercises=3." 
 
+        if (self.args.target_normalize > 0) and self.args.target_normalize_subject == 0:
+            self.args.target_normalize_subject = self.args.leftout_subject
+            print("Target normalize subject defaulting to leftout subject.")
+
         
 
         # Add date and time to filename
@@ -357,10 +364,16 @@ class Setup():
 
         
 
+        
+
     def print_params(self):
         for param, value in vars(self.args).items():
             if getattr(self.args, param):
-                print(f"The value of --{param} is {value}")
+                if param == "target_normalize_subject":
+                    if self.args.target_normalize != 0.0:
+                        print(f"The value of --{param} is {value}")
+                else:
+                    print(f"The value of --{param} is {value}")
 
     def set_exercise(self):
         """ Set the self.exercises for the partial dataset for Ninapro datasets. 
