@@ -140,6 +140,7 @@ class X_Data(Data):
                 # Get images and create the dataset
                 if (self.args.target_normalize > 0):
                     self.scaler = None
+
                 images = self.utils.getImages(
                     emg[x], 
                     self.scaler, 
@@ -150,6 +151,7 @@ class X_Data(Data):
                     global_min=self.global_low_value, 
                     global_max=self.global_high_value,
                     turn_on_spectrogram=self.args.turn_on_spectrogram, 
+                    turn_on_phase_spectrogram = self.args.turn_on_phase_spectrogram,
                     turn_on_cwt=self.args.turn_on_cwt,
                     turn_on_hht=self.args.turn_on_hht
                 )

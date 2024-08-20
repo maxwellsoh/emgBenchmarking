@@ -41,12 +41,9 @@ def get():
 
     for subject in range(1,11):
         for exercise in args.exercises:
-            print("Loading exercise " + str(exercise) + " of subject " + str(subject))
             # Load the .mat file
             data[exercise] = sio.loadmat(f'./NinaproDB5/s{subject}/S{subject}_E' + str(exercise) + '_A1.mat')
 
-            # Print the keys of the loaded data
-            print("Keys of exercise "+ str(exercise) + " " + str(data[exercise].keys()))
 
             # Access specific variables from the loaded data
             emg_microvolts[exercise] = data[exercise]['emg']
