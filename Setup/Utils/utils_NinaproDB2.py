@@ -30,6 +30,7 @@ cmap = mpl.colormaps['viridis']
 # Gesture Labels
 gesture_labels = {}
 gesture_labels['Rest'] = ['Rest'] # Shared between exercises
+transition_labels = ['Not a Transition', 'Transition'] 
 
 gesture_labels[1] = ['Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction',
                     'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation',
@@ -47,9 +48,7 @@ gesture_labels[3] = ['Flexion Of The Little Finger', 'Flexion Of The Ring Finger
 partial_gesture_labels = ['Rest', 'Finger Abduction', 'Fist', 'Finger Adduction', 'Middle Axis Supination', 
                           'Middle Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 'Ulnar Deviation']
 partial_gesture_indices = [0] + [gesture_labels[1].index(g) + len(gesture_labels['Rest']) for g in partial_gesture_labels[1:]] # 0 is for rest
-
-transition_labels = ['Not a Transition', 'Transition']
-
+label_to_index = {label: index for index, label in enumerate(partial_gesture_indices)}
 class CustomDataset_swav(Dataset):
     def __init__(self, data, labels=None, transform=None):
         self.data = data
@@ -161,7 +160,6 @@ def balance(restimulus, args):
             if args.include_transitions:
                 elements = (restimulus[x][0][0].item(), restimulus[x][0][-1].item()) # take first and last gesture (transition window)
 
-                # elements = int(str(restimulus[x][0][0].item()) + str(restimulus[x][0][-1].item())) # TODO: Figure out why dict keys have to be ints. Making them tuples or strings leads to different dimensions for X and Y for some reason. This is a hacky way to get around it. 
                 if elements in count_dict:
                     count_dict[elements] += 1
                 else:
@@ -176,24 +174,41 @@ def balance(restimulus, args):
     else:
         avg_count = 0  # Handle case where there are no non-zero unique elements
 
-    # Second pass: apply the threshold logic
     for x in range(len(restimulus)):
         unique_elements = torch.unique(restimulus[x])
         if len(unique_elements) == 1:
-            if unique_elements.item() == 0:
+            gesture = unique_elements.item()
+            if gesture == 0: 
                 if numZero < avg_count:
                     indices.append(x)
-                numZero += 1
+                numZero += 1 # Rest always in partial
             else:
-                indices.append(x)
+                if args.partial_dataset_ninapro:
+                    if gesture in partial_gesture_indices:
+                        indices.append(x)
+                else: 
+                    indices.append(x)
         else:
             if args.include_transitions:
-                indices.append(x)
+                if args.partial_dataset_ninapro:
+                    start_gesture = restimulus[x][0][0].item()
+                    end_gesture = restimulus[x][0][-1].item()
+                    if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
+                        indices.append(x)
+                else:
+                    indices.append(x)
                 
     return indices
 
+
+def contract(restim, args):
+    if args.transition_classifier:
+        return contract_transition_classifier(restim, args)
+    else:
+        return contract_gesture_classifier(restim, args)
+
 def contract_gesture_classifier(restim, args):
-    """Converts restimulus tensor to one-hot encoded tensor. Tensor is 1 at the gesture index it corresponds to. 
+    """Converts restimulus tensor to one-hot encoded tensor.
 
     Args:
         restim (tensor): restimulus data tensor
@@ -205,26 +220,24 @@ def contract_gesture_classifier(restim, args):
     numGestures = restim.max() + 1 # + 1 to account for rest gesture
     labels = torch.tensor(())
 
-    if args.partial_dataset_ninapro:
-        labels = labels.new_zeros(size=(len(restim), len(partial_gesture_indices)))
-    else: 
-        labels = labels.new_zeros(size=(len(restim), numGestures))
-  
+
+    labels = labels.new_zeros(size=(len(restim), numGestures))
+
     for x in range(len(restim)):
-
-
         if args.include_transitions:
             gesture = int(restim[x][0][-1]) # take the last gesture it belongs to (labels the transition as part of the gesture)
         else:
             gesture = int(restim[x][0][0])
-            
-        gesture = make_gesture_sequential(gesture, args)
-        labels[x][gesture] = 1.0
+
+        if args.partial_dataset_ninapro:
+            labels[x][label_to_index[gesture]] = 1.0
+        else:
+            labels[x][gesture] = 1.0
     
     return labels
 
 def contract_transition_classifier(restim, args):
-    """Converts restimulus tensor to one-hot encoded tensor. Tensor is 1 at 0 if Not a Transition and 1 at 1 if Transition.
+    """Converts restimulus tensor to one-hot encoded tensor.
 
     Args:
         restim (tensor): restimulus data tensor
@@ -234,28 +247,17 @@ def contract_transition_classifier(restim, args):
         labels: restimulus data now one-hot encoded
     """
 
-    num_classes = 2
     labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(restim), num_classes))
-
-    
+    labels = labels.new_zeros(size=(len(restim), 2))
 
     for x in range(len(restim)):
 
-        if restim[x][0][0].item() == restim[x][0][-1].item(): 
+        if restim[x][0][0].item() == restim[x][0][-1].item():
             labels[x][0] = 1.0
-        else: 
+        else:
             labels[x][1] = 1.0
     
     return labels
-
-def contract(restim, args): 
-
-    if args.transition_classifier:
-        return contract_gesture_classifier(restim, args)
-    else:
-        return contract_transition_classifier(restim, args)
-
 
 def filter(emg):
     # sixth-order Butterworth highpass filter

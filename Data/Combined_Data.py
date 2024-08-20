@@ -67,6 +67,14 @@ class Combined_Data():
             self.env.num_gestures  = numGestures # different gesture count for Ninapro
             self.append_to_new_data(self.X.concatenated_trials, self.Y.concatenated_trials, self.label.concatenated_trials)
 
+            print(f"Subject {subject}: has {numGestures} gestures and self.label.shape {self.label.concatenated_trials.shape}") 
+
+            # turn self.label.concatenated_trails from one hot encoding to labels
+            gestures_to_append = np.argmax(self.label.concatenated_trials, axis=1)
+            unique, counts = np.unique(gestures_to_append, return_counts=True)
+            for i in unique:
+                print(f"Gesture {i}: {counts[i]} ")
+
         self.set_new_data()
 
         del self.X.new_data, self.Y.new_data, self.label.new_data
@@ -96,11 +104,7 @@ class Combined_Data():
 
                 if self.args.force_regression:
                     assert(exercise == 3), "Regression only implemented for exercise 3"
-                    forces_async = pool.map_async(self.utils.getForces, list(
-                        zip(
-                            [(i+1) for i in range(self.utils.num_subjects)], exercise*np.ones(self.utils.num_subjects).astype(int), 
-                            [self.args]*np.ones(self.utils.num_subjects).astype(int)
-                    )))
+                    forces_async = pool.map_async(self.utils.getForces, list(zip([(i+1) for i in range(self.utils.num_subjects)], exercise*np.ones(self.utils.num_subjects).astype(int))))
                     forces.append(forces_async.get())
                     
                 assert len(emg[-1]) == len(labels[-1]), "Number of trials for EMG and labels do not match"
@@ -113,9 +117,6 @@ class Combined_Data():
         else:
             self.Y.data = labels
         self.label.data = labels
-
-        for i in range(len(self.X.data[0])):
-            assert(len(self.X.data[0][i]) == len(self.Y.data[0][i])), "Number of windows for X and Y do not match."
 
     def load_other_datasets(self):
 

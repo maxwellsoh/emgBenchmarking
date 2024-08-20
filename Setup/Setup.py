@@ -173,7 +173,6 @@ class Setup():
             self.args.include_transitions = True
 
         if self.args.include_transitions:
-
             transition_datasets = {"ninapro-db2", "ninapro_db2", "ninapro-db5", "ninapro_db5", "ninapro-db3", "ninapro_db3", "uciemg", "uci", "mcs"}
             assert self.args.dataset in transition_datasets, f"Transitions from rest to gesture are only preserved in {transition_datasets} datasets."
 

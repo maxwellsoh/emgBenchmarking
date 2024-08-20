@@ -48,6 +48,9 @@ partial_gesture_labels = ['Rest', 'Finger Abduction', 'Fist', 'Finger Adduction'
                           'Middle Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 'Ulnar Deviation']
 partial_gesture_indices = [0] + [gesture_labels[2].index(g) + len(gesture_labels['Rest']) for g in partial_gesture_labels[1:]] # 0 is for rest 
 
+label_to_index = {label: index for index, label in enumerate(partial_gesture_indices)}
+transition_labels = ['Not a Transition', 'Transition']
+
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
         self.data = data
@@ -116,7 +119,7 @@ def balance(restimulus, args):
         unique_elements = torch.unique(restimulus[x])
         if len(unique_elements) == 1:
             element = unique_elements.item()
-            element = (element,)
+            element = (element, )
             if element in count_dict:
                 count_dict[element] += 1
             else:
@@ -131,6 +134,8 @@ def balance(restimulus, args):
                 else:
                     count_dict[elements] = 1
                 
+ 
+    
     # Calculate average count of non-zero elements
     non_zero_counts = [count for key, count in count_dict.items() if key != (0,)]
     if non_zero_counts:
@@ -138,23 +143,40 @@ def balance(restimulus, args):
     else:
         avg_count = 0  # Handle case where there are no non-zero unique elements
 
-    # Second pass: apply the threshold logic
     for x in range(len(restimulus)):
         unique_elements = torch.unique(restimulus[x])
         if len(unique_elements) == 1:
-            if unique_elements.item() == 0:
+            gesture = unique_elements.item()
+            if gesture == 0: 
                 if numZero < avg_count:
                     indices.append(x)
-                numZero += 1
+                numZero += 1 # Rest always in partial
             else:
-                indices.append(x)
+                if args.partial_dataset_ninapro:
+                    if gesture in partial_gesture_indices:
+                        indices.append(x)
+                else: 
+                    indices.append(x)
         else:
             if args.include_transitions:
-                indices.append(x)
+                if args.partial_dataset_ninapro:
+                    start_gesture = restimulus[x][0][0].item()
+                    end_gesture = restimulus[x][0][-1].item()
+                    if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
+                        indices.append(x)
+                else:
+                    indices.append(x)
                 
     return indices
 
+
 def contract(restim, args):
+    if args.transition_classifier:
+        return contract_transition_classifier(restim, args)
+    else:
+        return contract_gesture_classifier(restim, args)
+
+def contract_gesture_classifier(restim, args):
     """Converts restimulus tensor to one-hot encoded tensor.
 
     Args:
@@ -166,17 +188,43 @@ def contract(restim, args):
     """
     numGestures = restim.max() + 1 # + 1 to account for rest gesture
     labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(restim), numGestures))
-  
-    for x in range(len(restim)):
 
+
+    labels = labels.new_zeros(size=(len(restim), numGestures))
+
+    for x in range(len(restim)):
         if args.include_transitions:
             gesture = int(restim[x][0][-1]) # take the last gesture it belongs to (labels the transition as part of the gesture)
         else:
             gesture = int(restim[x][0][0])
-            
-        gesture = make_gesture_sequential(gesture, args)
-        labels[x][gesture] = 1.0
+
+        if args.partial_dataset_ninapro:
+            labels[x][label_to_index[gesture]] = 1.0
+        else:
+            labels[x][gesture] = 1.0
+    
+    return labels
+
+def contract_transition_classifier(restim, args):
+    """Converts restimulus tensor to one-hot encoded tensor.
+
+    Args:
+        restim (tensor): restimulus data tensor
+        unfold (bool, optional): whether data was unfolded according to time steps. Defaults to True.
+
+    Returns:
+        labels: restimulus data now one-hot encoded
+    """
+
+    labels = torch.tensor(())
+    labels = labels.new_zeros(size=(len(restim), 2))
+
+    for x in range(len(restim)):
+
+        if restim[x][0][0].item() == restim[x][0][-1].item():
+            labels[x][0] = 1.0
+        else:
+            labels[x][1] = 1.0
     
     return labels
 
