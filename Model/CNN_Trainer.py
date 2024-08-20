@@ -70,7 +70,7 @@ class CNN_Trainer(Model_Trainer):
             self.model = resnet50(weights=ResNet50_Weights.DEFAULT)
             # Replace the last fully connected layer
             num_ftrs = self.model.fc.in_features  # Get the number of input features of the original fc layer
-            self.model.fc = nn.Linear(num_ftrs, self.num_gestures)  # Replace with a new linear layer
+            self.model.fc = nn.Linear(num_ftrs, self.num_classes)  # Replace with a new linear layer
 
         elif self.args.model == 'convnext_tiny_custom':
             class LayerNorm2d(nn.LayerNorm):
@@ -85,7 +85,7 @@ class CNN_Trainer(Model_Trainer):
 
             n_inputs = 768
             hidden_size = 128 # default is 2048
-            n_outputs = self.num_gestures
+            n_outputs = self.num_classes
 
             # self.model = timm.create_model(self.model_name, pretrained=True, num_classes=10)
             self.model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
@@ -112,13 +112,13 @@ class CNN_Trainer(Model_Trainer):
 
         elif self.args.model == 'vit_tiny_patch2_32':
             pretrain_path = "https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_tiny_patch2_32_mlp_im_1k_32.pth"
-            self.model = VisualTransformer.vit_tiny_patch2_32(pretrained=True, pretrained_path=pretrain_path, num_classes=self.num_gestures)
+            self.model = VisualTransformer.vit_tiny_patch2_32(pretrained=True, pretrained_path=pretrain_path, num_classes=self.num_classes)
 
         elif self.args.model not in ["MLP", "SVC", "RF"]:
             if self.args.force_regression: 
                 self.model = timm.create_model(self.model_name, pretrained=True, num_classes=self.Y.validation.shape[1])
             else: 
-                self.model = timm.create_model(self.model_name, pretrained=True, num_classes=self.num_gestures)
+                self.model = timm.create_model(self.model_name, pretrained=True, num_classes=self.num_classes)
 
 
     def set_param_requires_grad(self):
@@ -210,7 +210,7 @@ class CNN_Trainer(Model_Trainer):
         """
 
         # Evaluate performance on test metrics
-        ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, testing_metrics)
+        ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_classes, self.criterion, self.args, testing_metrics)
 
         if not self.args.force_regression:
             self.print_classification_metrics()
@@ -321,8 +321,8 @@ class CNN_Trainer(Model_Trainer):
             train_loss /= len(finetune_loader)
             val_loss /= len(self.val_loader)
             if not self.args.force_regression: 
-                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_gestures)
-                fpr_results = ml_utils.evaluate_model_fpr_at_tpr(self.model, self.val_loader, self.device, self.num_gestures)
+                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_classes)
+                fpr_results = ml_utils.evaluate_model_fpr_at_tpr(self.model, self.val_loader, self.device, self.num_classes)
                 confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
 
             # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
@@ -378,7 +378,7 @@ class CNN_Trainer(Model_Trainer):
 
         # Evaluate the self.model on the test set
         ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.
-        device, self.num_gestures, self.criterion, self.args, testing_metrics)
+        device, self.num_classes, self.criterion, self.args, testing_metrics)
 
         if not self.args.force_regression:
             self.print_classification_metrics()
