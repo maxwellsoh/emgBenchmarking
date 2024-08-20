@@ -209,68 +209,69 @@ def balance_gesture_classifier(restimulus, args):
 
 
 def balance_transition_classifier(restimulus, args):
-    """ Balances distribution of restimulus by minimizing zero (rest) gestures.
 
-    Args:
-        restimulus (tensor): restimulus tensor
-        args: argument parser object
+    # First pass to count the number of each type of window
 
-    """
+    non_transition_total = 0
+    transition_total = 0 
+
+    non_transition_count = {}
+    transition_count = {}
 
     indices = []
 
-    transition_limit = 0 
-    non_transition_limit = 0
-
-    # First pass: count the occurences of transtion/non-transition tensors
     for x in range(len(restimulus)):
 
-        unique_elements = torch.unique(restimulus[x])
-        if len(unique_elements) == 1:
-            non_transition_limit += 1
-        else:
-            transition_limit += 1
+        start_gesture = restimulus[x][0][0].item()
+        end_gesture = restimulus[x][0][-1].item()
+
+        if start_gesture == end_gesture: 
+            non_transition_total += 1
+            gesture = (start_gesture, )
+            non_transition_count[gesture] = non_transition_count.get(gesture, 0) + 1
+
+        else: 
+            transition_total += 1
+            gesture = (start_gesture, end_gesture) 
+            gesture = tuple(sorted(gesture))
+            transition_count[gesture] = transition_count.get(gesture, 0) + 1
+
     
-    equal_threshold = min(transition_limit, non_transition_limit)
+    # Calculate average count of each gesture 
 
+    equal_threshold = min(non_transition_total, transition_total)
+    non_transition_avg = equal_threshold / len(non_transition_count)
+    transition_avg = equal_threshold / len(transition_count)
 
-    # Second pass ensure that there are equal number of transition and non-transition tensors
+    non_transition_windows = {key: non_transition_avg for key in non_transition_count.keys()}
+    transition_windows = {key: transition_avg for key in transition_count.keys()}
 
-    transition_count = 0
-    non_transition_count = 0
+    # Second pass: Add transtion/non-transition windows balanced per gesture.
+
     for x in range(len(restimulus)):
 
-        unique_elements = torch.unique(restimulus[x])
-        if len(unique_elements) == 1:
-            gesture = unique_elements.item()
+        start_gesture = restimulus[x][0][0].item()
+        end_gesture = restimulus[x][0][-1].item()
+
+        if start_gesture == end_gesture:
+            gesture = (start_gesture, )
+            if non_transition_count[gesture] < non_transition_windows[gesture]:
+                indices.append(x)
+                non_transition_count[gesture] -= 1
+        else:
+            gesture = (start_gesture, end_gesture)
 
             if args.partial_dataset_ninapro:
-                if gesture in partial_gesture_indices:
-                    if non_transition_count < equal_threshold:
-                        indices.append(x)
-                        non_transition_count += 1
 
-            else:
-                if non_transition_count < equal_threshold:
-                    indices.append(x)
-                    non_transition_count += 1
-
-        else:
-            if args.partial_dataset_ninapro: 
-                start_gesture = restimulus[x][0][0].item()
-                end_gesture = restimulus[x][0][-1].item()
                 if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
-                    if transition_count < equal_threshold:
+                    if transition_count[gesture] < transition_windows[gesture]:
                         indices.append(x)
-                        transition_count += 1
+                        transition_count[gesture] -= 1
 
             else:
-                if transition_count < equal_threshold:
+                if transition_count[gesture] < transition_windows[gesture]:
                     indices.append(x)
-                    transition_count += 1
-                
-    return indices
-
+                    transition_count[gesture] -= 1
 
 
 def contract(restim, args):
