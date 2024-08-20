@@ -96,7 +96,8 @@ class X_Data(Data):
             else:
                 exercises_numbers_filename = '-'.join(map(str, self.args.exercises))
                 base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
-            
+        if self.args.include_transitions: 
+            base_foldername_zarr += 'include_transitions/'
         if self.args.save_images: 
             if not os.path.exists(base_foldername_zarr):
                 os.makedirs(base_foldername_zarr)
@@ -116,6 +117,7 @@ class X_Data(Data):
 
         emg = self.data # should already be defined as emg using load_data
         image_data = []
+        # emg[0].shape = 796 -> has the extra windows
         for x in tqdm(range(len(emg)), desc="Number of Subjects "):
             if self.args.leave_one_session_out:
                 subject_folder = f'session{x}/'
@@ -162,6 +164,8 @@ class X_Data(Data):
                 else:
                     print(f"Did not save dataset for subject {x} at {foldername_zarr} because save_images is set to False")
                 image_data += [images]
+
+            assert len(emg[x]) == len(image_data[x]), f"Number of windows in EMG and images do not match when x = {x}. Deleting old images may fix this issue."
                 
-        self.data = image_data
+        self.data = image_data 
         

@@ -21,6 +21,9 @@ import scipy
 import emd
 import fcwt
 
+
+
+include_transitions = False # Whether or not to expand the gesture window to when cue starts. Set in Setup.py.
 fs = 2000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
@@ -112,7 +115,11 @@ def getEMG (args):
         leftout = args[3]
 
     assert n >= 1 and n <= num_subjects
-    file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG/p{n}/flattened_participant_{n}.hdf5', 'r')
+
+    if include_transitions: 
+        file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG_include_transitions/p{n}/flattened_participant_{n}.hdf5', 'r')
+    else:
+        file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     emg = []
     for i, gesture in enumerate(gesture_labels):
         assert "Gesture" + gesture in file, f"Gesture {gesture} not found in file for participant {n}!"
@@ -123,9 +130,9 @@ def getEMG (args):
             for j in range(len(data)):
                 data[j] = target_normalize(data[j], target_min, target_max, i)
         
-        data = filter(torch.from_numpy(data)).unfold(dimension=-1, size=wLenTimesteps, step=stepLen) # (5, 4, 20, 500)
+        data = filter(torch.from_numpy(data)).unfold(dimension=-1, size=wLenTimesteps, step=stepLen) # 
         emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)).to(torch.float16)) 
-    return torch.cat(emg, dim=0) # (REPETITION*WINDOW, ELECTRODE, TIME STEP)
+    return torch.cat(emg, dim=0) # (CYCLE*WINDOWS(MS OF GESTURE/WINDOW SIZE)*NUM_GESTURES, CHANNEL, TIME STEP) = (5 repetitions * 24 (12,000 ms of gesture/(250 ms window * 2000 fs = 500)) * 7 gestures, 4 channels, 500 time steps)
 
 # assumes first of the 4 repetitions accessed
 def getExtrema (n, proportion):
@@ -144,7 +151,11 @@ def getExtrema (n, proportion):
     maxes = np.zeros((numElectrodes, numGestures))
 
     assert n >= 1 and n <= num_subjects
-    file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG/p{n}/flattened_participant_{n}.hdf5', 'r')
+
+    if include_transitions: 
+        file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG_include_transitions/p{n}/flattened_participant_{n}.hdf5', 'r')
+    else: 
+        file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG/p{n}/flattened_participant_{n}.hdf5', 'r')
     for i, gesture in enumerate(gesture_labels):
         # get the first repetition for each gesture
         data = np.array(file["Gesture" + gesture])  # (REPETITION, ELECTRODE, TIME STEPS)
@@ -164,7 +175,10 @@ def getExtrema (n, proportion):
     return mins, maxes
 
 def getLabels (n):
-    timesteps_for_one_gesture = 100 # 250 ms window with 250 step len empirically determines this
+    if include_transitions:
+        timesteps_for_one_gesture = 5 * 24 # (5 seconds per * (12000/500 = time of window/step but in fs))
+    else:
+        timesteps_for_one_gesture = 100 # 250 ms window with 250 step len empirically determines this
     labels = np.zeros((timesteps_for_one_gesture*numGestures, numGestures))
     for i in range(timesteps_for_one_gesture):
         for j in range(numGestures):

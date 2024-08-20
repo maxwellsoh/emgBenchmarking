@@ -341,6 +341,9 @@ class Model_Trainer():
         if (self.args.target_normalize > 0) and (self.args.target_normalize_subject != self.args.leftout_subject):
             wandb_runname += '_targ-norm-subj-' + str(self.args.target_normalize_subject)
 
+        if self.args.include_transitions: 
+            wandb_runname += '_include-transitions'
+
         self.wandb_runname = wandb_runname
 
 

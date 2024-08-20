@@ -33,6 +33,8 @@ cmap = mpl.colormaps['viridis']
 gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations","extended palm"]
 gesture_labels = gesture_labels[:numGestures]
 
+include_transitions = False # Whether or not to include mixed gestures and label them as their last. Defined by Setup/Setup.py
+
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
         self.data = data
@@ -69,8 +71,22 @@ def seed_worker(worker_id):
 def balance (restimulus):
     indices = []
     for x in range (len(restimulus)):
-        if len(torch.unique(restimulus[x])) == 1 and restimulus[x][0] > 0 and restimulus[x][0] < 7:
-            indices.append(x)
+        unique_gestures = len(torch.unique(restimulus[x]))
+        if unique_gestures == 1: 
+            gesture = restimulus[x][0] - 1 # 0 is unmarked data, 1 rest, etc
+            if gesture >= 0 and gesture <= 6: 
+                indices.append(x)
+
+        else: 
+            if include_transitions:
+                start_gesture = restimulus[x][0] - 1
+                end_gesture = restimulus[x][-1] - 1 
+            
+                if end_gesture >= 0 and end_gesture <= 6:
+                    indices.append(x)
+
+                    # Uncertain what Unmarked represents. Will include windows that go from Unmarked -> Gesture but not windows that go from Gesture -> Unmarked. (Unmarked is -1)
+          
     return indices
 
 def contract(R, unfold=True):
@@ -78,7 +94,11 @@ def contract(R, unfold=True):
     labels = labels.new_zeros(size=(len(R), numGestures))
     if (unfold):
         for x in range(len(R)):
-            labels[x][int(R[x][0]) - 1] = 1.0
+            if include_transitions: 
+                gesture = int(R[x][-1]) -1 # take the last gesture of the window, subtract by 1 because 0 is unmarked data
+            else: 
+                gesture = int(R[x][0]) - 1 # take the first gesture of the window, subtract by 1 because 0 is unmarked data
+            labels[x][gesture] = 1.0
     else:
         for x in range(len(R)):
             labels[x][int(R[x]) - 1] = 1.0
@@ -102,9 +122,18 @@ def getRestim (n, unfold=True, session_number=1):
                 print("Reading file", file, "Subject", n)
             else:
                 continue
+
             if (unfold):
-                data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:]).unfold(dimension=0, size=wLenTimesteps, step=stepLen)
-                restim.append(data[:, -1][balance(data[:, -1])])
+
+                file_path = os.path.join(f"uciEMG/{n}/", file)
+
+                data_numpy = np.loadtxt(file_path, dtype=np.float32, skiprows=1)[:, 1:] # ignore first row (header) and first column (time)
+                data_tensor = torch.from_numpy(data_numpy)
+                data_unfolded = data_tensor.unfold(dimension=0, size=wLenTimesteps, step=stepLen)
+                gesture_col = data_unfolded[:, -1] # take the gesture column
+                balanced_data = gesture_col[balance(gesture_col)]
+                restim.append(balanced_data)
+
             else:
                 data = torch.from_numpy(np.loadtxt(os.path.join(f"uciEMG/{n}/", file), dtype=np.float32, skiprows=1)[:, 1:])
                 restim.append(data[:, -1])
@@ -498,6 +527,9 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         for i in tqdm(range(len(emg)), desc="Creating CWT Images"):
             images_cwt_list.append(optimized_makeOneCWTImage(*args[i]))
         images = images_cwt_list
+
+    # elif turn_on_phase: 
+    #     # TODO: update the phase here 
         
     elif turn_on_hht:
         raise NotImplementedError("HHT is not implemented yet")

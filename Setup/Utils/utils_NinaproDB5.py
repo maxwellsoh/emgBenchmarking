@@ -99,13 +99,14 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance(restimulus):
+def balance(restimulus, args):
     """ Balances distribution of restimulus by minimizing zero (rest) gestures.
 
     Args:
         restimulus (tensor): restimulus tensor
-    """
+        args: argument parser object
 
+    """
     numZero = 0
     indices = []
     count_dict = {}
@@ -115,13 +116,23 @@ def balance(restimulus):
         unique_elements = torch.unique(restimulus[x])
         if len(unique_elements) == 1:
             element = unique_elements.item()
+            element = (element,)
             if element in count_dict:
                 count_dict[element] += 1
             else:
                 count_dict[element] = 1
-    
+
+        else:
+            if args.include_transitions:
+                elements = (restimulus[x][0][0].item(), restimulus[x][0][-1].item()) # take first and last gesture (transition window)
+
+                if elements in count_dict:
+                    count_dict[elements] += 1
+                else:
+                    count_dict[elements] = 1
+                
     # Calculate average count of non-zero elements
-    non_zero_counts = [count for key, count in count_dict.items() if key != 0]
+    non_zero_counts = [count for key, count in count_dict.items() if key != (0,)]
     if non_zero_counts:
         avg_count = sum(non_zero_counts) / len(non_zero_counts)
     else:
@@ -137,10 +148,13 @@ def balance(restimulus):
                 numZero += 1
             else:
                 indices.append(x)
+        else:
+            if args.include_transitions:
+                indices.append(x)
                 
     return indices
 
-def contract(restim, unfold=True):
+def contract(restim, args):
     """Converts restimulus tensor to one-hot encoded tensor.
 
     Args:
@@ -153,12 +167,17 @@ def contract(restim, unfold=True):
     numGestures = restim.max() + 1 # + 1 to account for rest gesture
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(restim), numGestures))
-    if unfold:
-        for x in range(len(restim)):
-            labels[x][int(restim[x][0][0])] = 1.0
-    else:
-        for x in range(len(restim)):
-            labels[x][int(restim[x][0])] = 1.0
+  
+    for x in range(len(restim)):
+
+        if args.include_transitions:
+            gesture = int(restim[x][0][-1]) # take the last gesture it belongs to (labels the transition as part of the gesture)
+        else:
+            gesture = int(restim[x][0][0])
+            
+        gesture = make_gesture_sequential(gesture, args)
+        labels[x][gesture] = 1.0
+    
     return labels
 
 def filter(emg):
@@ -257,7 +276,7 @@ def getEMG(input):
         emg = torch.tensor(emg.values)
 
     restim = getRestim(n, exercise, unfold=True)
-    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim)])
+    return filter(emg.unfold(dimension=0, size=wLenTimesteps, step=stepLen)[balance(restim, args)])
     
 def get_decrements(args):
     """
@@ -274,7 +293,7 @@ def get_decrements(args):
     exercises = tuple(args.exercises)
     return decrements[exercises]
 
-def make_gestures_sequential(balanced_restim, args):
+def make_gesture_sequential(gesture, args):
     """
     Removes missing gaps between gestures depending on which exercises are selected.
 
@@ -288,19 +307,16 @@ def make_gestures_sequential(balanced_restim, args):
    
     exercise_starts = {1: 1, 2: 18, 3: 41}
     decrements = get_decrements(args)
-    for x in range(len(balanced_restim)): 
-        value = balanced_restim[x][0][0] # TODO: break here and check why its [x][0][0]
 
-        if value != 0:
-            exercise = (max(ex for ex in exercise_starts if exercise_starts[ex] <= value))-1
-            d = decrements[exercise]
-    
-            balanced_restim[x][0][0] = value - d
+    if gesture != 0: 
+        exercise_group = (max(ex for ex in exercise_starts if exercise_starts[ex] <= gesture))-1
+        d = decrements[exercise_group]
+    else:
+        d = 0
 
-    return balanced_restim
-
+    return gesture - d
   
-def getLabels (input, unfold=True):
+def getLabels (input):
     """Returns one-hot-encoding labels for a given participant and exercise. Labels are balanced (reduced rest gestures) and are sequential (no gaps between gestures of different exercises).
 
     Args:
@@ -314,9 +330,8 @@ def getLabels (input, unfold=True):
 
     n, exercise, args = input
     restim = getRestim(n, exercise)             
-    balanced_restim = restim[balance(restim)]    # (WINDOW, GESTURE, TIME STEP) 
-    ordered_restim = make_gestures_sequential(balanced_restim, args) 
-    return contract(ordered_restim)
+    balanced_restim = restim[balance(restimulus=restim, args=args)]   # (WINDOW, GESTURE, TIME STEP) 
+    return contract(restim=balanced_restim, args=args)
 
 def getExtrema (n, proportion, exercise, args):
     

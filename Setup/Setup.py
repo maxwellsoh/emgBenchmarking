@@ -61,7 +61,7 @@ class Setup():
         # Arguments for run_CNN_EMG/using config files
         parser.add_argument('--config', type=str, help="Path to the config file.")
         parser.add_argument('--table', type=str, help="Specify which table to replicate. (Ex: 1, 2, 3, 3_intersession)")
-
+        parser.add_argument("--include_transitions", type=utils.str2bool, help="Whether or not to include transitions windows and label them as the final gesture. Set to False by default.", default=False)
         parser.add_argument("--multiprocessing", type=utils.str2bool, help="Whether or not to use multiprocessing when acquiring data. Set to True by default.", default=True)
         parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
         parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
@@ -153,6 +153,16 @@ class Setup():
             script_path = os.path.abspath(os.path.join(setup_dir, f"Get_Datasets/{dataset}.sh"))
             subprocess.run(['sh', script_path])
 
+        def process_dataset(dataset, params=''):
+            """
+            Downloads dataset in the root rather than in Setup directory.
+            """
+            setup_dir = os.path.dirname(__file__)
+            script_path = os.path.abspath(os.path.join(setup_dir, f"Get_Datasets/{dataset}.py"))
+            subprocess.run(['python', script_path, params])
+
+
+
         """ Conducts safety checks on the self.args, downloads needed datasets, and imports the correct self.utils file. """
         
         self.exercises = False
@@ -172,6 +182,9 @@ class Setup():
             from .Utils import utils_UCI as utils
             self.project_name = 'emg_benchmarking_uci'
             self.args.dataset = "uciemg"
+
+            if self.args.include_transitions: 
+                utils.include_transitions = True
 
         elif (self.args.dataset in {"ninapro-db2", "ninapro_db2"}):
             if (not os.path.exists("./NinaproDB2")):
@@ -273,7 +286,19 @@ class Setup():
             if (not os.path.exists("./MCS_EMG")):
                 print("MCS dataset does not exist yet. Downloading now...")
                 get_dataset("get_MCS_EMG")
-                get_dataset("process_MCS")
+            
+            if self.args.include_transitions: 
+                if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG_include_transitions/")):
+                    print("MCS dataset not yet processed. Processing now")
+                    process_dataset("process_MCS", "--include_transitions=True")
+
+                utils.include_transitions = True
+
+            else: 
+                if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG/")):
+                    print("MCS dataset not yet processed. Processing now")
+                    process_dataset("process_MCS", "--include_transitions=False")      
+                utils.include_transitions = False      
            
             self.project_name = 'emg_benchmarking_mcs'
             if self.args.full_dataset_mcs:
