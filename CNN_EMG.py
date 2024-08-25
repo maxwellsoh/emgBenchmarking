@@ -24,8 +24,6 @@ from Model.Unlabeled_Domain_Adaptation_Trainer import Unlabeled_Domain_Adaptatio
 from Model.MLP_Trainer import MLP_Trainer
 from Model.SVC_RF_Trainer import SVC_RF_Trainer
 
-
-
 class Run_Setup():
     """
     Sets up the run by reading in arguments, setting the dataset source, conducting safety checks, printing values and setting up env.

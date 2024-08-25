@@ -226,22 +226,37 @@ def balance_transition_classifier(restimulus, args):
         end_gesture = restimulus[x][0][-1].item()
 
         if start_gesture == end_gesture: 
-            non_transition_total += 1
             gesture = (start_gesture, )
-            non_transition_count[gesture] = non_transition_count.get(gesture, 0) + 1
+
+            if args.partial_dataset_ninapro:
+                if start_gesture in partial_gesture_indices:
+                    non_transition_total += 1
+                    non_transition_count[gesture] = non_transition_count.get(gesture, 0) + 1
+
+            else: 
+                non_transition_total += 1
+                non_transition_count[gesture] = non_transition_count.get(gesture, 0) + 1
+
 
         else: 
-            transition_total += 1
-            gesture = (start_gesture, end_gesture) 
-            gesture = tuple(sorted(gesture))
-            transition_count[gesture] = transition_count.get(gesture, 0) + 1
+
+            if args.partial_dataset_ninapro:
+                if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
+                    transition_total += 1
+                    gesture = (start_gesture, end_gesture) 
+                    transition_count[gesture] = transition_count.get(gesture, 0) + 1
+            
+            else:
+                transition_total += 1
+                gesture = (start_gesture, end_gesture) 
+                transition_count[gesture] = transition_count.get(gesture, 0) + 1
 
     
     # Calculate average count of each gesture 
 
     equal_threshold = min(non_transition_total, transition_total)
-    non_transition_avg = equal_threshold / len(non_transition_count)
-    transition_avg = equal_threshold / len(transition_count)
+    non_transition_avg = equal_threshold // len(non_transition_count)
+    transition_avg = equal_threshold // len(transition_count)
 
     non_transition_windows = {key: non_transition_avg for key in non_transition_count.keys()}
     transition_windows = {key: transition_avg for key in transition_count.keys()}
@@ -255,24 +270,33 @@ def balance_transition_classifier(restimulus, args):
 
         if start_gesture == end_gesture:
             gesture = (start_gesture, )
-            if non_transition_count[gesture] < non_transition_windows[gesture]:
-                indices.append(x)
-                non_transition_count[gesture] -= 1
+
+            if args.partial_dataset_ninapro and (start_gesture in partial_gesture_indices):
+                if non_transition_count[gesture] < non_transition_windows[gesture]:
+                    indices.append(x)
+                    non_transition_count[gesture] -= 1
+            else:
+                if non_transition_count[gesture] < non_transition_windows[gesture]:
+                    indices.append(x)
+                    non_transition_count[gesture] -= 1
         else:
             gesture = (start_gesture, end_gesture)
 
-            if args.partial_dataset_ninapro:
-
-                if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
+            if args.partial_dataset_ninapro and (start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices):
                     if transition_count[gesture] < transition_windows[gesture]:
                         indices.append(x)
                         transition_count[gesture] -= 1
-
             else:
                 if transition_count[gesture] < transition_windows[gesture]:
                     indices.append(x)
                     transition_count[gesture] -= 1
 
+
+def balance(restim, args):
+    if args.transition_classifier:
+        return balance_transition_classifier(restim, args)
+    else:
+        return balance_gesture_classifier(restim, args)
 
 def contract(restim, args):
     if args.transition_classifier:

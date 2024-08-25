@@ -426,6 +426,7 @@ class Model_Trainer():
     def plot_test_images(self):
         self.utils.plot_average_images(self.X.test, np.argmax(self.label.test.cpu().detach().numpy(), axis=1), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'test')
         self.utils.plot_first_fifteen_images(self.X.test, np.argmax(self.label.test.cpu().detach().numpy(), axis=1), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'test')
+        
 
     def plot_validation_images(self):
 
