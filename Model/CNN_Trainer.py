@@ -412,10 +412,10 @@ class CNN_Trainer(Model_Trainer):
 
                 for X_batch, Y_batch in t:
                     X_batch = X_batch.to(self.device).to(torch.float32)
-                    Y_batch =Y_batch.to(self.device).to(torch.float32) # ground truth
+                    Y_batch = Y_batch.to(self.device).to(torch.float32) # ground truth
 
                     if self.args.force_regression:
-                       Y_batch_long =Y_batch
+                       Y_batch_long = Y_batch
                     else: 
                        Y_batch_long = torch.argmax(Y_batch, dim=1)
 

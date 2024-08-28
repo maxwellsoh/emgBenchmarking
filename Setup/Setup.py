@@ -64,6 +64,10 @@ class Setup():
         parser.add_argument("--include_transitions", type=utils.str2bool, help="Whether or not to include transitions windows and label them as the final gesture. Set to False by default.", default=False)
         parser.add_argument("--multiprocessing", type=utils.str2bool, help="Whether or not to use multiprocessing when acquiring data. Set to True by default.", default=True)
         parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
+
+        # Add argument for doing domain generalization algorithm
+        parser.add_argument('--domain_generalization', type=str, help='domain generalization algorithm to use (e.g. \'IRM\',\'CORAL\'.', default=False)
+
         parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
         # Add argument for doing leave-one-subject-out
         parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
@@ -337,6 +341,12 @@ class Setup():
             self.args.target_normalize_subject = self.args.leftout_subject
             print("Target normalize subject defaulting to leftout subject.")
 
+        if self.args.domain_generalization == "IRM":
+            assert not self.args.turn_on_unlabeled_domain_adaptation, "IRM cannot be used with unlabeled domain adaptation currently."
+            assert self.args.leave_one_subject_out, "IRM can only be used with leave-one-subject-out currently."
+
+
+        # Set Final Values
         # Add date and time to filename
         current_datetime = datetime.datetime.now()
         self.formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")

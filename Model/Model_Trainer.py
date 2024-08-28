@@ -14,6 +14,11 @@ import numpy as np
 import torch 
 import multiprocessing
 from torch.utils.data import DataLoader
+import random
+import copy
+from torch.utils.data import Sampler
+
+
 
 class Model_Trainer():
     def __init__(self, X_data, Y_data, label_data, env):
@@ -232,10 +237,61 @@ class Model_Trainer():
 
             return self.train_dataset, val_dataset, test_dataset
 
+
+
+
+
+
     def set_loaders(self):
 
         if self.args.turn_on_unlabeled_domain_adaptation:
             raise NotImplementedError("This method should be overwritten in Unlabelled_Domain_Adaptation_Trainer")
+        
+        elif self.args.domain_generalization == "IRM":
+
+            train_dataset, val_dataset, test_dataset = self.create_datasets()
+
+            # Randomly sample within batches 
+            self.sampler = RandomDomainSampler(
+                batch_size=self.args.batch_size,
+                cumulative_sizes=self.X.cumulative_sizes,
+                num_subjects=self.utils.num_subjects
+            )
+
+            self.train_loader = DataLoader(
+                train_dataset,
+                batch_size=self.args.batch_size,
+                num_workers=multiprocessing.cpu_count()//8,
+                worker_init_fn=self.utils.seed_worker,
+                pin_memory=True,
+                sampler=self.sampler,
+                # drop_last=True 
+                drop_last=False
+            )
+
+            self.val_loader = DataLoader(
+                val_dataset,
+                batch_size=self.args.batch_size,
+                num_workers=multiprocessing.cpu_count()//8,
+                worker_init_fn=self.utils.seed_worker,
+                pin_memory=True,
+                shuffle=False,
+                # drop_last=True
+                drop_last=False
+            )
+
+            self.test_loader = DataLoader(
+                test_dataset,
+                batch_size=self.args.batch_size,
+                num_workers=multiprocessing.cpu_count()//8,
+                worker_init_fn=self.utils.seed_worker,
+                pin_memory=True,
+                shuffle=False,
+                # drop_last=True
+                drop_last=False
+            )
+
+
 
         else:
 
@@ -476,7 +532,101 @@ class Model_Trainer():
         raise NotImplementedError("Subclasses (Unlabeled_Domain_Adaptation, MLP, or SVC_RF trainers) must implement model_loop()")
     
 
+
+'''
+
+RandomDomainSampler from: https://github.com/thuml/Transfer-Learning-Library/blob/master/examples/domain_generalization/image_classification/irm.py
+'''
+
+class RandomDomainSampler(Sampler):
+    """
+    Source: DomainBed 
+    Randomly sample :math:`N` domains, then randomly select :math:`K` samples in each domain to form a mini-batch of
+    size :math:`N\times K`.
+
+    Args:
+        data_source: dataset that contains data from multiple domains (each subject's data is concated to itself)
+        data_source (ConcatDataset): dataset that contains data from multiple domains
+        batch_size (int): mini-batch size (:math:`N\times K` here)
+    """
+
+    def __init__(self, batch_size: int, cumulative_sizes, num_subjects):
+
+        super(Sampler, self).__init__()
+        self.n_domains_in_dataset = num_subjects - 1
+        self.n_domains_per_batch = num_subjects - 1 
+
+        self.sample_idxes_per_domain = [] 
+
+        self.batch_size_per_domain = []
+        total_windows = cumulative_sizes[-1]
+
+        start = 0
+
+        # Sort indices for each domain (subject) 
+        for end in cumulative_sizes:
+            subject_proportion = round((end-start) / total_windows * batch_size)
+            self.batch_size_per_domain.append(subject_proportion)
+
+            idxes = [idx for idx in range(start, end)] 
+            self.sample_idxes_per_domain.append(idxes) 
+            start = end
+
+        total_batch_size = sum(self.batch_size_per_domain)
+        while total_batch_size != batch_size: 
+            max_idx = self.batch_size_per_domain.index(max(self.batch_size_per_domain))
+            self.batch_size_per_domain[max_idx] -= 1
+            total_batch_size = sum(self.batch_size_per_domain)
+
+        self.length = len(list(self.__iter__()))
+
+    def __iter__(self):
+        sample_idxes_per_domain = copy.deepcopy(self.sample_idxes_per_domain)
+        domain_idxes = [idx for idx in range(self.n_domains_in_dataset)] # a list of all the domains we can pick from
+        final_idxes = []
+        stop_flag = False
+
+        while not stop_flag:
+            # shuffle select for the domain 
+            selected_domains = random.sample(domain_idxes, self.n_domains_per_batch) 
+
+            for domain in selected_domains:
+                sample_idxes = sample_idxes_per_domain[domain]
+                
+                # if not enough, sample with replacement
+                if len(sample_idxes) < self.batch_size_per_domain[domain]:
+                    selected_idxes = np.random.choice(sample_idxes, self.batch_size_per_domain[domain], replace=True)
+                # otherwise, sample without replacement
+                else:
+                    selected_idxes = random.sample(sample_idxes, self.batch_size_per_domain[domain])
+                final_idxes.extend(selected_idxes)
+
+                # Remove the indices we chose
+                for idx in selected_idxes:
+                    if idx in sample_idxes_per_domain[domain]:
+                        sample_idxes_per_domain[domain].remove(idx)
+
+                remaining_size = len(sample_idxes_per_domain[domain])
+                if remaining_size < self.batch_size_per_domain[domain]:
+                    stop_flag = True
+        
+        proportion_in_order = []
+        for domain in selected_domains: 
+            proportion_in_order.append(self.batch_size_per_domain[domain])
+
+        print("Proportion in order:", proportion_in_order)
+        self.curr_prop_per_domain = proportion_in_order
+
+        return iter(final_idxes)
+
+    def __len__(self):
+        return self.length
     
+    def get_prop_per_domain(self):
+        
+        return self.curr_prop_per_domain
+
+
 
         
 

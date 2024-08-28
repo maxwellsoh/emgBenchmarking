@@ -23,8 +23,7 @@ from Model.CNN_Trainer import CNN_Trainer
 from Model.Unlabeled_Domain_Adaptation_Trainer import Unlabeled_Domain_Adaptation_Trainer
 from Model.MLP_Trainer import MLP_Trainer
 from Model.SVC_RF_Trainer import SVC_RF_Trainer
-
-
+from Model.IRM import IRM_Trainer
 
 class Run_Setup():
     """
@@ -149,7 +148,10 @@ class Run_Model():
             elif self.args.model in ["SVC", "RF"]:
                 model_trainer = SVC_RF_Trainer(X, Y, label, self.env)
             else:
-                model_trainer = CNN_Trainer(X, Y, label, self.env)
+                if self.args.domain_generalization == "IRM":
+                    model_trainer = IRM_Trainer(X, Y, label, self.env)
+                else:
+                    model_trainer = CNN_Trainer(X, Y, label, self.env)
 
         model_trainer.setup_model()
         model_trainer.model_loop()
