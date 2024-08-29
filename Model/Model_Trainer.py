@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 import random
 import copy
 from torch.utils.data import Sampler
+import math
 
 
 
@@ -236,11 +237,6 @@ class Model_Trainer():
             )
 
             return self.train_dataset, val_dataset, test_dataset
-
-
-
-
-
 
     def set_loaders(self):
 
@@ -562,17 +558,19 @@ class RandomDomainSampler(Sampler):
         total_windows = cumulative_sizes[-1]
 
         start = 0
-
         # Sort indices for each domain (subject) 
         for end in cumulative_sizes:
-            subject_proportion = round((end-start) / total_windows * batch_size)
+            subject_proportion = math.ceil((end-start) / total_windows * batch_size)
             self.batch_size_per_domain.append(subject_proportion)
 
             idxes = [idx for idx in range(start, end)] 
             self.sample_idxes_per_domain.append(idxes) 
             start = end
 
+      
         total_batch_size = sum(self.batch_size_per_domain)
+
+        assert total_batch_size >= batch_size, f"Total batch size {total_batch_size} is less than batch size {batch_size}. Rounding issue. "
         while total_batch_size != batch_size: 
             max_idx = self.batch_size_per_domain.index(max(self.batch_size_per_domain))
             self.batch_size_per_domain[max_idx] -= 1
@@ -614,7 +612,6 @@ class RandomDomainSampler(Sampler):
         for domain in selected_domains: 
             proportion_in_order.append(self.batch_size_per_domain[domain])
 
-        print("Proportion in order:", proportion_in_order)
         self.curr_prop_per_domain = proportion_in_order
 
         return iter(final_idxes)
@@ -623,7 +620,6 @@ class RandomDomainSampler(Sampler):
         return self.length
     
     def get_prop_per_domain(self):
-        
         return self.curr_prop_per_domain
 
 

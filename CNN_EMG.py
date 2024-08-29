@@ -23,7 +23,7 @@ from Model.CNN_Trainer import CNN_Trainer
 from Model.Unlabeled_Domain_Adaptation_Trainer import Unlabeled_Domain_Adaptation_Trainer
 from Model.MLP_Trainer import MLP_Trainer
 from Model.SVC_RF_Trainer import SVC_RF_Trainer
-from Model.IRM import IRM_Trainer
+from Model.IRM_Trainer import IRM_Trainer
 
 class Run_Setup():
     """
