@@ -341,9 +341,11 @@ class Setup():
             self.args.target_normalize_subject = self.args.leftout_subject
             print("Target normalize subject defaulting to leftout subject.")
 
-        if self.args.domain_generalization == "IRM":
-            assert not self.args.turn_on_unlabeled_domain_adaptation, "IRM cannot be used with unlabeled domain adaptation currently."
-            assert self.args.leave_one_subject_out, "IRM can only be used with leave-one-subject-out currently."
+        if self.args.domain_generalization in {"IRM", "CORAL"}:
+            assert not self.args.turn_on_unlabeled_domain_adaptation, "Domain generalization cannot be used with unlabeled domain adaptation currently."
+            assert self.args.leave_one_subject_out, "Domain generalization can only be used with leave-one-subject-out currently."
+
+            assert self.args.model in {"MLP", "resnet18"}, "Domain generalization can only be used with MLP or resnet18 currently."
 
 
         # Set Final Values

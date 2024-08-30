@@ -50,19 +50,6 @@ class MLP_Trainer(Model_Trainer):
         super().plot_images()
         self.set_model()
         self.set_optimizer() # Only for MLP not SV/RF
-
-
-    def get_data_from_loader(loader):
-        X = []
-        Y = []
-        for X_batch, Y_batch in tqdm(loader, desc="Batches convert to Numpy"):
-            # Flatten each image from [batch_size, 3, 224, 224] to [batch_size, 3*224*224]
-            # X_batch_flat = X_batch.view(X_batch.size(0), -1).cpu().numpy().astype(np.float64)
-            Y_batch_indices = torch.argmax(Y_batch, dim=1)  # Convert one-hot to class indices
-            X.append(X_batch)
-            Y.append(Y_batch_indices.cpu().numpy().astype(np.int64))
-        return np.vstack(X), np.hstack(Y)
-    
     
     def set_model(self):
 

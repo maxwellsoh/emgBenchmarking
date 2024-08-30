@@ -243,7 +243,7 @@ class Model_Trainer():
         if self.args.turn_on_unlabeled_domain_adaptation:
             raise NotImplementedError("This method should be overwritten in Unlabelled_Domain_Adaptation_Trainer")
         
-        elif self.args.domain_generalization == "IRM":
+        elif self.args.domain_generalization in {"IRM", "CORAL"}:
 
             train_dataset, val_dataset, test_dataset = self.create_datasets()
 
