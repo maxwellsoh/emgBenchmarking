@@ -54,13 +54,16 @@ class Y_Data(Data):
 
             concatenated_labels = np.concatenate(labels_set, axis=0) # (TRIAL)
 
-            # if self.args.partial_dataset_ninapro:
-            #     desired_gesture_labels = self.utils.partial_gesture_indices
-            #     indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
-            #     concatenated_labels = concatenated_labels[indices_for_partial_dataset]
-            #     # convert labels to indices
-            #     label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
-            #     concatenated_labels = [label_to_index[label] for label in concatenated_labels]
+            # TODO: Need to cut the indices differently based on if we are are using transition_classifier since the gestures will be [start, end], should check the end of the gestures and see if its in the one 
+
+            
+            if self.args.partial_dataset_ninapro:
+                desired_gesture_labels = self.utils.partial_gesture_indices
+                indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
+                concatenated_labels = concatenated_labels[indices_for_partial_dataset]
+                # convert labels to indices
+                label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
+                concatenated_labels = [label_to_index[label] for label in concatenated_labels]
 
             # Convert to one hot encoding
             concatenated_labels = np.eye(np.max(concatenated_labels) + 1)[concatenated_labels] # (TRIAL, GESTURE)

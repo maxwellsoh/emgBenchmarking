@@ -11,16 +11,16 @@ import multiprocessing
 class Label_Data(Data):
 
     def __init__(self, env):
-            super().__init__("Label",env)
+        super().__init__("Label",env)
 
-            # Set seeds for reproducibility
-            np.random.seed(self.args.seed)
-            torch.manual_seed(self.args.seed)
-            torch.cuda.manual_seed(self.args.seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(self.args.seed)
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
+        # Set seeds for reproducibility
+        np.random.seed(self.args.seed)
+        torch.manual_seed(self.args.seed)
+        torch.cuda.manual_seed(self.args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
     # Process Ninapro Helper
@@ -47,20 +47,20 @@ class Label_Data(Data):
                 index_to_start_at = max(subject_labels_to_concatenate)
             labels_set.append(subject_labels_to_concatenate)
 
-        # if self.args.partial_dataset_ninapro:
-        #     desired_gesture_labels = self.utils.partial_gesture_indices
+        if self.args.partial_dataset_ninapro:
+            desired_gesture_labels = self.utils.partial_gesture_indices
 
         concatenated_labels = np.concatenate(labels_set, axis=0) # (TRIAL)
 
         indices_for_partial_dataset = None
-        # if self.args.partial_dataset_ninapro:
-        #     indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
+        if self.args.partial_dataset_ninapro:
+            indices_for_partial_dataset = np.array([indices for indices, label in enumerate(concatenated_labels) if label in desired_gesture_labels])
             
-        #     concatenated_labels = concatenated_labels[indices_for_partial_dataset]
+            concatenated_labels = concatenated_labels[indices_for_partial_dataset]
         
-        #     # convert labels to indices
-        #     label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
-        #     concatenated_labels = [label_to_index[label] for label in concatenated_labels]
+            # convert labels to indices
+            label_to_index = {label: index for index, label in enumerate(desired_gesture_labels)}
+            concatenated_labels = [label_to_index[label] for label in concatenated_labels]
         
         numGestures = len(np.unique(concatenated_labels))
 

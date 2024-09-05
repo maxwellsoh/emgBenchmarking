@@ -80,7 +80,8 @@ class Leave_One_Session_Out(Data_Split_Strategy):
                 stratify=label_train_temp, 
                 random_state=self.args.seed, 
                 shuffle=(not self.args.train_test_split_for_time_series),
-                force_regression=self.args.force_regression
+                force_regression=self.args.force_regression, 
+                transition_classifier=self.args.transition_classifier
             )
             
         if self.args.proportion_unlabeled_data_from_training_subjects>0 and self.args.turn_on_unlabeled_domain_adaptation:
@@ -94,7 +95,8 @@ class Leave_One_Session_Out(Data_Split_Strategy):
                 stratify=label_train_temp, 
                 random_state=self.args.seed, 
                 shuffle=(not self.args.train_test_split_for_time_series),
-                force_regression=self.args.force_regression
+                force_regression=self.args.force_regression, 
+                transition_classifier=self.args.transition_classifier
             )
 
             self.append_to_pretrain(X_pretrain_labeled, Y_pretrain_labeled, label_pretrain_labeled)
@@ -134,7 +136,8 @@ class Leave_One_Session_Out(Data_Split_Strategy):
                 stratify=label_train_temp, 
                 random_state=self.args.seed, 
                 shuffle=(not self.args.train_test_split_for_time_series),
-                force_regression=self.args.force_regression
+                force_regression=self.args.force_regression, 
+                transition_classifier=self.args.transition_classifier
             )
 
             self.append_to_finetune(X_finetune_labeled, Y_finetune_labeled, label_finetune_labeled)

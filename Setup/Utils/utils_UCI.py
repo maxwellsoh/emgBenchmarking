@@ -94,134 +94,6 @@ def balance_gesture_classifier (restimulus):
     return indices
 
 
-# per gesture
-# def balance_transition_classifier (restimulus):
-    
-#     indices = []
-#     default_indices = []
-
-#     non_transition_total = 0
-#     transition_total = 0 
-#     non_transition_count = {}
-#     transition_count = {} 
-
-#     for x in range(len(restimulus)):
-
-#         start_gesture = int(restimulus[x][0]) - 1
-#         end_gesture = int(restimulus[x][-1]) - 1
-
-#         gesture = (start_gesture, end_gesture)
-        
-#         if start_gesture == end_gesture:
-
-#             assert(len(np.unique(restimulus[x])) == 1)
-            
-#             if 0 <= start_gesture and start_gesture <= 6: 
-#                 non_transition_total += 1 
-#                 non_transition_count[gesture] = non_transition_count.get(gesture, 0) + 1
-
-#         else:
-
-#             if 0 <= end_gesture and end_gesture <= 6:
-#                 transition_total += 1
-#                 transition_count[gesture] = transition_count.get(gesture, 0) + 1
-
-#     equal_threshold = min(transition_total, non_transition_total)
-#     non_transition_avg = equal_threshold // len(non_transition_count)
-#     transition_avg = equal_threshold // len(transition_count)
-
-#     non_transition_windows = {key: non_transition_avg for key in non_transition_count}
-#     transition_windows = {key: transition_avg for key in transition_count}
-
-
-#     gesture_count = {}
-
-#     for x in range(len(restimulus)):
-
-#         start_gesture = int(restimulus[x][0]) - 1
-#         end_gesture = int(restimulus[x][-1]) - 1
-
-#         gesture = (start_gesture, end_gesture)
-
-#         if start_gesture == end_gesture:
-#             assert(len(np.unique(restimulus[x])) == 1)
-#             if 0 <= start_gesture and start_gesture <= 6: 
-#                 if non_transition_windows[gesture] > 0:
-#                     gesture_count[gesture] = gesture_count.get(gesture, 0) + 1
-#                     indices.append(x)
-#                     non_transition_windows[gesture] -= 1
-
-#         else: 
-#             if 0 <= end_gesture and end_gesture <= 6:
-#                 if transition_windows[gesture] > 0:
-#                     gesture_count[gesture] = gesture_count.get(gesture, 0) + 1
-#                     indices.append(x)
-#                     transition_windows[gesture] -= 1
-    
-#     print("gesture_count", gesture_count, "sum:", sum(gesture_count.values()))
-
-
-#     return indices
-
-# SEQUENTIAL
-# def balance_transition_classifier (restimulus):
-#     indices = []
-
-#     # First pass: count the occurences of each type of window
-
-#     transition_total = 0
-#     non_transition_total = 0 
-
-#     gestures_added = {}
-
-
-#     for x in range (len(restimulus)):
-
-#         start_gesture = int(restimulus[x][0])-1
-#         end_gesture = int(restimulus[x][-1])-1
-        
-
-#         if start_gesture == end_gesture:
-#             if start_gesture >= 0 and start_gesture <= 6:
-#                 non_transition_total += 1
-#         else:
-#             if end_gesture >= 0 and end_gesture <= 6:
-#                 transition_total += 1
-
-#     equal_threshold = min(transition_total, non_transition_total)
-#     non_transition_count = 0
-#     transition_count = 0 
-
-    
-
-#     for x in range (len(restimulus)):
-
-#         start_gesture = int(restimulus[x][0])-1
-#         end_gesture = int(restimulus[x][-1])-1
-#         gesture = (start_gesture, end_gesture)
-
-#         if start_gesture == end_gesture:
-           
-#             if start_gesture >= 0 and start_gesture <= 6: 
-#                 if non_transition_count < equal_threshold:
-#                     gestures_added[gesture] = gestures_added.get(gesture, 0) + 1
-#                     indices.append(x)
-#                     non_transition_count += 1
-
-#         else: 
-          
-#             start_gesture = restimulus[x][0] - 1
-#             end_gesture = restimulus[x][-1] - 1 
-        
-#             if end_gesture >= 0 and end_gesture <= 6:
-#                 if transition_count < equal_threshold:
-#                     gestures_added[gesture] = gestures_added.get(gesture, 0) + 1
-#                     indices.append(x)
-#                     transition_count += 1
-        
-#     print("gesture_count", gestures_added, "sum:", sum(gestures_added.values()), "unique gestures", np.unique(restimulus)-1)
-#     return indices
-
 
 def balance_transition_classifier (restimulus):
     indices = []
@@ -230,13 +102,9 @@ def balance_transition_classifier (restimulus):
 
     transition_total = 0
     non_transition_total = 0 
-
-
-
     gestures_added = {}
     non_transition_seen = {}
     transition_seen = {}
-
 
     for x in range (len(restimulus)):
 
@@ -245,7 +113,6 @@ def balance_transition_classifier (restimulus):
 
         gesture = (start_gesture, end_gesture)
         
-
         if start_gesture == end_gesture:
             if start_gesture >= 0 and start_gesture <= 6:
                 non_transition_seen[gesture] = non_transition_seen.get(gesture, 0) + 1
@@ -260,11 +127,8 @@ def balance_transition_classifier (restimulus):
     equal_transition_threshold = equal_threshold // len(transition_seen)
     equal_non_transition_threshold = equal_threshold // len(non_transition_seen)
 
-    non_transition_windows = {key: equal_non_transition_threshold for key in non_transition_seen}
-    transition_windows = {key: equal_transition_threshold for key in transition_seen}
-
-    non_transition_count = 0
-    transition_count = 0 
+    non_transition_windows_left = {key: equal_non_transition_threshold for key in non_transition_seen}
+    transition_windows_left = {key: equal_transition_threshold for key in transition_seen}
 
     for x in range (len(restimulus)):
 
@@ -275,12 +139,10 @@ def balance_transition_classifier (restimulus):
         if start_gesture == end_gesture:
            
             if start_gesture >= 0 and start_gesture <= 6: 
-                # if non_transition_count < equal_threshold:
-                if non_transition_windows[gesture] > 0:
+                if non_transition_windows_left[gesture] > 0:
                     gestures_added[gesture] = gestures_added.get(gesture, 0) + 1
                     indices.append(x)
-                    # non_transition_count += 1
-                    non_transition_windows[gesture] -= 1
+                    non_transition_windows_left[gesture] -= 1
 
         else: 
           
@@ -288,14 +150,12 @@ def balance_transition_classifier (restimulus):
             end_gesture = restimulus[x][-1] - 1 
         
             if end_gesture >= 0 and end_gesture <= 6:
-                # if transition_count < equal_threshold:
-                if transition_windows[gesture] > 0:
+                if transition_windows_left[gesture] > 0:
                     gestures_added[gesture] = gestures_added.get(gesture, 0) + 1
                     indices.append(x)
-                    # transition_count += 1
-                    transition_windows[gesture] -= 1
+                    transition_windows_left[gesture] -= 1
         
-    print("non-seq balanced gesture_count", gestures_added, "sum:", sum(gestures_added.values()), "unique gestures", np.unique(restimulus)-1)
+    # print("non-seq balanced gesture_count", gestures_added, "sum:", sum(gestures_added.values()), "unique gestures", np.unique(restimulus)-1)
     return indices
 
 
@@ -345,8 +205,25 @@ def contract(R, unfold=True):
         assert unfold == True, "Cannot do gesture classification without contracting."
         return contract_transition_classifier(R)
     else:
-        
         return contract_gesture_classifer(R, unfold)
+
+def label_transition(R, unfold=True):
+    '''
+    Should return a tensor of shape (N, 2) where per window each row represents the (start, end) of a transition.
+    '''
+
+    # Initialize the tensor with zeros
+    transition_labels = torch.zeros((len(R), 2), dtype=torch.float32)
+
+    # Populate the tensor with (start, end) pairs
+    for x in range(len(R)):
+        start_gesture = int(R[x][0]) - 1
+        end_gesture = int(R[x][-1]) - 1
+
+        transition_labels[x] = torch.tensor([start_gesture, end_gesture], dtype=torch.float32)
+    
+    return transition_labels
+
 
 
 
@@ -539,11 +416,18 @@ def getRestim_separateSessions(args, unfold=True):
     return torch.cat(restim, dim=0)
 
 def getLabels (n, unfold=True):
-    return contract(getRestim(n, unfold), unfold)
+
+    if args.transition_classifier:
+        return label_transition(getRestim(n, unfold), unfold)
+    else:
+        return contract(getRestim(n, unfold), unfold)
 
 def getLabels_separateSessions(args, unfold=True):
     subject_number, session_number = args
     return contract(getRestim_separateSessions((subject_number, session_number), unfold), unfold)
+
+
+
 
 def closest_factors(num):
     # Find factors of the number

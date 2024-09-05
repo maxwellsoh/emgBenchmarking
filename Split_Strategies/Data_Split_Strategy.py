@@ -4,6 +4,7 @@ Data_Split_Strategy.py
 - Acts as a wrapper for X, Y, and label objects. Repeats function calls for each object.
 """
 from .cross_validation_utilities import train_test_split as tts # custom train test split to split stratified without shuffling
+import torch 
 class Data_Split_Strategy():
     """
     Base strategy. Serves as a wrapper to hold X, Y, and label objects. 
@@ -19,8 +20,6 @@ class Data_Split_Strategy():
         self.Y = Y_data
         self.label = label_data
         
-        
-
     def split(self):
         raise NotImplementedError("Subclasses must implement split()")
     
@@ -71,6 +70,7 @@ class Data_Split_Strategy():
 
     def test_from_validation(self):
         
+        # TRAIN 
         self.X.test, self.X.validation, \
         self.Y.test, self.Y.validation, \
         self.label.test, self.label.validation \
@@ -81,11 +81,19 @@ class Data_Split_Strategy():
             stratify=self.label.validation,
             random_state=self.args.seed,
             shuffle=(not self.args.train_test_split_for_time_series),
-            force_regression=self.args.force_regression
+            force_regression=self.args.force_regression,
+            transition_classifier=self.args.transition_classifier
         )
 
     def all_sets_to_tensor(self):
         self.X.all_sets_to_tensor()
         self.Y.all_sets_to_tensor()
         self.label.all_sets_to_tensor()
-   
+
+    def contract_to_binary_gestures(self):
+        '''
+        Convert from labels of the type [start, end] to [0] or [1] depending on whether or not they are a gesture. 
+        '''
+
+        self.Y.transition_labels_to_binary()
+        self.label.transition_labels_to_binary()

@@ -183,20 +183,22 @@ def balance(restimulus, args):
                     indices.append(x)
                 numZero += 1 # Rest always in partial
             else:
-                if args.partial_dataset_ninapro:
-                    if gesture in partial_gesture_indices:
-                        indices.append(x)
-                else: 
-                    indices.append(x)
+                indices.append(x)
+                # if args.partial_dataset_ninapro:
+                #     if gesture in partial_gesture_indices:
+                #         indices.append(x)
+                # else: 
+                #     indices.append(x)
         else:
             if args.include_transitions:
-                if args.partial_dataset_ninapro:
-                    start_gesture = restimulus[x][0][0].item()
-                    end_gesture = restimulus[x][0][-1].item()
-                    if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
-                        indices.append(x)
-                else:
-                    indices.append(x)
+                indices.append(x)
+                # if args.partial_dataset_ninapro:
+                #     start_gesture = restimulus[x][0][0].item()
+                #     end_gesture = restimulus[x][0][-1].item()
+                #     if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
+                #         indices.append(x)
+                # else:
+                #     indices.append(x)
                 
     return indices
 
@@ -229,10 +231,12 @@ def contract_gesture_classifier(restim, args):
         else:
             gesture = int(restim[x][0][0])
 
-        if args.partial_dataset_ninapro:
-            labels[x][label_to_index[gesture]] = 1.0
-        else:
-            labels[x][gesture] = 1.0
+        # if args.partial_dataset_ninapro:
+        #     labels[x][label_to_index[gesture]] = 1.0
+        # else:
+        #     labels[x][gesture] = 1.0
+
+        labels[x][gesture] = 1.0
     
     return labels
 
@@ -246,18 +250,16 @@ def contract_transition_classifier(restim, args):
     Returns:
         labels: restimulus data now one-hot encoded
     """
-
-    labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(restim), 2))
+    transition_labels = torch.zeros((len(restim), 2), dtype=torch.float32)
 
     for x in range(len(restim)):
 
-        if restim[x][0][0].item() == restim[x][0][-1].item():
-            labels[x][0] = 1.0
-        else:
-            labels[x][1] = 1.0
-    
-    return labels
+        start_gesture = restim[x][0][0].item()
+        end_gesture = restim[x][0][-1].item()
+
+        transition_labels[x] = torch.tensor([start_gesture, end_gesture], dtype=torch.float32)
+
+    return transition_labels
 
 def filter(emg):
     # sixth-order Butterworth highpass filter

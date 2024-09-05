@@ -348,6 +348,9 @@ class Setup():
             self.args.target_normalize_subject = self.args.leftout_subject
             print("Target normalize subject defaulting to leftout subject.")
 
+        if self.args.transition_classifier:
+            assert self.args.leave_one_subject_out, "Binary classifier only implemented for LOSO."
+
         
 
         # Add date and time to filename

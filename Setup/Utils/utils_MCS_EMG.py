@@ -184,23 +184,37 @@ def getExtrema (n, proportion):
 
 def getLabels_transition_classificatier(n):
     """
-    One-hot encoding for transition classifier. For the first second of the window (the second immediately after cue), label as Transition. All other windows are labeled as No Transition. 
+    
     """
 
+    # Need to return labels of type (start, end) per window
 
     # Balanced windows out: [Transition][No Transiton], 2 seconds total
     timesteps_for_one_gesture = 20 * 2 
     timsteps_for_one_second = 20 
 
-    labels = np.zeros(((timesteps_for_one_gesture)*numGestures, 2))
+    # labels = np.zeros(((timesteps_for_one_gesture)*numGestures, 2))
+
+    transition_labels = torch.zeros(((timesteps_for_one_gesture)*numGestures, 2), dtype=torch.float32)
+
     for i in range(timesteps_for_one_gesture):
         for j in range(numGestures):
 
+            current_window = (j * timesteps_for_one_gesture) + i
+            
+            # the first second is transition
             if i <= timsteps_for_one_second:
-                labels[j * timesteps_for_one_gesture + i][1] = 1.0
+
+                transition_labels[current_window] = torch.tensor([-1, j], dtype=torch.float32)
+
+                # labels[j * timesteps_for_one_gesture + i][1] = 1.0
+
+            # the next second is non transtion
             elif timsteps_for_one_second < i < 2 * timsteps_for_one_second:
-                labels[j * timesteps_for_one_gesture + i][0] = 1.0
-    return labels
+                
+                transition_labels[current_window] = torch.tensor([j, j], dtype=torch.float32)
+
+    return transition_labels
 
 
 def getLabels_gesture_classificatier(n):

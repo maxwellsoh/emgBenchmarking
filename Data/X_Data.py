@@ -58,8 +58,8 @@ class X_Data(Data):
         """
         self.concatenated_trials = np.concatenate(self.subject_trials, axis=0)
 
-        # if self.args.partial_dataset_ninapro:
-        #     self.concatenated_trials = self.concatenated_trials[indices_for_partial_dataset]
+        if self.args.partial_dataset_ninapro:
+            self.concatenated_trials = self.concatenated_trials[indices_for_partial_dataset]
 
     def create_foldername_zarr(self):
         base_foldername_zarr = ""
