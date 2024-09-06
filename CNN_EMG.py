@@ -23,8 +23,9 @@ from Model.CNN_Trainer import CNN_Trainer
 from Model.Unlabeled_Domain_Adaptation_Trainer import Unlabeled_Domain_Adaptation_Trainer
 from Model.MLP_Trainer import MLP_Trainer
 from Model.SVC_RF_Trainer import SVC_RF_Trainer
-
-
+from Model.IRM_CNN_Based_Trainer import IRM_CNN_Based_Trainer
+from Model.IRM_MLP_Based_Trainer import IRM_MLP_Based_Trainer
+from Model.CORAL_Trainer import CORAL_Trainer
 
 class Run_Setup():
     """
@@ -145,11 +146,19 @@ class Run_Model():
             model_trainer = Unlabeled_Domain_Adaptation_Trainer(X, Y, label, self.env)
         else:
             if self.args.model == "MLP":
-                model_trainer = MLP_Trainer(X, Y, label, self.env)
+                if self.args.domain_generalization == "IRM":
+                    model_trainer = IRM_MLP_Based_Trainer(X, Y, label, self.env)
+                else:
+                    model_trainer = MLP_Trainer(X, Y, label, self.env)
             elif self.args.model in ["SVC", "RF"]:
                 model_trainer = SVC_RF_Trainer(X, Y, label, self.env)
             else:
-                model_trainer = CNN_Trainer(X, Y, label, self.env)
+                if self.args.domain_generalization == "IRM":
+                    model_trainer = IRM_CNN_Based_Trainer(X, Y, label, self.env)
+                elif self.args.domain_generalization == "CORAL":
+                    model_trainer = CORAL_Trainer(X, Y, label, self.env)
+                else:
+                    model_trainer = CNN_Trainer(X, Y, label, self.env)
 
         model_trainer.setup_model()
         model_trainer.model_loop()

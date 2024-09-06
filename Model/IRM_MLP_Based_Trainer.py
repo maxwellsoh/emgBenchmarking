@@ -23,7 +23,7 @@ class MLP(nn.Module):
         x = self.output_layer(x)
         return x
 
-class MLP_Trainer(Model_Trainer):
+class IRM_MLP_Based_Trainer(Model_Trainer):
 
     def __init__(self, X_data, Y_data, label_data, env):
         super().__init__(X_data, Y_data, label_data, env)
@@ -50,6 +50,19 @@ class MLP_Trainer(Model_Trainer):
         super().plot_images()
         self.set_model()
         self.set_optimizer() # Only for MLP not SV/RF
+
+
+    def get_data_from_loader(loader):
+        X = []
+        Y = []
+        for X_batch, Y_batch in tqdm(loader, desc="Batches convert to Numpy"):
+            # Flatten each image from [batch_size, 3, 224, 224] to [batch_size, 3*224*224]
+            # X_batch_flat = X_batch.view(X_batch.size(0), -1).cpu().numpy().astype(np.float64)
+            Y_batch_indices = torch.argmax(Y_batch, dim=1)  # Convert one-hot to class indices
+            X.append(X_batch)
+            Y.append(Y_batch_indices.cpu().numpy().astype(np.int64))
+        return np.vstack(X), np.hstack(Y)
+    
     
     def set_model(self):
 
@@ -78,20 +91,33 @@ class MLP_Trainer(Model_Trainer):
             train_loss = 0.0
 
             with tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{self.num_epochs}", leave=False) as t:
-                if not self.args.force_regression:
-                    ground_truth_train_all = []
-                    outputs_all = [] # NOTE: why is this inside the loop for MLP but outside in CNN
+           
+                ground_truth_train_all = []
+                outputs_all = [] # NOTE: why is this inside the loop for MLP but outside in CNN
+
+                prop_per_domain = self.sampler.get_prop_per_domain()
                 
                 for X_batch, Y_batch in t:
                     X_batch = X_batch.view(X_batch.size(0), -1).to(self.device).to(torch.float32)
-                    if self.args.force_regression:
-                        Y_batch = Y_batch.to(self.self.device).to(torch.float32) 
-                    else:
-                        Y_batch = torch.argmax(Y_batch, dim=1).to(self.device).to(torch.int64)
+                    Y_batch = torch.argmax(Y_batch, dim=1).to(self.device).to(torch.int64)
 
                     self.optimizer.zero_grad()
                     output = self.model(X_batch)
-                    loss = self.criterion(output, Y_batch)
+
+                    # compute cross entropy loss
+                    loss_ce = F.cross_entropy(output, Y_batch)
+
+                    # compute invariance penalty loss
+                    loss_penalty = 0
+                    output_per_domains = output.split(prop_per_domain, dim=0)
+                    labels_per_domains = Y_batch.split(prop_per_domain, dim=0)
+
+                    n_domains_per_batch = self.utils.num_subjects - 1
+                    for output_per_domain, labels_per_domain in zip(output_per_domains, labels_per_domains):
+                        loss_penalty += self.criterion(output_per_domain, labels_per_domain) / n_domains_per_batch
+
+                    # compute final loss
+                    loss = loss_ce + loss_penalty # equally weighted
                     loss.backward()
                     self.optimizer.step()
 
@@ -100,29 +126,24 @@ class MLP_Trainer(Model_Trainer):
                         if train_metric.name != "Macro_AUROC" and train_metric.name != "Macro_AUPRC":
                             train_metric(output, Y_batch)
                     
-                    if not self.args.force_regression:
-                        outputs_all.append(output)
-                        # ground_truth_train_all.append(torch.argmax(Y_batch, dim=1)) 
-                        # NOTE: This code was double flattening it raising dimension errors.
-                        ground_truth_train_all.append(Y_batch)
+                    outputs_all.append(output)
+                    ground_truth_train_all.append(Y_batch)
                     
-                    if not self.args.force_regression:
-                        if t.n % 10 == 0:
-                            train_micro_acc = next(metric for metric in self.training_metrics if metric.name == "Micro_Accuracy")
-                            t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": train_micro_acc.compute().item()})
+                    if t.n % 10 == 0:
+                        train_micro_acc = next(metric for metric in self.training_metrics if metric.name == "Micro_Accuracy")
+                        t.set_postfix({"Batch Loss": loss.item(), "Batch Acc": train_micro_acc.compute().item()})
 
                     del X_batch, Y_batch, output
                     torch.cuda.empty_cache()
                 
-                if not self.args.force_regression:
-                    outputs_all = torch.cat(outputs_all, dim=0).to(self.device)
-                    ground_truth_train_all = torch.cat(ground_truth_train_all, dim=0).to(self.device)
+                outputs_all = torch.cat(outputs_all, dim=0).to(self.device)
+                ground_truth_train_all = torch.cat(ground_truth_train_all, dim=0).to(self.device)
 
-                    train_macro_auroc = next(metric for metric in self.training_metrics if metric.name == "Macro_AUROC")
-                    train_macro_auprc = next(metric for metric in self.training_metrics if metric.name == "Macro_AUPRC")
+                train_macro_auroc = next(metric for metric in self.training_metrics if metric.name == "Macro_AUROC")
+                train_macro_auprc = next(metric for metric in self.training_metrics if metric.name == "Macro_AUPRC")
 
-                    train_macro_auroc(outputs_all, ground_truth_train_all)
-                    train_macro_auprc(outputs_all, ground_truth_train_all)
+                train_macro_auroc(outputs_all, ground_truth_train_all)
+                train_macro_auprc(outputs_all, ground_truth_train_all)
 
 
             # Validation
@@ -131,60 +152,53 @@ class MLP_Trainer(Model_Trainer):
             for val_metric in self.validation_metrics:
                 val_metric.reset()
             
-            if not self.args.force_regression:
-                all_val_outputs = []
-                all_val_labels = []
+            all_val_outputs = []
+            all_val_labels = []
 
             val_loss = 0.0
             with torch.no_grad():
     
                 for X_batch, Y_batch in self.val_loader:
                     X_batch = X_batch.view(X_batch.size(0), -1).to(self.device).to(torch.float32)
-                    if self.args.force_regression:
-                        Y_batch =  Y_batch.to(self.device).to(torch.float32)
-                    else: 
-                        Y_batch = torch.argmax(Y_batch, dim=1).to(self.device).to(torch.int64)
+                    Y_batch = torch.argmax(Y_batch, dim=1).to(self.device).to(torch.int64)
 
                     output = self.model(X_batch)
                     for validation_metric in self.validation_metrics:
                         validation_metric(output, Y_batch)
 
-                    val_loss += self.criterion(output, Y_batch).item()
+                    val_loss += F.cross_entropy(output, Y_batch).item()
         
-                    if not self.args.force_regression:
-                        all_val_outputs.append(output)
-                        all_val_labels.append(Y_batch)
+                    all_val_outputs.append(output)
+                    all_val_labels.append(Y_batch)
 
                     del X_batch, Y_batch
                     torch.cuda.empty_cache()
 
-            if not self.args.force_regression:
-                all_val_outputs = torch.cat(all_val_outputs, dim=0).to(self.device)
-                all_val_labels = torch.cat(all_val_labels, dim=0)
+            all_val_outputs = torch.cat(all_val_outputs, dim=0).to(self.device)
+            all_val_labels = torch.cat(all_val_labels, dim=0)
 
-                Y_validation_long = torch.argmax(self.Y.validation, dim=1).to(self.device).to(torch.int64)
+            Y_validation_long = torch.argmax(self.Y.validation, dim=1).to(self.device).to(torch.int64)
 
-                true_labels = Y_validation_long.cpu().detach().numpy()
-                test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
-                conf_matrix = confusion_matrix(true_labels, test_predictions)
-                print("Confusion Matrix:")
-                print(conf_matrix)
+            true_labels = Y_validation_long.cpu().detach().numpy()
+            test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+            conf_matrix = confusion_matrix(true_labels, test_predictions)
+            print("Confusion Matrix:")
+            print(conf_matrix)
 
-                val_macro_auroc = next(metric for metric in self.validation_metrics if metric.name == "Macro_AUROC")
-                val_macro_auprc = next(metric for metric in self.validation_metrics if metric.name == "Macro_AUPRC")
+            val_macro_auroc = next(metric for metric in self.validation_metrics if metric.name == "Macro_AUROC")
+            val_macro_auprc = next(metric for metric in self.validation_metrics if metric.name == "Macro_AUPRC")
 
-                val_macro_auroc(all_val_outputs, Y_validation_long)
-                val_macro_auprc(all_val_outputs, Y_validation_long)
+            val_macro_auroc(all_val_outputs, Y_validation_long)
+            val_macro_auprc(all_val_outputs, Y_validation_long)
                 
 
             # Average the losses and print the metrics
             train_loss /= len(self.train_loader)
             val_loss /= len(self.val_loader)
 
-            if not self.args.force_regression:
-                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_gestures)
-                fpr_results = ml_utils.evaluate_model_fpr_at_tpr(self.model, self.val_loader, self.device, self.num_gestures)
-                confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
+            tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_gestures)
+            fpr_results = ml_utils.evaluate_model_fpr_at_tpr(self.model, self.val_loader, self.device, self.num_gestures)
+            confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
 
             # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
             training_metrics_values = {metric.name: metric.compute() for metric in self.training_metrics}
@@ -199,11 +213,10 @@ class MLP_Trainer(Model_Trainer):
             val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in self.validation_metrics_values.items())
             print(f"Val Metrics: {val_metrics_str}")
             
-            if not self.args.force_regression:
-                for fpr, tprs in tpr_results.items():
-                    print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
-                for confidence_level, accuracy in confidence_levels.items():
-                    print(f"Val Accuracy at confidence level >{confidence_level}: {accuracy:.4f}")
+            for fpr, tprs in tpr_results.items():
+                print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+            for confidence_level, accuracy in confidence_levels.items():
+                print(f"Val Accuracy at confidence level >{confidence_level}: {accuracy:.4f}")
 
             training_metrics_values = {metric.name: metric.compute() for metric in self.training_metrics}
             self.validation_metrics_values = {metric.name: metric.compute() for metric in self.validation_metrics}
