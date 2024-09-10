@@ -50,9 +50,6 @@ gesture_labels[3] = ['Flexion Of The Little Finger', 'Flexion Of The Ring Finger
 partial_gesture_labels = ['Rest', 'Finger Abduction', 'Fist', 'Finger Adduction', 'Middle Axis Supination', 
                           'Middle Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 'Ulnar Deviation']
 partial_gesture_indices = [0] + [gesture_labels[1].index(g) + len(gesture_labels['Rest']) for g in partial_gesture_labels[1:]] # 0 is for rest
-
-
-label_to_index = {label: index for index, label in enumerate(partial_gesture_indices)}
 transition_labels = ['Not a Transition', 'Transition']
 
 
@@ -173,7 +170,7 @@ def balance_gesture_classifier(restimulus, args):
                     count_dict[elements] += 1
                 else:
                     count_dict[elements] = 1
-    
+                
     # Calculate average count of non-zero elements
     non_zero_counts = [count for key, count in count_dict.items() if key != (0,)]
     if non_zero_counts:
@@ -190,113 +187,73 @@ def balance_gesture_classifier(restimulus, args):
                     indices.append(x)
                 numZero += 1 # Rest always in partial
             else:
-                if args.partial_dataset_ninapro:
-                    if gesture in partial_gesture_indices:
-                        indices.append(x)
-                else: 
-                    indices.append(x)
+                indices.append(x)
         else:
             if args.include_transitions:
-                if args.partial_dataset_ninapro:
-                    start_gesture = restimulus[x][0][0].item()
-                    end_gesture = restimulus[x][0][-1].item()
-                    if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
-                        indices.append(x)
-                else:
-                    indices.append(x)
-                
+                indices.append(x)
     return indices
 
-
 def balance_transition_classifier(restimulus, args):
-
-    # First pass to count the number of each type of window
-
-    non_transition_total = 0
-    transition_total = 0 
-
-    non_transition_count = {}
-    transition_count = {}
-
+    '''
+    Balances such that there is an equal number of windows for all types of gestures. Balances all combinations of (start_gesture, end_gesture) windows not just between transition and non transition. 
+    '''
     indices = []
 
+    transition_total = 0 
+    non_transition_total = 0 
+
+    transition_seen = {}
+    non_transition_seen = {}
+    
+    # First pass to count the number of each type of window
     for x in range(len(restimulus)):
 
         start_gesture = restimulus[x][0][0].item()
         end_gesture = restimulus[x][0][-1].item()
+        gesture = (start_gesture, end_gesture)
 
         if start_gesture == end_gesture: 
-            gesture = (start_gesture, )
-
-            if args.partial_dataset_ninapro:
-                if start_gesture in partial_gesture_indices:
-                    non_transition_total += 1
-                    non_transition_count[gesture] = non_transition_count.get(gesture, 0) + 1
-
-            else: 
-                non_transition_total += 1
-                non_transition_count[gesture] = non_transition_count.get(gesture, 0) + 1
-
+            non_transition_seen[gesture] = non_transition_seen.get(gesture, 0) + 1
+            non_transition_total += 1
 
         else: 
+            transition_seen[gesture] = transition_seen.get(gesture, 0) + 1
+            transition_total += 1
 
-            if args.partial_dataset_ninapro:
-                if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
-                    transition_total += 1
-                    gesture = (start_gesture, end_gesture) 
-                    transition_count[gesture] = transition_count.get(gesture, 0) + 1
-            
-            else:
-                transition_total += 1
-                gesture = (start_gesture, end_gesture) 
-                transition_count[gesture] = transition_count.get(gesture, 0) + 1
+    # Calculate average count of each gesture -- averaged seperately for transition and non-transition gestures
+    equal_threshold = min(transition_total, non_transition_total)
+    equal_transition_threshold = equal_threshold // len(transition_seen)
+    equal_non_transition_threshold = equal_threshold // len(non_transition_seen)
 
-    
-    # Calculate average count of each gesture 
-
-    equal_threshold = min(non_transition_total, transition_total)
-    non_transition_avg = equal_threshold // len(non_transition_count)
-    transition_avg = equal_threshold // len(transition_count)
-
-    non_transition_windows = {key: non_transition_avg for key in non_transition_count.keys()}
-    transition_windows = {key: transition_avg for key in transition_count.keys()}
+    non_transition_windows_left = {key: equal_non_transition_threshold for key in non_transition_seen}
+    transition_windows_left = {key: equal_transition_threshold for key in transition_seen}
 
     # Second pass: Add transtion/non-transition windows balanced per gesture.
-
     for x in range(len(restimulus)):
 
         start_gesture = restimulus[x][0][0].item()
         end_gesture = restimulus[x][0][-1].item()
+        gesture = (start_gesture, end_gesture)
 
         if start_gesture == end_gesture:
-            gesture = (start_gesture, )
-
-            if args.partial_dataset_ninapro and (start_gesture in partial_gesture_indices):
-                if non_transition_count[gesture] < non_transition_windows[gesture]:
-                    indices.append(x)
-                    non_transition_count[gesture] -= 1
-            else:
-                if non_transition_count[gesture] < non_transition_windows[gesture]:
-                    indices.append(x)
-                    non_transition_count[gesture] -= 1
+            
+            if non_transition_windows_left[gesture] > 0: 
+                indices.append(x)
+                non_transition_windows_left[gesture] -= 1
+        
         else:
-            gesture = (start_gesture, end_gesture)
+            if transition_windows_left[gesture] > 0:
+                indices.append(x)
+                transition_windows_left[gesture] -= 1
 
-            if args.partial_dataset_ninapro and (start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices):
-                    if transition_count[gesture] < transition_windows[gesture]:
-                        indices.append(x)
-                        transition_count[gesture] -= 1
-            else:
-                if transition_count[gesture] < transition_windows[gesture]:
-                    indices.append(x)
-                    transition_count[gesture] -= 1
+    return indices
 
-
-def balance(restim, args):
+def balance(restimulus, args):
     if args.transition_classifier:
-        return balance_transition_classifier(restim, args)
+        return balance_transition_classifier(restimulus, args)
     else:
-        return balance_gesture_classifier(restim, args)
+        return balance_gesture_classifier(restimulus, args)
+
 
 def contract(restim, args):
     if args.transition_classifier:
@@ -325,11 +282,7 @@ def contract_gesture_classifier(restim, args):
             gesture = int(restim[x][0][-1]) # take the last gesture it belongs to (labels the transition as part of the gesture)
         else:
             gesture = int(restim[x][0][0])
-
-        if args.partial_dataset_ninapro:
-            labels[x][label_to_index[gesture]] = 1.0
-        else:
-            labels[x][gesture] = 1.0
+        labels[x][gesture] = 1.0
     
     return labels
 
@@ -343,18 +296,16 @@ def contract_transition_classifier(restim, args):
     Returns:
         labels: restimulus data now one-hot encoded
     """
-
-    labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(restim), 2))
+    transition_labels = torch.zeros((len(restim), 2), dtype=torch.float32)
 
     for x in range(len(restim)):
 
-        if restim[x][0][0].item() == restim[x][0][-1].item():
-            labels[x][0] = 1.0
-        else:
-            labels[x][1] = 1.0
-    
-    return labels
+        start_gesture = restim[x][0][0].item()
+        end_gesture = restim[x][0][-1].item()
+
+        transition_labels[x] = torch.tensor([start_gesture, end_gesture], dtype=torch.float32)
+
+    return transition_labels
 
 
 def filter(emg):

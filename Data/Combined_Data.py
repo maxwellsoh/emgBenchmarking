@@ -67,14 +67,6 @@ class Combined_Data():
             self.env.num_gestures  = numGestures # different gesture count for Ninapro
             self.append_to_new_data(self.X.concatenated_trials, self.Y.concatenated_trials, self.label.concatenated_trials)
 
-            print(f"Subject {subject}: has {numGestures} gestures and self.label.shape {self.label.concatenated_trials.shape}") 
-
-            # turn self.label.concatenated_trails from one hot encoding to labels
-            gestures_to_append = np.argmax(self.label.concatenated_trials, axis=1)
-            unique, counts = np.unique(gestures_to_append, return_counts=True)
-            for i in unique:
-                print(f"Gesture {i}: {counts[i]} ")
-
         self.set_new_data()
 
         del self.X.new_data, self.Y.new_data, self.label.new_data

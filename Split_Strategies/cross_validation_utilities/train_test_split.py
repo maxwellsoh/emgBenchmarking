@@ -45,6 +45,7 @@ def train_test_split(
         train_size = train_size or 1 - test_size
 
         if transition_classifier:
+            # Labels are of type [start_gesture, end_gesture]
             
             transitions = [(int(start), int(end)) for start, end in Y_train_set_og]
             counter = Counter(transitions) 
@@ -73,8 +74,6 @@ def train_test_split(
             label_train_set = stratify.clone()
 
             unique, counts = np.unique(stratify, return_counts=True) # (GESTURE, ITS WINDOWS)
-
-       
 
         # split data for each class
         X_train = []

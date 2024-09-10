@@ -102,7 +102,6 @@ def balance_transition_classifier (restimulus):
 
     transition_total = 0
     non_transition_total = 0 
-    gestures_added = {}
     non_transition_seen = {}
     transition_seen = {}
 
@@ -123,7 +122,6 @@ def balance_transition_classifier (restimulus):
                 transition_total += 1
 
     equal_threshold = min(transition_total, non_transition_total)
-
     equal_transition_threshold = equal_threshold // len(transition_seen)
     equal_non_transition_threshold = equal_threshold // len(non_transition_seen)
 
@@ -140,7 +138,6 @@ def balance_transition_classifier (restimulus):
            
             if start_gesture >= 0 and start_gesture <= 6: 
                 if non_transition_windows_left[gesture] > 0:
-                    gestures_added[gesture] = gestures_added.get(gesture, 0) + 1
                     indices.append(x)
                     non_transition_windows_left[gesture] -= 1
 
@@ -151,11 +148,9 @@ def balance_transition_classifier (restimulus):
         
             if end_gesture >= 0 and end_gesture <= 6:
                 if transition_windows_left[gesture] > 0:
-                    gestures_added[gesture] = gestures_added.get(gesture, 0) + 1
                     indices.append(x)
                     transition_windows_left[gesture] -= 1
-        
-    # print("non-seq balanced gesture_count", gestures_added, "sum:", sum(gestures_added.values()), "unique gestures", np.unique(restimulus)-1)
+
     return indices
 
 
@@ -209,10 +204,9 @@ def contract(R, unfold=True):
 
 def label_transition(R, unfold=True):
     '''
-    Should return a tensor of shape (N, 2) where per window each row represents the (start, end) of a transition.
+    Should return a tensor of shape (N, 2) where per window we label [start_gesture, end_gesture] of a transition.
     '''
 
-    # Initialize the tensor with zeros
     transition_labels = torch.zeros((len(R), 2), dtype=torch.float32)
 
     # Populate the tensor with (start, end) pairs
@@ -223,9 +217,6 @@ def label_transition(R, unfold=True):
         transition_labels[x] = torch.tensor([start_gesture, end_gesture], dtype=torch.float32)
     
     return transition_labels
-
-
-
 
 def filter(emg):
     # sixth-order Butterworth highpass filter

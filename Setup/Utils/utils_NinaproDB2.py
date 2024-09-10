@@ -30,7 +30,7 @@ cmap = mpl.colormaps['viridis']
 # Gesture Labels
 gesture_labels = {}
 gesture_labels['Rest'] = ['Rest'] # Shared between exercises
-transition_labels = ['Not a Transition', 'Transition'] 
+
 
 gesture_labels[1] = ['Thumb Up', 'Index Middle Extension', 'Ring Little Flexion', 'Thumb Opposition', 'Finger Abduction', 'Fist', 'Pointing Index', 'Finger Adduction',
                     'Middle Axis Supination', 'Middle Axis Pronation', 'Little Axis Supination', 'Little Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation',
@@ -48,7 +48,7 @@ gesture_labels[3] = ['Flexion Of The Little Finger', 'Flexion Of The Ring Finger
 partial_gesture_labels = ['Rest', 'Finger Abduction', 'Fist', 'Finger Adduction', 'Middle Axis Supination', 
                           'Middle Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 'Ulnar Deviation']
 partial_gesture_indices = [0] + [gesture_labels[1].index(g) + len(gesture_labels['Rest']) for g in partial_gesture_labels[1:]] # 0 is for rest
-label_to_index = {label: index for index, label in enumerate(partial_gesture_indices)}
+transition_labels = ['Not a Transition', 'Transition'] 
 class CustomDataset_swav(Dataset):
     def __init__(self, data, labels=None, transform=None):
         self.data = data
@@ -133,7 +133,7 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance(restimulus, args):
+def balance_gesture_classifier(restimulus, args):
     """ Balances distribution of restimulus by minimizing zero (rest) gestures.
 
     Args:
@@ -165,8 +165,6 @@ def balance(restimulus, args):
                 else:
                     count_dict[elements] = 1
                 
- 
-    
     # Calculate average count of non-zero elements
     non_zero_counts = [count for key, count in count_dict.items() if key != (0,)]
     if non_zero_counts:
@@ -184,24 +182,71 @@ def balance(restimulus, args):
                 numZero += 1 # Rest always in partial
             else:
                 indices.append(x)
-                # if args.partial_dataset_ninapro:
-                #     if gesture in partial_gesture_indices:
-                #         indices.append(x)
-                # else: 
-                #     indices.append(x)
         else:
             if args.include_transitions:
                 indices.append(x)
-                # if args.partial_dataset_ninapro:
-                #     start_gesture = restimulus[x][0][0].item()
-                #     end_gesture = restimulus[x][0][-1].item()
-                #     if start_gesture in partial_gesture_indices and end_gesture in partial_gesture_indices:
-                #         indices.append(x)
-                # else:
-                #     indices.append(x)
-                
     return indices
 
+def balance_transition_classifier(restimulus, args):
+    '''
+    Balances such that there is an equal number of windows for all types of gestures. Balances all combinations of (start_gesture, end_gesture) windows not just between transition and non transition. 
+    '''
+    indices = []
+
+    transition_total = 0 
+    non_transition_total = 0 
+
+    transition_seen = {}
+    non_transition_seen = {}
+    
+    # First pass to count the number of each type of window
+    for x in range(len(restimulus)):
+
+        start_gesture = restimulus[x][0][0].item()
+        end_gesture = restimulus[x][0][-1].item()
+        gesture = (start_gesture, end_gesture)
+
+        if start_gesture == end_gesture: 
+            non_transition_seen[gesture] = non_transition_seen.get(gesture, 0) + 1
+            non_transition_total += 1
+
+        else: 
+            transition_seen[gesture] = transition_seen.get(gesture, 0) + 1
+            transition_total += 1
+
+    # Calculate average count of each gesture 
+    equal_threshold = min(transition_total, non_transition_total)
+    equal_transition_threshold = equal_threshold // len(transition_seen)
+    equal_non_transition_threshold = equal_threshold // len(non_transition_seen)
+
+    non_transition_windows_left = {key: equal_non_transition_threshold for key in non_transition_seen}
+    transition_windows_left = {key: equal_transition_threshold for key in transition_seen}
+
+    # Second pass: Add transtion/non-transition windows balanced per gesture.
+    for x in range(len(restimulus)):
+
+        start_gesture = restimulus[x][0][0].item()
+        end_gesture = restimulus[x][0][-1].item()
+        gesture = (start_gesture, end_gesture)
+
+        if start_gesture == end_gesture:
+            
+            if non_transition_windows_left[gesture] > 0: 
+                indices.append(x)
+                non_transition_windows_left[gesture] -= 1
+        
+        else:
+            if transition_windows_left[gesture] > 0:
+                indices.append(x)
+                transition_windows_left[gesture] -= 1
+
+    return indices
+
+def balance(restimulus, args):
+    if args.transition_classifier:
+        return balance_transition_classifier(restimulus, args)
+    else:
+        return balance_gesture_classifier(restimulus, args)
 
 def contract(restim, args):
     if args.transition_classifier:
@@ -230,12 +275,6 @@ def contract_gesture_classifier(restim, args):
             gesture = int(restim[x][0][-1]) # take the last gesture it belongs to (labels the transition as part of the gesture)
         else:
             gesture = int(restim[x][0][0])
-
-        # if args.partial_dataset_ninapro:
-        #     labels[x][label_to_index[gesture]] = 1.0
-        # else:
-        #     labels[x][gesture] = 1.0
-
         labels[x][gesture] = 1.0
     
     return labels
@@ -260,6 +299,7 @@ def contract_transition_classifier(restim, args):
         transition_labels[x] = torch.tensor([start_gesture, end_gesture], dtype=torch.float32)
 
     return transition_labels
+
 
 def filter(emg):
     # sixth-order Butterworth highpass filter

@@ -162,8 +162,6 @@ class Setup():
             script_path = os.path.abspath(os.path.join(setup_dir, f"Get_Datasets/{dataset}.py"))
             subprocess.run(['python', script_path, params])
 
-
-
         """ Conducts safety checks on the self.args, downloads needed datasets, and imports the correct self.utils file. """
         
         self.exercises = False
@@ -207,11 +205,15 @@ class Setup():
                 assert self.args.exercises == [3], "Regression only implemented for exercise 3"
             self.args.dataset = 'ninapro-db2'
 
-        elif (self.args.dataset in { "ninapro-db5", "ninapro_db5"}):
+        elif (self.args.dataset in {"ninapro-db5", "ninapro_db5"}):
             if (not os.path.exists("./NinaproDB5")):
                 print("NinaproDB5 dataset does not exist yet. Downloading now...")
                 get_dataset("get_NinaproDB5")
-                get_dataset("process_NinaproDB5")
+
+            if (not os.path.exists("./DatasetsProcessed_hdf5/NinaproDB5/")):
+                print("NinaproDB5 dataset not yet processed. Processing now")
+                process_dataset("process_NinaproDB5")
+
             from .Utils import utils_NinaproDB5 as utils
             self.project_name = 'emg_benchmarking_ninapro-db5'
             self.exercises = True
@@ -300,6 +302,7 @@ class Setup():
                     print("MCS dataset not yet processed. Processing now")
                     process_dataset("process_MCS", "--transition_classifier=True")
 
+                # TODO: Pass in arg parse to utils and use that instead
                 utils.include_transitions = True
                 utils.transition_classifier = True
 
