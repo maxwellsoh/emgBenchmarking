@@ -358,13 +358,13 @@ class Model_Trainer():
         self.project_name += self.args.project_name_suffix
 
 
-    def start_train_and_validate_run(self):
+    def start_pretrain_run(self):
 
         self.clear_memory()
         self.set_wandb_runname()
         self.set_project_name()
 
-        self.train_and_validate_run = wandb.init(name=self.wandb_runname, project=self.project_name)
+        self.pretrain_run = wandb.init(name=self.wandb_runname, project=self.project_name)
         wandb.config.lr = self.args.learning_rate
     
     def set_model_to_device(self):
