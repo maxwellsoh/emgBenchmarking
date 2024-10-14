@@ -606,7 +606,7 @@ def calculate_rms(array_2d):
     return np.sqrt(np.mean(array_2d**2))
 
 def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, 
-              global_min=None, global_max=None, turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
+              global_min=None, global_max=None, turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False, turn_on_phase_spectrogram=True):
     
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length * width)))
