@@ -23,6 +23,7 @@ from Model.CNN_Trainer import CNN_Trainer
 from Model.Unlabeled_Domain_Adaptation_Trainer import Unlabeled_Domain_Adaptation_Trainer
 from Model.MLP_Trainer import MLP_Trainer
 from Model.SVC_RF_Trainer import SVC_RF_Trainer
+
 from Model.IRM_CNN_Based_Trainer import IRM_CNN_Based_Trainer
 from Model.IRM_MLP_Based_Trainer import IRM_MLP_Based_Trainer
 from Model.CORAL_Trainer import CORAL_Trainer

@@ -48,6 +48,7 @@ gesture_labels[3] = ['Large Diameter Grasp', 'Small Diameter Grasp', 'Fixed Hook
 partial_gesture_labels = ['Rest', 'Finger Abduction', 'Fist', 'Finger Adduction', 'Middle Axis Supination', 
                           'Middle Axis Pronation', 'Wrist Flexion', 'Wrist Extension', 'Radial Deviation', 'Ulnar Deviation']
 partial_gesture_indices = [0] + [gesture_labels[2].index(g) + len(gesture_labels['Rest']) for g in partial_gesture_labels[1:]] # 0 is for rest 
+transition_labels = ['Not a Transition', 'Transition']
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -100,7 +101,8 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance(restimulus, args):
+
+def balance_gesture_classifier(restimulus, args):
     """ Balances distribution of restimulus by minimizing zero (rest) gestures.
 
     Args:
@@ -117,7 +119,7 @@ def balance(restimulus, args):
         unique_elements = torch.unique(restimulus[x])
         if len(unique_elements) == 1:
             element = unique_elements.item()
-            element = (element,)
+            element = (element, )
             if element in count_dict:
                 count_dict[element] += 1
             else:
@@ -139,23 +141,90 @@ def balance(restimulus, args):
     else:
         avg_count = 0  # Handle case where there are no non-zero unique elements
 
-    # Second pass: apply the threshold logic
     for x in range(len(restimulus)):
         unique_elements = torch.unique(restimulus[x])
         if len(unique_elements) == 1:
-            if unique_elements.item() == 0:
+            gesture = unique_elements.item()
+            if gesture == 0: 
                 if numZero < avg_count:
                     indices.append(x)
-                numZero += 1
+                numZero += 1 # Rest always in partial
             else:
                 indices.append(x)
         else:
             if args.include_transitions:
                 indices.append(x)
-                
     return indices
 
+def balance_transition_classifier(restimulus, args):
+    '''
+    Balances such that there is an equal number of windows for all types of gestures. Balances all combinations of (start_gesture, end_gesture) windows not just between transition and non transition. 
+    '''
+    indices = []
+
+    transition_total = 0 
+    non_transition_total = 0 
+
+    transition_seen = {}
+    non_transition_seen = {}
+    
+    # First pass to count the number of each type of window
+    for x in range(len(restimulus)):
+
+        start_gesture = restimulus[x][0][0].item()
+        end_gesture = restimulus[x][0][-1].item()
+        gesture = (start_gesture, end_gesture)
+
+        if start_gesture == end_gesture: 
+            non_transition_seen[gesture] = non_transition_seen.get(gesture, 0) + 1
+            non_transition_total += 1
+
+        else: 
+            transition_seen[gesture] = transition_seen.get(gesture, 0) + 1
+            transition_total += 1
+
+    # Calculate average count of each gesture -- averaged seperately for transition and non-transition gestures
+    equal_threshold = min(transition_total, non_transition_total)
+    equal_transition_threshold = equal_threshold // len(transition_seen)
+    equal_non_transition_threshold = equal_threshold // len(non_transition_seen)
+
+    non_transition_windows_left = {key: equal_non_transition_threshold for key in non_transition_seen}
+    transition_windows_left = {key: equal_transition_threshold for key in transition_seen}
+
+    # Second pass: Add transtion/non-transition windows balanced per gesture.
+    for x in range(len(restimulus)):
+
+        start_gesture = restimulus[x][0][0].item()
+        end_gesture = restimulus[x][0][-1].item()
+        gesture = (start_gesture, end_gesture)
+
+        if start_gesture == end_gesture:
+            
+            if non_transition_windows_left[gesture] > 0: 
+                indices.append(x)
+                non_transition_windows_left[gesture] -= 1
+        
+        else:
+            if transition_windows_left[gesture] > 0:
+                indices.append(x)
+                transition_windows_left[gesture] -= 1
+
+    return indices
+
+def balance(restimulus, args):
+    if args.transition_classifier:
+        return balance_transition_classifier(restimulus, args)
+    else:
+        return balance_gesture_classifier(restimulus, args)
+
+
 def contract(restim, args):
+    if args.transition_classifier:
+        return contract_transition_classifier(restim, args)
+    else:
+        return contract_gesture_classifier(restim, args)
+
+def contract_gesture_classifier(restim, args):
     """Converts restimulus tensor to one-hot encoded tensor.
 
     Args:
@@ -167,19 +236,39 @@ def contract(restim, args):
     """
     numGestures = restim.max() + 1 # + 1 to account for rest gesture
     labels = torch.tensor(())
-    labels = labels.new_zeros(size=(len(restim), numGestures))
-  
-    for x in range(len(restim)):
 
+
+    labels = labels.new_zeros(size=(len(restim), numGestures))
+
+    for x in range(len(restim)):
         if args.include_transitions:
             gesture = int(restim[x][0][-1]) # take the last gesture it belongs to (labels the transition as part of the gesture)
         else:
             gesture = int(restim[x][0][0])
-            
-        gesture = make_gesture_sequential(gesture, args)
         labels[x][gesture] = 1.0
     
     return labels
+
+def contract_transition_classifier(restim, args):
+    """Converts restimulus tensor to one-hot encoded tensor.
+
+    Args:
+        restim (tensor): restimulus data tensor
+        unfold (bool, optional): whether data was unfolded according to time steps. Defaults to True.
+
+    Returns:
+        labels: restimulus data now one-hot encoded
+    """
+    transition_labels = torch.zeros((len(restim), 2), dtype=torch.float32)
+
+    for x in range(len(restim)):
+
+        start_gesture = restim[x][0][0].item()
+        end_gesture = restim[x][0][-1].item()
+
+        transition_labels[x] = torch.tensor([start_gesture, end_gesture], dtype=torch.float32)
+
+    return transition_labels
 
 def filter(emg):
     # sixth-order Butterworth highpass filter

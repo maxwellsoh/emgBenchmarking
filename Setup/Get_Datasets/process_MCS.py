@@ -11,8 +11,7 @@ from glob import glob
 import torch
 
 
-# introduce an arg parse to take in args.include_transitions
-
+# Argparse for including transitions and transition classifier
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -26,8 +25,10 @@ def str2bool(v):
 import argparse
 parser = argparse.ArgumentParser(description="Include arguments for loading different data files")
 parser.add_argument("--include_transitions", type=str2bool, help="Start labeling gestures as soon as cue begins. Defaults to False.", default=False)
+parser.add_argument("--transition_classifier", type=str2bool, help="Classify windows as transtions or non transitions. Shortens observed window. Defaults to False.", default=False)
 args = parser.parse_args()
-print("include_transitions is set to:", args.include_transitions)
+
+
 # Sampling rate "Hz"
 fs = 2000
 gesture_names = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
@@ -36,11 +37,17 @@ gesture_names = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Devi
 # Erase old files to write new hdf5 files if you want to change this
 
 
-if args.include_transitions:
+# Set time delay after cue
+if args.include_transitions or args.transition_classifier:
     signal_segment_starting = 0 # start labeling as soon as the cue starts
 else:
-    signal_segment_starting = 1 # amount of time delay after cue
-signal_segment_ending = 6 # amount of time after signal. 6 seconds is the end of the cue, so 5 or 6 are good numbers
+    signal_segment_starting = 1 
+
+# Set second to stop observing after cue
+if args.transition_classifier:
+    signal_segment_ending = 2 # one second of each to balance transition/non-transition windows
+else:
+    signal_segment_ending = 6 # amount of time after signal. 6 seconds is the end of the cue, so 5 or 6 are good numbers
 
 
 # Get sEMG Records directory
@@ -53,7 +60,9 @@ Files = glob(os.path.join(Base, '**/*.mat'), recursive=True)
 # Automated segmentation and saving of all participant sEMG data to sEMG gesture segment in HDF5
 for file_path in Files:
     
-    if args.include_transitions:
+    if args.transition_classifier:
+        foldername = 'DatasetsProcessed_hdf5/MCS_EMG_transition_classifier/'
+    elif args.include_transitions:
         foldername = 'DatasetsProcessed_hdf5/MCS_EMG_include_transitions/'
     else:
         foldername = 'DatasetsProcessed_hdf5/MCS_EMG/'
@@ -96,12 +105,6 @@ for file_path in Files:
 
                 # Save the data in the group, formatted as (CHANNEL, TIME)
                 grp.create_dataset('sEMG', data=multi_channel_sEMG_data, compression="gzip")
-
-                # print(f"gesture: {gesture_names[gesture]}")
-                # print(f"    cycle: {rep + 1}")
-                # print(f"    start_idx: {start_idx}")
-                # print(f"    end_idx: {end_idx}")
-                # print(f"    data shape: {multi_channel_sEMG_data.shape}")
                 
               
 
@@ -117,7 +120,10 @@ import matplotlib.pyplot as plt
 #Flattened dataset with gestures as groups and numpy arrays of shape (CYCLE, CHANNEL, TIME)
 
 for i in range(1, 41):
-    if args.include_transitions: 
+
+    if args.transition_classifier:
+        foldername = 'DatasetsProcessed_hdf5/MCS_EMG_transition_classifier/'
+    elif args.include_transitions: 
         foldername = 'DatasetsProcessed_hdf5/MCS_EMG_include_transitions/'
     else:
         foldername = 'DatasetsProcessed_hdf5/MCS_EMG/'
@@ -173,7 +179,9 @@ for i in range(1, 41):
 
 gesture_names = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
 
-if args.include_transitions:
+if args.transition_classifier:
+    foldername = 'DatasetsProcessed_hdf5/MCS_EMG_transition_classifier/p40/'
+elif args.include_transitions:
     foldername = 'DatasetsProcessed_hdf5/MCS_EMG_include_transitions/p40/'
 else:
     foldername = 'DatasetsProcessed_hdf5/MCS_EMG/p40/'
@@ -210,7 +218,9 @@ def filter(emg):
 def getEMG (n):
     # NOTE: Not sure if this function is being used 
 
-    if args.include_transitions:
+    if args.transition_classifier:
+        file = h5py.File('DatasetsProcessed_hdf5/MCS_EMG_transition_classifier/p40/flattened_participant_40.hdf5', 'r')
+    elif args.include_transitions:
         file = h5py.File('DatasetsProcessed_hdf5/MCS_EMG_include_transitions/p40/flattened_participant_40.hdf5', 'r')
     else:
         file = h5py.File('DatasetsProcessed_hdf5/MCS_EMG/p40/flattened_participant_40.hdf5', 'r')

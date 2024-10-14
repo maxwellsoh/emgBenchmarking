@@ -159,11 +159,37 @@ class Model_Trainer():
                 metric.name = name
             
             return classification_metrics
+        
+
+        def get_transition_classifier_metrics():
+            classification_metrics = [
+
+                torchmetrics.Accuracy(task="multiclass", num_classes=self.num_classes, average="macro").to(self.device),
+                torchmetrics.Precision(task="multiclass", num_classes=self.num_classes, average="macro").to(self.device),
+                torchmetrics.Recall(task="multiclass", num_classes=self.num_classes, average="macro").to(self.device),
+                torchmetrics.F1Score(task="multiclass", num_classes=self.num_classes, average="macro").to(self.device),
+                torchmetrics.Accuracy(top_k=1, task="multiclass", num_classes=self.num_classes, average="macro").to(self.device),
+                torchmetrics.Accuracy(task="multiclass", num_classes=self.num_classes, average="micro").to(self.device),
+                torchmetrics.Accuracy(top_k=1, task="multiclass", num_classes=self.num_classes, average="micro").to(self.device),
+                torchmetrics.AUROC(task="multiclass", num_classes=self.num_classes, average="macro").to(self.device),
+                torchmetrics.AveragePrecision(task="multiclass", num_classes=self.num_classes, average="macro").to(self.device)
+            ]
+            for metric, name in zip(classification_metrics, ["Macro_Acc", "Macro_Precision", "Macro_Recall", "Macro_F1Score", "Macro_Top5Accuracy", "Micro_Accuracy", "Micro_Top5Accuracy", "Macro_AUROC","Macro_AUPRC"]):
+                metric.name = name
             
+            return classification_metrics
+        
+
+         
         if self.args.force_regression:
             training_metrics = get_regression_metrics()
             validation_metrics = get_regression_metrics()
             testing_metrics = get_regression_metrics()
+
+        elif self.args.transition_classifier:
+            training_metrics = get_transition_classifier_metrics()
+            validation_metrics = get_transition_classifier_metrics()
+            testing_metrics = get_transition_classifier_metrics()
 
         else: 
             training_metrics = get_classification_metrics()
@@ -339,6 +365,9 @@ class Model_Trainer():
     
     def set_wandb_runname(self):
         wandb_runname = 'CNN_seed-'+str(self.args.seed)
+
+        if self.args.transition_classifier:
+            wandb_runname += '_transition_classifier'
         if self.args.turn_on_rms:
             wandb_runname += '_rms-'+str(self.args.rms_input_windowsize)
         if self.args.leftout_subject != 0:
@@ -438,21 +467,24 @@ class Model_Trainer():
         self.model_filename = f'{self.testrun_foldername}model_{self.formatted_datetime}.pth'
 
     def set_gesture_labels(self):
-        if (self.exercises):
-            if not self.args.partial_dataset_ninapro:
-                self.gesture_labels = self.utils.gesture_labels['Rest']
-                for exercise_set in self.args.exercises:
-                    self.gesture_labels = self.gesture_labels + self.utils.gesture_labels[exercise_set]
-            else:
-                self.gesture_labels = self.utils.partial_gesture_labels
-        else:
-            self.gesture_labels = self.utils.gesture_labels
 
-        self.gesture_labels = self.gesture_labels
+        if self.args.transition_classifier:
+            self.gesture_labels = self.utils.transition_labels
+        else: 
+            if (self.exercises):
+                if not self.args.partial_dataset_ninapro:
+                    self.gesture_labels = self.utils.gesture_labels['Rest']
+                    for exercise_set in self.args.exercises:
+                        self.gesture_labels = self.gesture_labels + self.utils.gesture_labels[exercise_set]
+                else:
+                    self.gesture_labels = self.utils.partial_gesture_labels
+            else:
+                self.gesture_labels = self.utils.gesture_labels
 
     def plot_test_images(self):
         self.utils.plot_average_images(self.X.test, np.argmax(self.label.test.cpu().detach().numpy(), axis=1), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'test')
         self.utils.plot_first_fifteen_images(self.X.test, np.argmax(self.label.test.cpu().detach().numpy(), axis=1), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'test')
+        
 
     def plot_validation_images(self):
 
@@ -511,10 +543,14 @@ class Model_Trainer():
         if self.args.force_regression:
             num_classes = self.Y.train.shape[1]
             # assert num_classes == 6
+        elif self.args.transition_classifier:
+            num_classes = 2
         else: 
             num_classes = self.num_gestures
 
         self.num_classes = num_classes
+
+
 
     def shared_setup(self):
         # set up function calls shared for all models 

@@ -31,6 +31,8 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
         super().print_set_shapes()
         super().all_sets_to_tensor()
 
+        if self.args.transition_classifier: 
+            super().contract_to_binary_gestures()
 
     def append_to_train_unlabeled_list(self, X_new_data, Y_new_data, label_new_data):
         self.X.append_to_train_unlabeled_list(X_new_data)
@@ -108,7 +110,8 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                     stratify=label_train_temp, 
                     random_state=self.args.seed, 
                     shuffle=(not self.args.train_test_split_for_time_series),
-                    force_regression=self.args.force_regression
+                    force_regression=self.args.force_regression, 
+                    transition_classifier=self.args.transition_classifier
                 )
  
             if self.args.proportion_unlabeled_data_from_training_subjects>0:
@@ -121,7 +124,8 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                     stratify=label_train_temp, 
                     random_state=self.args.seed, 
                     shuffle=(not self.args.train_test_split_for_time_series), 
-                    force_regression=self.args.force_regression
+                    force_regression=self.args.force_regression, 
+                    transition_classifier=self.args.transition_classifier
                 )
 
                 self.append_to_train_list(X_train_labeled, Y_train_labeled, label_train_labeled)
@@ -129,8 +133,31 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                 self.append_to_train_unlabeled_list(X_train_unlabeled, Y_train_unlabeled, label_train_unlabeled)
 
             else:
+                # TRAIN 
+                # TODO: Should stratify if doing transition classifier
+                if self.args.transition_classifier:
+   
+                    Y_train_temp = torch.from_numpy(Y_train_temp).to(torch.float16)
+                    label_train_temp = torch.from_numpy(label_train_temp).to(torch.float16)
+
+                    if self.args.transition_classifier: 
+                        X_train_temp, _, \
+                        Y_train_temp, _, \
+                        label_train_temp, _ \
+                        = tts.train_test_split(
+                            X_train_temp, 
+                            Y_train_temp, 
+                            train_size=1.0, 
+                            stratify=label_train_temp, 
+                            random_state=self.args.seed, 
+                            shuffle=(not self.args.train_test_split_for_time_series), 
+                            force_regression=self.args.force_regression, 
+                            transition_classifier=self.args.transition_classifier
+                        )
+
 
                 total_windows += X_train_temp.shape[0]
+
                 self.append_to_train_list(X_train_temp, Y_train_temp, label_train_temp)
 
             cumulative_sizes.append(total_windows)
@@ -165,7 +192,7 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
 
         proportion_unlabeled_of_training_subjects = self.args.proportion_unlabeled_data_from_training_subjects
         
-
+        # TRAIN AND VALIDATION 
         # Split leftout validation into train and validation
         if proportion_to_keep_of_leftout_subject_for_training>0.0:
             X_train_partial_leftout_subject, X_validation_partial_leftout_subject, \
@@ -178,7 +205,8 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                     stratify=self.label.validation, 
                     random_state=self.args.seed, 
                     shuffle=(not self.args.train_test_split_for_time_series), 
-                    force_regression=self.args.force_regression    
+                    force_regression=self.args.force_regression, 
+                    transition_classifier=self.args.transition_classifier   
                 )
 
         # Otherwise validate with all of left out subject's data
@@ -204,7 +232,8 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                     stratify=label_train_partial_leftout_subject, 
                     random_state=self.args.seed, 
                     shuffle=(not self.args.train_test_split_for_time_series), 
-                    force_regression=self.args.force_regression
+                    force_regression=self.args.force_regression, 
+                    transition_classifier=self.args.transition_classifier
                 )
 
         # Add the partial from leftout subject to train/finetune

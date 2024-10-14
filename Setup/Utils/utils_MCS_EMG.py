@@ -24,6 +24,7 @@ import fcwt
 
 
 include_transitions = False # Whether or not to expand the gesture window to when cue starts. Set in Setup.py.
+transition_classifier = False # Whether or not to classify transitions. Set in Setup.py.
 fs = 2000 #Hz
 wLen = 250 # ms
 wLenTimesteps = int(wLen / 1000 * fs)
@@ -38,6 +39,7 @@ gesture_labels_partial = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Ra
 gesture_labels_full = ['Rest', 'Extension', 'Flexion', 'Ulnar_Deviation', 'Radial_Deviation', 'Grip', 'Abduction', 'Adduction', 'Supination', 'Pronation']
 gesture_labels = gesture_labels_full
 numGestures = len(gesture_labels)
+transition_labels = ['No Transition', 'Transition']
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -115,8 +117,9 @@ def getEMG (args):
         leftout = args[3]
 
     assert n >= 1 and n <= num_subjects
-
-    if include_transitions: 
+    if transition_classifier:
+        file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG_transition_classifier/p{n}/flattened_participant_{n}.hdf5', 'r')
+    elif include_transitions: 
         file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG_include_transitions/p{n}/flattened_participant_{n}.hdf5', 'r')
     else:
         file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG/p{n}/flattened_participant_{n}.hdf5', 'r')
@@ -129,10 +132,12 @@ def getEMG (args):
         if (type(args) != int and n != leftout):
             for j in range(len(data)):
                 data[j] = target_normalize(data[j], target_min, target_max, i)
-        
+
         data = filter(torch.from_numpy(data)).unfold(dimension=-1, size=wLenTimesteps, step=stepLen) # 
         emg.append(torch.cat([data[i] for i in range(len(data))], dim=-2).permute((1, 0, 2)).to(torch.float16)) 
-    return torch.cat(emg, dim=0) # (CYCLE*WINDOWS(MS OF GESTURE/WINDOW SIZE)*NUM_GESTURES, CHANNEL, TIME STEP) = (5 repetitions * 24 (12,000 ms of gesture/(250 ms window * 2000 fs = 500)) * 7 gestures, 4 channels, 500 time steps)
+    
+    return torch.cat(emg, dim=0) # (Number of Gestures * 20 * Number of Seconds Per Window, Number of Electrodes, Time Steps)
+    
 
 # assumes first of the 4 repetitions accessed
 def getExtrema (n, proportion):
@@ -152,7 +157,9 @@ def getExtrema (n, proportion):
 
     assert n >= 1 and n <= num_subjects
 
-    if include_transitions: 
+    if transition_classifier:
+        file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG_transition_classifier/p{n}/flattened_participant_{n}.hdf5', 'r')
+    elif include_transitions: 
         file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG_include_transitions/p{n}/flattened_participant_{n}.hdf5', 'r')
     else: 
         file = h5py.File(f'DatasetsProcessed_hdf5/MCS_EMG/p{n}/flattened_participant_{n}.hdf5', 'r')
@@ -174,16 +181,62 @@ def getExtrema (n, proportion):
             maxes[j][i] = torch.max(selected_windows[:, j, :])
     return mins, maxes
 
-def getLabels (n):
-    if include_transitions:
-        timesteps_for_one_gesture = 5 * 24 # (5 seconds per * (12000/500 = time of window/step but in fs))
+
+def getLabels_transition_classificatier(n):
+    """
+    
+    """
+
+    # Need to return labels of type (start, end) per window
+
+    # Balanced windows out: [Transition][No Transiton], 2 seconds total
+    timesteps_for_one_gesture = 20 * 2 
+    timsteps_for_one_second = 20 
+
+    # labels = np.zeros(((timesteps_for_one_gesture)*numGestures, 2))
+
+    transition_labels = torch.zeros(((timesteps_for_one_gesture)*numGestures, 2), dtype=torch.float32)
+
+    for i in range(timesteps_for_one_gesture):
+        for j in range(numGestures):
+
+            current_window = (j * timesteps_for_one_gesture) + i
+            
+            # the first second is transition
+            if i <= timsteps_for_one_second:
+
+                transition_labels[current_window] = torch.tensor([-1, j], dtype=torch.float32)
+
+                # labels[j * timesteps_for_one_gesture + i][1] = 1.0
+
+            # the next second is non transtion
+            elif timsteps_for_one_second < i < 2 * timsteps_for_one_second:
+                
+                transition_labels[current_window] = torch.tensor([j, j], dtype=torch.float32)
+
+    return transition_labels
+
+
+def getLabels_gesture_classificatier(n):
+
+    if transition_classifier:
+        timesteps_for_one_gesture = 20 * 2 
+    elif include_transitions:
+        timesteps_for_one_gesture = 20 * 6  # (12000 windows for 6 seconds / 0.01)
     else:
-        timesteps_for_one_gesture = 100 # 250 ms window with 250 step len empirically determines this
+        timesteps_for_one_gesture = 20 * 5 # 250 ms window with 250 step len empirically determines this
+
     labels = np.zeros((timesteps_for_one_gesture*numGestures, numGestures))
     for i in range(timesteps_for_one_gesture):
         for j in range(numGestures):
             labels[j * timesteps_for_one_gesture + i][j] = 1.0
     return labels
+
+def getLabels(n): 
+    if transition_classifier:
+        return getLabels_transition_classificatier(n)
+    else: 
+        return getLabels_gesture_classificatier(n)
 
 def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
     normalize_for_colormap_benchmark_hht = mpl.colors.Normalize(vmin=0, vmax=1)   
@@ -679,7 +732,13 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     # Calculate average image of each gesture
     average_images = []
     print(f"Plotting average {partition_name} images...")
-    for i in range(numGestures):
+
+    if transition_classifier:
+        num_classes = 2
+    else:
+        num_classes = numGestures
+
+    for i in range(num_classes):
         # Find indices
         gesture_indices = np.where(true_np == i)[0]
 
@@ -691,7 +750,7 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
                     
     # Plot average image of each gesture
     fig, axs = plt.subplots(2, 9, figsize=(10, 10))
-    for i in range(numGestures):
+    for i in range(num_classes):
         axs[i//9, i%9].imshow(average_images[i].transpose(1,2,0))
         axs[i//9, i%9].set_title(gesture_labels[i])
         axs[i//9, i%9].axis('off')
@@ -710,7 +769,11 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
 
     # Parameters for plotting
     rows_per_gesture = 15
-    total_gestures = numGestures  # Replace with the actual number of gestures
+
+    if transition_classifier: 
+        total_gestures = numGestures  # Replace with the actual number of gestures
+    else: 
+        total_gestures = 2
 
     # Create subplots
     fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 20))

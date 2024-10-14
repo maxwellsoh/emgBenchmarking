@@ -64,6 +64,7 @@ class Setup():
 
         
         parser.add_argument("--include_transitions", type=utils.str2bool, help="Whether or not to include transitions windows and label them as the final gesture. Set to False by default.", default=False)
+        parser.add_argument("--transition_classifier", type=utils.str2bool, help="Whether or not to classify whether a window is a transition. Set to False by default.", default=False)
         parser.add_argument("--multiprocessing", type=utils.str2bool, help="Whether or not to use multiprocessing when acquiring data. Set to True by default.", default=True)
         parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
 
@@ -169,12 +170,17 @@ class Setup():
             script_path = os.path.abspath(os.path.join(setup_dir, f"Get_Datasets/{dataset}.py"))
             subprocess.run(['python', script_path, params])
 
-
-
         """ Conducts safety checks on the self.args, downloads needed datasets, and imports the correct self.utils file. """
         
         self.exercises = False
         self.args.dataset = self.args.dataset.lower()
+
+        if self.args.transition_classifier:
+            self.args.include_transitions = True
+
+        if self.args.include_transitions:
+            transition_datasets = {"ninapro-db2", "ninapro_db2", "ninapro-db5", "ninapro_db5", "ninapro-db3", "ninapro_db3", "uciemg", "uci", "mcs"}
+            assert self.args.dataset in transition_datasets, f"Transitions from rest to gesture are only preserved in {transition_datasets} datasets."
 
         if self.args.model == "MLP" or self.args.model == "SVC" or self.args.model == "RF":
             print("Warning: not using pytorch, many arguments will be ignored")
@@ -207,11 +213,12 @@ class Setup():
                 assert self.args.exercises == [3], "Regression only implemented for exercise 3"
             self.args.dataset = 'ninapro-db2'
 
-        elif (self.args.dataset in { "ninapro-db5", "ninapro_db5"}):
+        elif (self.args.dataset in {"ninapro-db5", "ninapro_db5"}):
             if (not os.path.exists("./NinaproDB5")):
                 print("NinaproDB5 dataset does not exist yet. Downloading now...")
                 get_dataset("get_NinaproDB5")
                 process_dataset("process_NinaproDB5")
+
             if (not os.path.exists("./DatasetsProcessed_hdf5/NinaproDB5/")):
                 print("NinaproDB5 dataset not yet processed. Processing now")
                 process_dataset("process_NinaproDB5")
@@ -298,13 +305,23 @@ class Setup():
             if (not os.path.exists("./MCS_EMG")):
                 print("MCS dataset does not exist yet. Downloading now...")
                 get_dataset("get_MCS_EMG")
-            
-            if self.args.include_transitions: 
-                if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG_include_transitions/")):
+
+            if self.args.transition_classifier:
+                if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG_transition_classifer/")):
                     print("MCS dataset not yet processed. Processing now")
+                    process_dataset("process_MCS", "--transition_classifier=True")
+
+                # TODO: Pass in arg parse to utils and use that instead
+                utils.include_transitions = True
+                utils.transition_classifier = True
+
+            elif self.args.include_transitions: 
+                if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG_include_transitions/")):
+                    print("MCS dataset not yet processed for include transitions. Processing now")
                     process_dataset("process_MCS", "--include_transitions=True")
 
                 utils.include_transitions = True
+                utils.transition_classifier = self.args.transition_classifier
 
             else: 
                 if (not os.path.exists("./DatasetsProcessed_hdf5/MCS_EMG/")):
@@ -349,6 +366,9 @@ class Setup():
             self.args.target_normalize_subject = self.args.leftout_subject
             print("Target normalize subject defaulting to leftout subject.")
 
+        if self.args.transition_classifier:
+            assert self.args.leave_one_subject_out, "Binary classifier only implemented for LOSO."
+
         if self.args.domain_generalization in {"IRM", "CORAL"}:
             assert not self.args.turn_on_unlabeled_domain_adaptation, "Domain generalization cannot be used with unlabeled domain adaptation currently."
             assert self.args.leave_one_subject_out, "Domain generalization can only be used with leave-one-subject-out currently."
@@ -362,6 +382,7 @@ class Setup():
         self.formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
 
         self.utils = utils
+        self.utils.args = self.args
 
         print("------------------------------------------------------------------------------------------------------------------------")
         print("Starting run at", self.formatted_datetime)

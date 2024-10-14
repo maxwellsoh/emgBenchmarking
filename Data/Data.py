@@ -210,3 +210,25 @@ class Data():
 
                 new_torch = torch.from_numpy(getattr(self, set_name)).to(torch.float16)
                 setattr(self, set_name, new_torch)
+
+    # Transition Classifier Helper
+    def transition_labels_to_binary(self):
+
+        for set_name in ["train", "validation", "test"]:
+                         
+            transition_labels = getattr(self, set_name)
+            binary_labels = torch.zeros((len(transition_labels), 2))
+
+            for i in range(len(transition_labels)):
+            
+                start_gesture = int(transition_labels[i][0])
+                end_gesture = int(transition_labels[i][1])
+
+                if start_gesture == end_gesture: 
+                    binary_labels[i][0] = 1.0
+                else:
+                    binary_labels[i][1] = 1.0
+
+            setattr(self, set_name, binary_labels)
+
+                         

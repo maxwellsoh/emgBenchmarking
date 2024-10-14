@@ -33,8 +33,11 @@ cmap = mpl.colormaps['viridis']
 # Gesture Labels
 gesture_labels = ["hand at rest","hand clenched in a fist","wrist flexion","wrist extension","radial deviations","ulnar deviations","extended palm"]
 gesture_labels = gesture_labels[:numGestures]
+transition_labels = ['Not a Transition', 'Transition']
 
 include_transitions = False # Whether or not to include mixed gestures and label them as their last. Defined by Setup/Setup.py
+args = None # Defined by Setup/Setup.py
+
 
 class CustomDataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -69,7 +72,8 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def balance (restimulus):
+
+def balance_gesture_classifier (restimulus):
     indices = []
     for x in range (len(restimulus)):
         unique_gestures = len(torch.unique(restimulus[x]))
@@ -90,7 +94,76 @@ def balance (restimulus):
           
     return indices
 
-def contract(R, unfold=True):
+
+
+def balance_transition_classifier (restimulus):
+    indices = []
+
+    # First pass: count the occurences of each type of window
+
+    transition_total = 0
+    non_transition_total = 0 
+    non_transition_seen = {}
+    transition_seen = {}
+
+    for x in range (len(restimulus)):
+
+        start_gesture = int(restimulus[x][0])-1
+        end_gesture = int(restimulus[x][-1])-1
+
+        gesture = (start_gesture, end_gesture)
+        
+        if start_gesture == end_gesture:
+            if start_gesture >= 0 and start_gesture <= 6:
+                non_transition_seen[gesture] = non_transition_seen.get(gesture, 0) + 1
+                non_transition_total += 1
+        else:
+            if end_gesture >= 0 and end_gesture <= 6:
+                transition_seen[gesture] = transition_seen.get(gesture, 0) + 1
+                transition_total += 1
+
+    equal_threshold = min(transition_total, non_transition_total)
+    equal_transition_threshold = equal_threshold // len(transition_seen)
+    equal_non_transition_threshold = equal_threshold // len(non_transition_seen)
+
+    non_transition_windows_left = {key: equal_non_transition_threshold for key in non_transition_seen}
+    transition_windows_left = {key: equal_transition_threshold for key in transition_seen}
+
+    for x in range (len(restimulus)):
+
+        start_gesture = int(restimulus[x][0])-1
+        end_gesture = int(restimulus[x][-1])-1
+        gesture = (start_gesture, end_gesture)
+
+        if start_gesture == end_gesture:
+           
+            if start_gesture >= 0 and start_gesture <= 6: 
+                if non_transition_windows_left[gesture] > 0:
+                    indices.append(x)
+                    non_transition_windows_left[gesture] -= 1
+
+        else: 
+          
+            start_gesture = restimulus[x][0] - 1
+            end_gesture = restimulus[x][-1] - 1 
+        
+            if end_gesture >= 0 and end_gesture <= 6:
+                if transition_windows_left[gesture] > 0:
+                    indices.append(x)
+                    transition_windows_left[gesture] -= 1
+
+    return indices
+
+
+def balance(restimulus):
+    
+    if args.transition_classifier:
+        return balance_transition_classifier(restimulus)
+    else:
+        return balance_gesture_classifier(restimulus)
+
+
+def contract_gesture_classifer(R, unfold=True):
     labels = torch.tensor(())
     labels = labels.new_zeros(size=(len(R), numGestures))
     if (unfold):
@@ -104,6 +177,47 @@ def contract(R, unfold=True):
         for x in range(len(R)):
             labels[x][int(R[x]) - 1] = 1.0
     return labels
+
+
+def contract_transition_classifier(R):
+
+    labels = torch.tensor(())
+    labels = labels.new_zeros(size=(len(R), 2))
+    for x in range(len(R)):
+
+        start_gesture = int(R[x][0]) - 1
+        end_gesture = int(R[x][-1]) - 1
+
+        if start_gesture == end_gesture:
+            labels[x][0] = 1.0
+        else:
+            labels[x][1] = 1.0
+   
+    return labels
+
+def contract(R, unfold=True):
+
+    if args.transition_classifier:
+        assert unfold == True, "Cannot do gesture classification without contracting."
+        return contract_transition_classifier(R)
+    else:
+        return contract_gesture_classifer(R, unfold)
+
+def label_transition(R, unfold=True):
+    '''
+    Should return a tensor of shape (N, 2) where per window we label [start_gesture, end_gesture] of a transition.
+    '''
+
+    transition_labels = torch.zeros((len(R), 2), dtype=torch.float32)
+
+    # Populate the tensor with (start, end) pairs
+    for x in range(len(R)):
+        start_gesture = int(R[x][0]) - 1
+        end_gesture = int(R[x][-1]) - 1
+
+        transition_labels[x] = torch.tensor([start_gesture, end_gesture], dtype=torch.float32)
+    
+    return transition_labels
 
 def filter(emg):
     # sixth-order Butterworth highpass filter
@@ -294,11 +408,18 @@ def getRestim_separateSessions(args, unfold=True):
     return torch.cat(restim, dim=0)
 
 def getLabels (n, unfold=True):
-    return contract(getRestim(n, unfold), unfold)
+
+    if args.transition_classifier:
+        return label_transition(getRestim(n, unfold), unfold)
+    else:
+        return contract(getRestim(n, unfold), unfold)
 
 def getLabels_separateSessions(args, unfold=True):
     subject_number, session_number = args
     return contract(getRestim_separateSessions((subject_number, session_number), unfold), unfold)
+
+
+
 
 def closest_factors(num):
     # Find factors of the number
@@ -732,6 +853,7 @@ def plot_average_images(image_data, true, gesture_labels, testrun_foldername, ar
     # Calculate average image of each gesture
     average_images = []
     print(f"Plotting average {partition_name} images...")
+    numGestures = len(gesture_labels)
     for i in range(numGestures):
         # Find indices
         gesture_indices = np.where(true_np == i)[0]
@@ -762,11 +884,19 @@ def plot_first_fifteen_images(image_data, true, gesture_labels, testrun_folderna
     true_np = np.array(true)
 
     # Parameters for plotting
-    rows_per_gesture = 15
-    total_gestures = numGestures  # Replace with the actual number of gestures
+    # rows_per_gesture = 15
+    # total_gestures = len(gesture_labels)  # Replace with the actual number of gestures
+
+
+    if args.transition_classifier:
+        rows_per_gesture = 30
+        total_gestures = 2
+    else: 
+        total_gestures = numGestures
+        rows_per_gesture = 15
 
     # Create subplots
-    fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(20, 20))
+    fig, axs = plt.subplots(rows_per_gesture, total_gestures, figsize=(40, 40))
 
     print(f"Plotting first fifteen {partition_name} images...")
     for i in range(total_gestures):

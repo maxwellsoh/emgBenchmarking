@@ -100,6 +100,10 @@ class X_Data(Data):
                 base_foldername_zarr += f'exercises{exercises_numbers_filename}/'
         if self.args.include_transitions: 
             base_foldername_zarr += 'include_transitions/'
+
+        if self.args.transition_classifier: 
+            base_foldername_zarr += 'transition_classifier/'
+
         if self.args.save_images: 
             if not os.path.exists(base_foldername_zarr):
                 os.makedirs(base_foldername_zarr)

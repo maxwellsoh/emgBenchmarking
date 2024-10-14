@@ -1,5 +1,7 @@
 from sklearn import model_selection
 import numpy as np
+from collections import Counter
+import torch
 
 def train_test_split(
     *arrays,
@@ -8,7 +10,8 @@ def train_test_split(
     random_state=None,
     shuffle=True,
     stratify=None,
-    force_regression=False
+    force_regression=False, 
+    transition_classifier=False
 ): 
     """Splits data into training and testing sets. 
 
@@ -32,7 +35,7 @@ def train_test_split(
 
     if shuffle==False and stratify is not None:
         X_train_set = arrays[0]
-        Y_train_set_og = arrays[1]
+        Y_train_set_og = arrays[1] 
 
         if train_size is None and test_size is None:
             train_size = 0.75
@@ -41,23 +44,36 @@ def train_test_split(
 
         train_size = train_size or 1 - test_size
 
-        stratify_one_hot = False
-        is_y_one_hot = False
-        NUM_GESTURES = stratify.shape[1]
+        if transition_classifier:
+            # Labels are of type [start_gesture, end_gesture]
+            
+            transitions = [(int(start), int(end)) for start, end in Y_train_set_og]
+            counter = Counter(transitions) 
+            unique, counts = counter.keys(), counter.values()
+            counts = np.array(list(counts))
 
-        # If labels are one-hot-encoded, convert to 1D array      
-        if stratify.shape[1] != 1:
-            stratify_one_hot = True
-            stratify = np.argmax(stratify, axis=1)
-        if not force_regression and Y_train_set_og.shape[1] != 1:
-            is_y_one_hot = True
-            Y_train_set = np.argmax(Y_train_set_og, axis=1)
-        else:
             Y_train_set = Y_train_set_og
+            label_train_set = stratify.clone()
 
-        label_train_set = stratify.clone()
+        else: 
 
-        unique, counts = np.unique(stratify, return_counts=True) # (GESTURE, ITS WINDOWS)
+            stratify_one_hot = False
+            is_y_one_hot = False
+            NUM_GESTURES = stratify.shape[1]
+            
+            # If labels are one-hot-encoded, convert to 1D array      
+            if stratify.shape[1] != 1:
+                stratify_one_hot = True
+                stratify = np.argmax(stratify, axis=1)
+            if not force_regression and Y_train_set_og.shape[1] != 1:
+                is_y_one_hot = True
+                Y_train_set = np.argmax(Y_train_set_og, axis=1)
+            else:
+                Y_train_set = Y_train_set_og
+
+            label_train_set = stratify.clone()
+
+            unique, counts = np.unique(stratify, return_counts=True) # (GESTURE, ITS WINDOWS)
 
         # split data for each class
         X_train = []
@@ -73,13 +89,21 @@ def train_test_split(
 
         for key in class_amount.keys():
             train_size_for_current_class = class_amount[key]
+
             # get indices for current class
-            indices = np.where(stratify == key)[0]
+            if transition_classifier: 
+                key_tensor = torch.tensor(key)
+                indices = torch.all(stratify == key_tensor, dim=1).nonzero(as_tuple=True)[0]
+            else: 
+                indices = np.where(stratify == key)[0]
+            
             indices_train = indices[:train_size_for_current_class]
+
             # get data for current class
             X_train_class = X_train_set[indices_train]
             y_train_class = Y_train_set[indices_train]
             label_train_class = label_train_set[indices_train]
+
             # test set is the rest of the data
             indices_test = np.setdiff1d(indices, indices_train)
             X_test_class = X_train_set[indices_test]
@@ -99,15 +123,20 @@ def train_test_split(
         y_test = np.concatenate(y_test)
         label_train = np.concatenate(label_train)
         label_test = np.concatenate(label_test)
+
+        # If transition classifier and the gestures haven't been transitioned back yet
         
-        # if input labels are one-hot-encoded, output labels are one-hot-encoded
-        if not force_regression and is_y_one_hot:
-            NUM_GESTURES = Y_train_set_og.shape[1] 
-            y_train = np.eye(NUM_GESTURES)[y_train]
-            y_test = np.eye(NUM_GESTURES)[y_test]
-        if stratify_one_hot:
-            label_train = np.eye(NUM_GESTURES)[label_train]
-            label_test = np.eye(NUM_GESTURES)[label_test]
+        
+        if not transition_classifier: 
+        
+            # if input labels are one-hot-encoded, output labels are one-hot-encoded
+            if not force_regression and is_y_one_hot:
+                NUM_GESTURES = Y_train_set_og.shape[1] 
+                y_train = np.eye(NUM_GESTURES)[y_train]
+                y_test = np.eye(NUM_GESTURES)[y_test]
+            if stratify_one_hot:
+                label_train = np.eye(NUM_GESTURES)[label_train]
+                label_test = np.eye(NUM_GESTURES)[label_test]
         
     else: # shuffle=True or stratify=None
         arrays = list(arrays) + [stratify]
