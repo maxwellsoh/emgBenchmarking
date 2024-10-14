@@ -19,6 +19,7 @@ import os
 from scipy.signal import spectrogram, stft
 import pywt
 import fcwt
+import emd 
 
 numGestures = 6 # 7 total, but not all subjects have 7
 fs = 1000 #Hz (device sampling frequency is 200Hz but raw data is collected at 1000Hz)
@@ -489,13 +490,17 @@ def optimized_makeOnePhaseSpectrogramImage(data, length, width, resize_length_fa
     return final_image
 
 
-def optimized_makeOneHilbertHuangImage(i, data, length, width, resize_length_factor, native_resnet_size):
+def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
 
     emg_sample = data 
     max_imfs = 6
 
     # Perform Empirical Mode Decomposition (EMD)
-    intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=max_imfs-1) 
+    try:
+        intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=max_imfs-1) 
+    except NameError as e:
+        # If no IMFS can be sifted, pad with zeroes
+        intrinsic_mode_functions = np.zeros((emg_sample.shape[0], max_imfs))
 
     instantaneous_phase, instantaneous_frequencies, instantaneous_amplitudes = \
         emd.spectra.frequency_transform(imf=intrinsic_mode_functions, sample_rate=fs, method='nht')
@@ -605,8 +610,8 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, 
-              global_min=None, global_max=None, turn_on_spectrogram=False, turn_on_cwt=False, turn_on_hht=False, turn_on_phase_spectrogram=True):
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, global_min=None, global_max=None,
+              turn_on_spectrogram=False, turn_on_phase_spectrogram=False, turn_on_cwt=False, turn_on_hht=False):
     
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length * width)))
@@ -658,7 +663,7 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
         images_spectrogram = []
         for i in tqdm(range(len(emg)), desc="Creating Phase HHT Images"):
-            images_spectrogram.append(optimized_makeOneHilbertHuangImage(i, *args[i]))
+            images_spectrogram.append(optimized_makeOneHilbertHuangImage(*args[i]))
         images = images_spectrogram
         
     elif turn_on_cwt:

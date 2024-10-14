@@ -207,7 +207,11 @@ class Setup():
             if (not os.path.exists("./NinaproDB5")):
                 print("NinaproDB5 dataset does not exist yet. Downloading now...")
                 get_dataset("get_NinaproDB5")
-                get_dataset("process_NinaproDB5")
+                process_dataset("process_NinaproDB5")
+            if (not os.path.exists("./DatasetsProcessed_hdf5/NinaproDB5/")):
+                print("NinaproDB5 dataset not yet processed. Processing now")
+                process_dataset("process_NinaproDB5")
+
             from .Utils import utils_NinaproDB5 as utils
             self.project_name = 'emg_benchmarking_ninapro-db5'
             self.exercises = True
