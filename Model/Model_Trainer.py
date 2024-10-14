@@ -323,6 +323,8 @@ class Model_Trainer():
 
     def set_criterion(self):
 
+        # TODO: Add in CORAL/IRM
+
         if self.args.force_regression:
             self.criterion = nn.MSELoss()
         else:
@@ -362,6 +364,8 @@ class Model_Trainer():
             wandb_runname += '_cwt'
         if self.args.turn_on_hht:
             wandb_runname += '_hht'
+        if self.args.turn_on_phase_spectrogram:
+            wandb_runname += '_phase-spect'
         if self.args.reduce_training_data_size:
             wandb_runname += '_reduced-training-data-size-' + str(self.args.reduced_training_data_size)
         if self.args.turn_off_scaler_normalization:
@@ -410,13 +414,13 @@ class Model_Trainer():
         self.project_name += self.args.project_name_suffix
 
 
-    def start_train_and_validate_run(self):
+    def start_pretrain_run(self):
 
         self.clear_memory()
         self.set_wandb_runname()
         self.set_project_name()
 
-        self.train_and_validate_run = wandb.init(name=self.wandb_runname, project=self.project_name)
+        self.pretrain_run = wandb.init(name=self.wandb_runname, project=self.project_name)
         wandb.config.lr = self.args.learning_rate
     
     def set_model_to_device(self):

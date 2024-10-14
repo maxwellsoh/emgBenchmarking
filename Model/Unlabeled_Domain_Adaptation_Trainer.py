@@ -37,7 +37,7 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         super().set_pretrain_path()
         self.set_loaders()
         super().shared_setup()
-        super().start_train_and_validate_run()
+        super().start_pretrain_run()
         super().set_testrun_foldername()
         super().set_gesture_labels()
         super().plot_images()
@@ -319,7 +319,7 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         ml_utils.evaluate_model_on_test_set(self.semilearn_algorithm.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, self.testing_metrics)
         wandb.finish()
 
-    def pretrain_and_finetune_model(self):
+    def finetune_model(self):
         
         print("Finetuning the model...")
         self.run = wandb.init(name=self.wandb_runname+"_unlab_finetune", project=self.project_name)
@@ -363,8 +363,8 @@ class Unlabeled_Domain_Adaptation_Trainer(Model_Trainer):
         self.test_model()
 
         if self.args.pretrain_and_finetune:
-            self.pretrain_and_finetune_model()
+            self.finetune_model()
 
-        self.train_and_validate_run()   
+        self.pretrain_run.finish()   
 
     

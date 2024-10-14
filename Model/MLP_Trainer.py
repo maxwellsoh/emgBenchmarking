@@ -44,7 +44,7 @@ class MLP_Trainer(Model_Trainer):
         super().set_resize_transform()
         super().set_loaders()
         super().set_criterion()
-        super().start_train_and_validate_run()
+        super().start_pretrain_run()
         super().set_gesture_labels()
         super().set_testrun_foldername()
         super().plot_images()
@@ -247,5 +247,5 @@ class MLP_Trainer(Model_Trainer):
         torch.save(self.model.state_dict(), self.model_filename)
         wandb.save(f'model/modelParameters_{self.formatted_datetime}.pth')
 
-        self.train_and_validate_run.finish()
+        self.pretrain_run.finish()
     

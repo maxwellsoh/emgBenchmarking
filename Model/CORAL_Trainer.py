@@ -3,6 +3,7 @@ CORAL Trainer
 CNN Base with DeepCoral algorithm applied. 
 Inspiration: https://github.com/thuml/Transfer-Learning-Library/
 '''
+
 from .Model_Trainer import Model_Trainer
 import torch.nn as nn
 import timm
@@ -139,6 +140,7 @@ class CorrelationAlignmentLoss(nn.Module):
         return mean_diff + cov_diff
 
 class CORAL_Trainer(Model_Trainer):
+
     """
     Training class for CNN self.models (resnet, convnext_tiny_custom, vit_tiny_patch and not (unlabeled_domain or in MLP, SVC, RF) self.models.
     """
@@ -166,6 +168,7 @@ class CORAL_Trainer(Model_Trainer):
         super().set_resize_transform()
         super().set_loaders()
         self.set_criterion()
+
         super().start_train_and_validate_run()
         super().set_model_to_device()
         super().set_testrun_foldername()
@@ -200,6 +203,7 @@ class CORAL_Trainer(Model_Trainer):
 
         # Print the total number of parameters
         print(f'Total number of parameters: {total_params}')
+
 
     def set_param_requires_grad(self):
         
@@ -258,6 +262,7 @@ class CORAL_Trainer(Model_Trainer):
                 if isinstance(output, dict):
                     output = output['logits']
                 preds = np.argmax(output.cpu().detach().numpy(), axis=1)
+
                 validation_predictions.extend(preds)
         
         self.utils.plot_confusion_matrix(np.argmax(self.Y.validation.cpu().detach().numpy(), axis=1), np.array(validation_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'validation')   
@@ -278,6 +283,7 @@ class CORAL_Trainer(Model_Trainer):
                 if isinstance(output, dict):
                         output = output['logits']
                 preds = torch.argmax(output, dim=1)
+
                 train_predictions.extend(preds.cpu().detach().numpy())
         
         self.utils.plot_confusion_matrix(np.argmax(self.Y.train.cpu().detach().numpy(), axis=1), np.array(train_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'train')
@@ -310,6 +316,7 @@ class CORAL_Trainer(Model_Trainer):
             pin_memory=True,
             drop_last=self.args.force_regression
         )
+
         # Initialize metrics for finetuning training and validation
         ft_training_metrics, ft_validation_metrics, testing_metrics = super().get_metrics()
 
@@ -318,6 +325,7 @@ class CORAL_Trainer(Model_Trainer):
             self.model.train()
             train_loss = 0.0
             
+
             for ft_train_metric in ft_training_metrics:
                 ft_train_metric.reset()
 
@@ -346,6 +354,7 @@ class CORAL_Trainer(Model_Trainer):
                     # no other domains to cross compare with 
                     loss = loss_ce
             
+
                     loss.backward()
                     self.optimizer.step()
 
@@ -362,6 +371,7 @@ class CORAL_Trainer(Model_Trainer):
                             "Batch Acc": ft_accuracy_metric.compute().item()
                         })
 
+
             # Finetuning Validation
             self.model.eval()
             val_loss = 0.0
@@ -373,6 +383,7 @@ class CORAL_Trainer(Model_Trainer):
             all_val_outputs = []
             all_val_labels = []
 
+
             with torch.no_grad():
                 for X_batch, Y_batch in self.val_loader:
                     X_batch = X_batch.to(self.device).to(torch.float32)
@@ -383,6 +394,7 @@ class CORAL_Trainer(Model_Trainer):
                     if isinstance(output, dict):
                         output = output['logits']
                     val_loss += self.cross_entropy(output,Y_batch).item()
+
 
                     for ft_val_metric in ft_validation_metrics:
                         if ft_val_metric.name != "Macro_AUROC" and ft_val_metric.name != "Macro_AUPRC":
@@ -407,12 +419,14 @@ class CORAL_Trainer(Model_Trainer):
             finetune_val_macro_auroc_metric(all_val_outputs,Y_validation_long)
             finetune_val_macro_auprc_metric(all_val_outputs,Y_validation_long)
 
+
             # Calculate average loss and metrics
             train_loss /= len(finetune_loader)
             val_loss /= len(self.val_loader)
             tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_gestures)
             fpr_results = ml_utils.evaluate_model_fpr_at_tpr(self.model, self.val_loader, self.device, self.num_gestures)
             confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
+
 
             # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
             ft_training_metrics_values = {ft_metric.name: ft_metric.compute() for ft_metric in ft_training_metrics}
@@ -472,6 +486,7 @@ class CORAL_Trainer(Model_Trainer):
         self.print_classification_metrics()
         self.ft_run.finish() 
 
+
     def train_and_validate(self, training_metrics, validation_metrics):
         """
         Train and validation loop. 
@@ -481,6 +496,7 @@ class CORAL_Trainer(Model_Trainer):
             
             self.model.train()
             
+
             train_loss = 0.0
 
             # Reset training metrics at the start of each epoch
@@ -547,6 +563,7 @@ class CORAL_Trainer(Model_Trainer):
                     outputs_train_all.append(output)
                     ground_truth_train_all.append(torch.argmax(Y_batch, dim=1))
 
+
                     train_loss += loss.item()
 
                     for train_metric in training_metrics:
@@ -569,6 +586,7 @@ class CORAL_Trainer(Model_Trainer):
 
             train_macro_auroc_metric(outputs_train_all,   ground_truth_train_all)
             train_macro_auprc_metric(outputs_train_all, ground_truth_train_all)
+
 
             # Validation phase
             self.model.eval()
@@ -597,6 +615,7 @@ class CORAL_Trainer(Model_Trainer):
                  
                     val_loss += self.cross_entropy(output, Y_batch).item()
 
+
                     for val_metric in validation_metrics:
                         if val_metric.name != "Macro_AUROC" and val_metric.name != "Macro_AUPRC":
                             val_metric(output,Y_batch_long)
@@ -618,6 +637,7 @@ class CORAL_Trainer(Model_Trainer):
             val_macro_auroc_metric(all_val_outputs,Y_validation_long)
             val_macro_auprc_metric(all_val_outputs,Y_validation_long)
 
+
             # Calculate average loss and metrics
             train_loss /= len(self.train_loader)
             val_loss /= len(self.val_loader)
@@ -628,6 +648,7 @@ class CORAL_Trainer(Model_Trainer):
 
             tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_classes)
             confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
+
 
             # Print metric values
             print(f"Epoch {epoch+1}/{self.num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")

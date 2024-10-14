@@ -17,7 +17,7 @@ import wandb
 
 class CNN_Trainer(Model_Trainer):
     """
-    Training class for CNN self.models (resnet, convnext_tiny_custom, vit_tiny_patch and not (unlabeled_domain or in MLP, SVC, RF) self.models.
+    Training class for CNN based (resnet, convnext_tiny_custom, vit_tiny_patch) NOT (unlabeled_domain or in MLP, SVC, RF).
     """
 
     def __init__(self, X_data, Y_data, label_data, env):
@@ -32,9 +32,14 @@ class CNN_Trainer(Model_Trainer):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
+    def model_loop(self):
+        self.pretrain_model() 
+        if self.args.pretrain_and_finetune:
+            self.finetune_model()
+        
     def setup_model(self):
         """
-        Main function that sets up the model 
+        Set up all model parameters for the run. 
         """
         super().set_pretrain_path()
         self.set_model()
@@ -43,12 +48,11 @@ class CNN_Trainer(Model_Trainer):
         super().set_resize_transform()
         super().set_loaders()
         super().set_criterion()
-        super().start_train_and_validate_run()
+        super().start_pretrain_run()
         super().set_model_to_device()
         super().set_testrun_foldername()
         super().set_gesture_labels()
         super().plot_images()
-
 
     def set_model(self):
 
@@ -81,7 +85,6 @@ class CNN_Trainer(Model_Trainer):
                     return x
                 
             # Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
-
 
             n_inputs = 768
             hidden_size = 128 # default is 2048
@@ -126,7 +129,6 @@ class CNN_Trainer(Model_Trainer):
         # Print the total number of parameters
         print(f'Total number of parameters: {total_params}')
 
-
     def set_param_requires_grad(self):
         
         num = 0
@@ -141,8 +143,6 @@ class CNN_Trainer(Model_Trainer):
 
     def set_optimizer(self):
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
-
-    
 
     def print_classification_metrics(self):
         """
@@ -210,19 +210,10 @@ class CNN_Trainer(Model_Trainer):
         
         self.utils.plot_confusion_matrix(np.argmax(self.Y.train.cpu().detach().numpy(), axis=1), np.array(train_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'train')
     
-    def pretrain_and_finetune(self, testing_metrics):
+    def finetune_model(self):
         """
-        Finish current run and start a new run for finetuning.
+        Start a new loop for finetuning. 
         """
-
-        # Evaluate performance on test metrics
-        ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, testing_metrics)
-
-        if not self.args.force_regression:
-            self.print_classification_metrics()
-        self.train_and_validate_run.finish()
-        
-        ## START NEW RUN FOR FINETUNING 
 
         self.ft_run = wandb.init(name=self.wandb_runname+"_finetune", project=self.project_name) 
         ft_epochs = self.args.finetuning_epochs
@@ -230,14 +221,13 @@ class CNN_Trainer(Model_Trainer):
         finetune_loader = DataLoader(finetune_dataset, batch_size=self.batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True, drop_last=self.args.force_regression)
 
         # Initialize metrics for finetuning training and validation
-        ft_training_metrics, ft_validation_metrics, testing_metrics = super().get_metrics()
+        ft_training_metrics, ft_validation_metrics, ft_testing_metrics = super().get_metrics()
 
         # Finetuning Loop 
         for epoch in tqdm(range(ft_epochs), desc="Finetuning Epoch"):
             self.model.train()
             train_loss = 0.0
             
-
             for ft_train_metric in ft_training_metrics:
                 ft_train_metric.reset()
 
@@ -305,7 +295,6 @@ class CNN_Trainer(Model_Trainer):
                         all_val_outputs.append(output)
                         all_val_labels.append(Y_batch_long)
 
-            
             if not self.args.force_regression:
                 all_val_outputs = torch.cat(all_val_outputs, dim=0)
                 all_val_labels = torch.cat(all_val_labels, dim=0)  
@@ -384,17 +373,18 @@ class CNN_Trainer(Model_Trainer):
 
         # Evaluate the self.model on the test set
         ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.
-        device, self.num_gestures, self.criterion, self.args, testing_metrics)
+        device, self.num_gestures, self.criterion, self.args, ft_testing_metrics)
 
         if not self.args.force_regression:
             self.print_classification_metrics()
         self.ft_run.finish() 
 
+    def pretrain_model(self):
+        """
+        Train and validation loop for the pretraining phase.
+        """
 
-    def train_and_validate(self, training_metrics, validation_metrics):
-        """
-        Train and validation loop. 
-        """
+        training_metrics, validation_metrics, testing_metrics = super().get_metrics()
 
         for epoch in tqdm(range(self.num_epochs), desc="Epoch"):
             self.model.train()
@@ -568,25 +558,11 @@ class CNN_Trainer(Model_Trainer):
         torch.save(self.model.state_dict(), self.model_filename)
         wandb.save(f'model/modelParameters_{self.formatted_datetime}.pth')
 
-        # If pretrain and finetune, continue. Otherwise, here.
-        if not self.args.pretrain_and_finetune:
+        # Evaluate performance on test metrics
+        ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, testing_metrics)
 
-            if not self.args.force_regression: 
-                self.print_classification_metrics()
-            self.train_and_validate_run.finish()
+        if not self.args.force_regression:
+            self.print_classification_metrics()
+        self.pretrain_run.finish()
+        
 
-    def model_loop(self):
-
-        # Get metrics
-        if self.args.pretrain_and_finetune:
-            training_metrics, validation_metrics, testing_metrics = super().get_metrics()
-        else: 
-            training_metrics, validation_metrics = super().get_metrics(testing=False)
-
-        # Train and Validation Loop 
-        self.train_and_validate(training_metrics, validation_metrics)
-
-        # Finetune Loop 
-        if self.args.pretrain_and_finetune:
-            self.pretrain_and_finetune(testing_metrics)
-            
