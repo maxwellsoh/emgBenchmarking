@@ -87,6 +87,8 @@ class Model_Trainer():
         print("Device:", self.device)
 
         self.set_num_classes()
+        
+        
 
     class CustomDataset(Dataset):
         def __init__(self, X, Y, transform=None):
@@ -249,7 +251,6 @@ class Model_Trainer():
                 drop_last=self.args.force_regression
             )
             
-            
             self.val_loader = DataLoader(
                 val_dataset, 
                 batch_size=self.batch_size, 
@@ -289,6 +290,10 @@ class Model_Trainer():
         if self.args.turn_on_rms:
             wandb_runname += '_rms-'+str(self.args.rms_input_windowsize)
         if self.args.leftout_subject != 0:
+            if (self.args.force_regression and self.args.dataset == "ninapro-db3") and self.args.leftout_subject == 10:
+                # Subject 10 in DB3 is missing a lot of data. We delete it internally and subject 11 gets shifted to become subject 10. Naming it its the "external" subject number for consistency. 
+                wandb_runname += '_LOSO-11'
+
             wandb_runname += '_LOSO-'+str(self.args.leftout_subject)
         wandb_runname += '_' + self.model_name
         if (self.exercises and not self.args.partial_dataset_ninapro):
@@ -307,6 +312,8 @@ class Model_Trainer():
             wandb_runname += '_cwt'
         if self.args.turn_on_hht:
             wandb_runname += '_hht'
+        if self.args.turn_on_phase_spectrogram:
+            wandb_runname += '_phase-spect'
         if self.args.reduce_training_data_size:
             wandb_runname += '_reduced-training-data-size-' + str(self.args.reduced_training_data_size)
         if self.args.turn_off_scaler_normalization:
@@ -337,7 +344,7 @@ class Model_Trainer():
         if self.args.proportion_unlabeled_data_from_training_subjects>0:
             wandb_runname += '_unlabel-subj-prop-' + str(self.args.proportion_unlabeled_data_from_training_subjects)
 
-        if self.args.target_normalize_subject != self.args.leftout_subject:
+        if (self.args.target_normalize > 0) and (self.args.target_normalize_subject != self.args.leftout_subject):
             wandb_runname += '_targ-norm-subj-' + str(self.args.target_normalize_subject)
 
         if self.args.include_transitions: 
@@ -355,13 +362,13 @@ class Model_Trainer():
         self.project_name += self.args.project_name_suffix
 
 
-    def start_train_and_validate_run(self):
+    def start_pretrain_run(self):
 
         self.clear_memory()
         self.set_wandb_runname()
         self.set_project_name()
 
-        self.train_and_validate_run = wandb.init(name=self.wandb_runname, project=self.project_name)
+        self.pretrain_run = wandb.init(name=self.wandb_runname, project=self.project_name)
         wandb.config.lr = self.args.learning_rate
     
     def set_model_to_device(self):

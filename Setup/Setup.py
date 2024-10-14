@@ -172,17 +172,12 @@ class Setup():
         self.exercises = False
         self.args.dataset = self.args.dataset.lower()
 
-        if self.args.target_normalize_subject == 0:
-            self.args.target_normalize_subject = self.args.leftout_subject
-            print("Target normalize subject defaulting to leftout subject.")
-
         if self.args.model == "MLP" or self.args.model == "SVC" or self.args.model == "RF":
             print("Warning: not using pytorch, many arguments will be ignored")
             if self.args.turn_on_unlabeled_domain_adaptation:
                 raise NotImplementedError("Cannot use unlabeled domain adaptation with MLP, SVC, or RF")
             if self.args.pretrain_and_finetune:
                 raise NotImplementedError("Cannot use pretrain and finetune with MLP, SVC, or RF")
-
 
         if (self.args.dataset in {"uciemg", "uci"}):
             if (not os.path.exists("./uciEMG")):
@@ -191,7 +186,9 @@ class Setup():
             from .Utils import utils_UCI as utils
             self.project_name = 'emg_benchmarking_uci'
             self.args.dataset = "uciemg"
-            utils.include_transitions = True
+
+            if self.args.include_transitions: 
+                utils.include_transitions = True
 
         elif (self.args.dataset in {"ninapro-db2", "ninapro_db2"}):
             if (not os.path.exists("./NinaproDB2")):
@@ -241,8 +238,8 @@ class Setup():
             assert not(self.args.force_regression and self.args.leftout_subject == 10), "Subject 10 is missing gesture data for exercise 3 and cannot be used. Please choose another subject."
 
             if self.args.force_regression and self.args.leftout_subject == 11: 
-                self.args.leftout_subject = 10
                 # subject 10 is missing force data and is deleted internally 
+                self.args.leftout_subject = 10
 
             self.args.dataset = 'ninapro-db3'
 
@@ -325,7 +322,13 @@ class Setup():
             self.args.dataset = 'mcs'
             
         else: 
-            raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," + "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
+            print(self.args.dataset)
+            if os.path.exists(f"DatasetsProcessed_hdf5/{self.args.dataset}/"):
+                from .Utils import utils_generic as utils
+                utils.initialize(self.args.dataset)
+                self.project_name = f'emg_benchmarking_{self.args.dataset}'
+            else:
+                raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," + "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
             
         # Safety Checks
         if self.args.turn_off_scaler_normalization:
@@ -337,6 +340,10 @@ class Setup():
         if self.args.force_regression:
             assert self.args.dataset in {"ninapro-db2", "ninapro-db3"}, "Regression only implemented for Ninapro DB2 and DB3 dataset." 
             assert not self.args.partial_dataset_ninapro, "Cannot use partial dataset for regression. Set exercises=3." 
+
+        if (self.args.target_normalize > 0) and self.args.target_normalize_subject == 0:
+            self.args.target_normalize_subject = self.args.leftout_subject
+            print("Target normalize subject defaulting to leftout subject.")
 
         # Add date and time to filename
         current_datetime = datetime.datetime.now()
@@ -350,10 +357,16 @@ class Setup():
 
         
 
+        
+
     def print_params(self):
         for param, value in vars(self.args).items():
             if getattr(self.args, param):
-                print(f"The value of --{param} is {value}")
+                if param == "target_normalize_subject":
+                    if self.args.target_normalize != 0.0:
+                        print(f"The value of --{param} is {value}")
+                else:
+                    print(f"The value of --{param} is {value}")
 
     def set_exercise(self):
         """ Set the self.exercises for the partial dataset for Ninapro datasets. 

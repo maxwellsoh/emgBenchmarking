@@ -167,6 +167,8 @@ class Combined_Data():
                     labels = labels_async.get()
 
         self.X.data = emg
+        self.X.length = emg[0].shape[-2]
+        self.X.width = emg[0].shape[-1]
         self.Y.data = labels
         self.label.data = labels
 

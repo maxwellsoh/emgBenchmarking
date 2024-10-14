@@ -490,7 +490,6 @@ def optimized_makeOnePhaseSpectrogramImage(data, length, width, resize_length_fa
     return final_image
 
 
-
 def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
 
     emg_sample = data 

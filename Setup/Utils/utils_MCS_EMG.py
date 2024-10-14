@@ -15,7 +15,7 @@ import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import h5py
-from scipy.signal import spectrogram
+from scipy.signal import spectrogram, stft
 import pywt
 import scipy
 import emd
@@ -362,15 +362,21 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
 
     final_image = image_normalized.numpy().astype(np.float32)
 
+    # Plot
+    image_np = np.transpose(final_image, (1, 2, 0))
+    plt.imshow(image_np)
+    plt.savefig("mcs-spectrogram.png")
+
     return final_image
 
 def optimized_makeOnePhaseSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
     spectrogram_window_size = wLenTimesteps // 16
     emg_sample_unflattened = data.reshape(numElectrodes, -1)
+    
         
     benchmarking_window = scipy.signal.windows.hamming(spectrogram_window_size, sym=False) # https://www.sciencedirect.com/science/article/pii/S1746809422003093?via%3Dihub#f0020
     benchmarking_number_fft_points = wLenTimesteps
-    frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, window=benchmarking_window, nfft=benchmarking_number_fft_points)
+    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, nfft=benchmarking_number_fft_points)
 
     Sxx_phase = np.angle(Sxx)
     Sxx_phase_normalize = (Sxx_phase + np.pi) / (2 * np.pi)
@@ -389,7 +395,8 @@ def optimized_makeOnePhaseSpectrogramImage(data, length, width, resize_length_fa
     bottom_row = torch.cat((e3_flipped, e4_flipped), dim=1)
     combined_image = torch.cat((top_row, bottom_row), dim=0)
 
-    data_converted = cmap(normalize_for_colormap_benchmark(combined_image))
+    cmap = mpl.colormaps['viridis']
+    data_converted = cmap(combined_image)
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
 
@@ -408,7 +415,7 @@ def optimized_makeOnePhaseSpectrogramImage(data, length, width, resize_length_fa
     image_normalized = normalize(image_clamped)
 
     final_image = image_normalized.numpy().astype(np.float32)
-
+    
     return final_image
 
 
