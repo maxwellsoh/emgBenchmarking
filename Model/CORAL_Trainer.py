@@ -169,7 +169,7 @@ class CORAL_Trainer(Model_Trainer):
         super().set_loaders()
         self.set_criterion()
 
-        super().start_train_and_validate_run()
+        super().start_pretrain_run()
         super().set_model_to_device()
         super().set_testrun_foldername()
         super().set_gesture_labels()
@@ -299,7 +299,7 @@ class CORAL_Trainer(Model_Trainer):
         if not self.args.force_regression:
             self.print_classification_metrics()
             
-        self.train_and_validate_run.finish()
+        self.pretrain_run.finish()
 
         # Start new run for finetuning
         self.ft_run = wandb.init(name=self.wandb_runname+"_finetune", project=self.project_name) 
@@ -704,7 +704,7 @@ class CORAL_Trainer(Model_Trainer):
 
             if not self.args.force_regression: 
                 self.print_classification_metrics()
-            self.train_and_validate_run.finish()
+            self.pretrain_run.finish()
 
 
 

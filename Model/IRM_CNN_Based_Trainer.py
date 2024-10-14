@@ -80,7 +80,7 @@ class IRM_CNN_Based_Trainer(Model_Trainer):
         super().set_resize_transform()
         super().set_loaders()
         self.set_criterion()
-        super().start_train_and_validate_run()
+        super().start_pretrain_run()
         super().set_model_to_device()
         super().set_testrun_foldername()
         super().set_gesture_labels()
@@ -103,7 +103,7 @@ class IRM_CNN_Based_Trainer(Model_Trainer):
         
     def set_criterion(self):
         self.criterion = InvariancePenaltyLoss()
-        self.cross_entropy
+        self.cross_entropy = nn.CrossEntropyLoss()
 
     def set_model(self):
 
@@ -273,7 +273,7 @@ class IRM_CNN_Based_Trainer(Model_Trainer):
         if not self.args.force_regression:
             self.print_classification_metrics()
  
-        self.train_and_validate_run.finish()
+        self.pretrain_run.finish()
 
         # Start new run for finetuning
         self.ft_run = wandb.init(name=self.wandb_runname+"_finetune", project=self.project_name) 
@@ -641,7 +641,7 @@ class IRM_CNN_Based_Trainer(Model_Trainer):
 
             if not self.args.force_regression: 
                 self.print_classification_metrics()
-            self.train_and_validate_run.finish()
+            self.pretrain_run.finish()
 
 
 
