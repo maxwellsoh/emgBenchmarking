@@ -61,10 +61,16 @@ class Setup():
         # Arguments for run_CNN_EMG/using config files
         parser.add_argument('--config', type=str, help="Path to the config file.")
         parser.add_argument('--table', type=str, help="Specify which table to replicate. (Ex: 1, 2, 3, 3_intersession)")
+
+        
         parser.add_argument("--include_transitions", type=utils.str2bool, help="Whether or not to include transitions windows and label them as the final gesture. Set to False by default.", default=False)
         parser.add_argument("--transition_classifier", type=utils.str2bool, help="Whether or not to classify whether a window is a transition. Set to False by default.", default=False)
         parser.add_argument("--multiprocessing", type=utils.str2bool, help="Whether or not to use multiprocessing when acquiring data. Set to True by default.", default=True)
         parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
+
+        # Add argument for doing domain generalization algorithm
+        parser.add_argument('--domain_generalization', type=str, help='domain generalization algorithm to use (e.g. \'IRM\',\'CORAL\'.', default=False)
+
         parser.add_argument('--dataset', help='dataset to test. Set to MCS_EMG by default', default="MCS_EMG")
         # Add argument for doing leave-one-subject-out
         parser.add_argument('--leave_one_subject_out', type=utils.str2bool, help='whether or not to do leave one subject out. Set to False by default.', default=False)
@@ -90,6 +96,8 @@ class Setup():
         parser.add_argument('--partial_dataset_ninapro', type=utils.str2bool, help='whether or not to use the partial dataset for Ninapro DB2 and DB5. Set to False by default.', default=False)
         # Add argument for using spectrogram transform
         parser.add_argument('--turn_on_spectrogram', type=utils.str2bool, help='whether or not to use spectrogram transform. Set to False by default.', default=False)
+        # Add argument for using phase spectrogram transform
+        parser.add_argument('--turn_on_phase_spectrogram', type=utils.str2bool, help='whether or not to use phase spectrogram transform. Set to False by default.', default=False)
         # Add argument for using cwt
         parser.add_argument('--turn_on_cwt', type=utils.str2bool, help='whether or not to use cwt. Set to False by default.', default=False)
         # Add argument for using Hilbert Huang Transform
@@ -209,6 +217,7 @@ class Setup():
             if (not os.path.exists("./NinaproDB5")):
                 print("NinaproDB5 dataset does not exist yet. Downloading now...")
                 get_dataset("get_NinaproDB5")
+                process_dataset("process_NinaproDB5")
 
             if (not os.path.exists("./DatasetsProcessed_hdf5/NinaproDB5/")):
                 print("NinaproDB5 dataset not yet processed. Processing now")
@@ -334,7 +343,13 @@ class Setup():
             self.args.dataset = 'mcs'
             
         else: 
-            raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," + "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
+            print(self.args.dataset)
+            if os.path.exists(f"DatasetsProcessed_hdf5/{self.args.dataset}/"):
+                from .Utils import utils_generic as utils
+                utils.initialize(self.args.dataset)
+                self.project_name = f'emg_benchmarking_{self.args.dataset}'
+            else:
+                raise ValueError("Dataset not recognized. Please choose from 'uciemg', 'ninapro-db2', 'ninapro-db5', 'myoarmbanddataset', 'hyser'," + "'capgmyo', 'flexwear-hd', 'sci', or 'mcs'")
             
         # Safety Checks
         if self.args.turn_off_scaler_normalization:
@@ -354,8 +369,14 @@ class Setup():
         if self.args.transition_classifier:
             assert self.args.leave_one_subject_out, "Binary classifier only implemented for LOSO."
 
-        
+        if self.args.domain_generalization in {"IRM", "CORAL"}:
+            assert not self.args.turn_on_unlabeled_domain_adaptation, "Domain generalization cannot be used with unlabeled domain adaptation currently."
+            assert self.args.leave_one_subject_out, "Domain generalization can only be used with leave-one-subject-out currently."
 
+            assert self.args.model in {"MLP", "resnet18"}, "Domain generalization can only be used with MLP or resnet18 currently."
+
+
+        # Set Final Values
         # Add date and time to filename
         current_datetime = datetime.datetime.now()
         self.formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")

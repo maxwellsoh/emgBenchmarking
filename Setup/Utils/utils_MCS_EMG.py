@@ -15,7 +15,7 @@ import seaborn as sn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import h5py
-from scipy.signal import spectrogram
+from scipy.signal import spectrogram, stft
 import pywt
 import scipy
 import emd
@@ -239,56 +239,55 @@ def getLabels(n):
         return getLabels_gesture_classificatier(n)
 
 def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor, native_resnet_size):
-    normalize_for_colormap_benchmark_hht = mpl.colors.Normalize(vmin=-30, vmax=0)   
+    normalize_for_colormap_benchmark_hht = mpl.colors.Normalize(vmin=0, vmax=1)   
 
     emg_sample = data
+    max_imfs = 6
     # Perform Empirical Mode Decomposition (EMD)
-    intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=5)
+    intrinsic_mode_functions = emd.sift.sift(emg_sample, max_imfs=(max_imfs-1))
+
     instantaneous_phase, instantaneous_frequencies, instantaneous_amplitudes = \
         emd.spectra.frequency_transform(intrinsic_mode_functions, fs, 'nht')
-    # Compute Hilbert-Huang Transform (HHT)
-    start_frequency = 1; end_frequency = fs # Hz
-    num_frequencies = 64
-    frequency_edges, frequency_centres = emd.spectra.define_hist_bins(start_frequency, end_frequency, num_frequencies, 'linear')
-    frequencies, hht = emd.spectra.hilberthuang(instantaneous_frequencies, instantaneous_amplitudes, frequency_edges, 
-                                                mode='amplitude',sum_time=False)
+    
+    # Pad any missing IMFs with zeros
+    if instantaneous_phase.shape[-1] < max_imfs:
+        padded_instantaneous_phase = np.zeros((instantaneous_phase.shape[0], max_imfs))
 
-    # Convert back to PyTorch tensor and reshape
-    emg_sample = np.array_split(hht, 4, axis=1)
-    # # Normalization
-    # emg_sample -= torch.min(emg_sample)
-    # emg_sample /= torch.max(emg_sample) - torch.min(emg_sample)  # Adjusted normalization to avoid divide-by-zero
-        
-    # emg_sample -= torch.min(emg_sample)
-    # emg_sample /= torch.max(emg_sample)
+        for electrode_at_time in range(instantaneous_phase.shape[0]):
+            missing_imfs = max_imfs - instantaneous_phase.shape[-1]
+            padding = np.zeros(missing_imfs)
+            padded_instantaneous_phase[electrode_at_time] = np.append(instantaneous_phase[electrode_at_time], padding)
+        instantaneous_phase = padded_instantaneous_phase
 
-    e1, e2, e3, e4 = emg_sample
-    e1 = e1[:num_frequencies//2, :]
-    e2 = e2[:num_frequencies//2, :]
-    e3 = e3[:num_frequencies//2, :]
-    e4 = e4[:num_frequencies//2, :]
+    # Rearrange to be (WLENTIMESTEP, NUM_ELECTRODES, MAX_IMF+1 (includes a combined IMF))
+    instantaneous_phase_norm = instantaneous_phase / (2 * np.pi) 
+    emg_sample = np.array_split(instantaneous_phase_norm, numElectrodes, axis=0) 
+    emg_sample = [torch.tensor(emg) for emg in emg_sample]
+    emg_sample = torch.stack(emg_sample)
+    emg_sample = emg_sample.permute(1, 0, 2) 
 
-    # Flip each part about the x-axis
-    e1_flipped = torch.tensor(np.flipud(e1).copy())
-    e2_flipped = torch.tensor(np.flipud(e2).copy())
-    e3_flipped = torch.tensor(np.flipud(e3).copy())
-    e4_flipped = torch.tensor(np.flipud(e4).copy())
+    # Stack the y axis to be all imfs per electrode
+    final_emg = torch.zeros(wLenTimesteps, numElectrodes*(max_imfs))
+    for t in range(wLenTimesteps):
+        for i in range(numElectrodes):
+            final_emg[t, i*(max_imfs):(i+1)*(max_imfs)] = emg_sample[t, i, :]
+    
+    combined_image = final_emg
 
-    # Combine the flipped parts into a 2x2 grid
-    top_row = torch.cat((e1_flipped, e2_flipped), dim=1)
-    bottom_row = torch.cat((e3_flipped, e4_flipped), dim=1)
-    combined_image = torch.cat((top_row, bottom_row), dim=0)
+    # Normalize the Image
+    combined_image -= torch.min(combined_image)
+    combined_image /= torch.max(combined_image) - torch.min(combined_image)
 
-    combined_image_dB = 10 * torch.log10(torch.abs(combined_image) + 1e-6)  # Adding a small constant to avoid log(0)
-
-    # print("Min and max of combined_image: ", torch.min(combined_image_dB), torch.max(combined_image_dB))
-
-    data_converted = cmap((normalize_for_colormap_benchmark_hht(combined_image_dB)))
+    cmap = mpl.colormaps['viridis']
+    data_converted = cmap(combined_image)
 
     rgb_data = data_converted[:, :, :3]
     image = np.transpose(rgb_data, (2, 0, 1))
+
+    length_to_transform_to = min(native_resnet_size, image.shape[-2])
+    width_to_transform_to = min(native_resnet_size, image.shape[-1])
     
-    resize = transforms.Resize([min(num_frequencies, native_resnet_size), native_resnet_size],
+    resize = transforms.Resize([length_to_transform_to, width_to_transform_to],
                            interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
     image_resized = resize(torch.from_numpy(image))
 
@@ -301,6 +300,11 @@ def optimized_makeOneHilbertHuangImage(data, length, width, resize_length_factor
 
     # Since no split occurs, we don't need to concatenate halves back together
     final_image = image_normalized.numpy().astype(np.float32)
+
+    # Plot
+    image_np = np.transpose(final_image, (2, 1, 0))
+    plt.imshow(image_np)
+    plt.savefig("mcs-hilbert-huang-image.png")
 
     return final_image
 
@@ -369,6 +373,7 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
     benchmarking_window = scipy.signal.windows.hamming(spectrogram_window_size, sym=False) # https://www.sciencedirect.com/science/article/pii/S1746809422003093?via%3Dihub#f0020
     benchmarking_number_fft_points = wLenTimesteps
     frequencies, times, Sxx = spectrogram(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, window=benchmarking_window, nfft=benchmarking_number_fft_points)
+
     Sxx_dB = 10 * np.log10(Sxx + 1e-12) # small constant added to avoid log(0)
     # print("Min and max of Sxx_dB: ", np.min(Sxx_dB), np.max(Sxx_dB))
     # emg_sample = torch.from_numpy(Sxx_dB)
@@ -410,7 +415,62 @@ def optimized_makeOneSpectrogramImage(data, length, width, resize_length_factor,
 
     final_image = image_normalized.numpy().astype(np.float32)
 
+    # Plot
+    image_np = np.transpose(final_image, (1, 2, 0))
+    plt.imshow(image_np)
+    plt.savefig("mcs-spectrogram.png")
+
     return final_image
+
+def optimized_makeOnePhaseSpectrogramImage(data, length, width, resize_length_factor, native_resnet_size):
+    spectrogram_window_size = wLenTimesteps // 16
+    emg_sample_unflattened = data.reshape(numElectrodes, -1)
+    
+        
+    benchmarking_window = scipy.signal.windows.hamming(spectrogram_window_size, sym=False) # https://www.sciencedirect.com/science/article/pii/S1746809422003093?via%3Dihub#f0020
+    benchmarking_number_fft_points = wLenTimesteps
+    frequencies, times, Sxx = stft(emg_sample_unflattened, fs=fs, nperseg=spectrogram_window_size, noverlap=spectrogram_window_size-1, nfft=benchmarking_number_fft_points)
+
+    Sxx_phase = np.angle(Sxx)
+    Sxx_phase_normalize = (Sxx_phase + np.pi) / (2 * np.pi)
+    
+    # Split by the 4 channels/electrodes
+    e1, e2, e3, e4 = torch.from_numpy(Sxx_phase_normalize)
+
+    # Flip each part about the x-axis
+    e1_flipped = e1.flip(dims=[0])
+    e2_flipped = e2.flip(dims=[0])
+    e3_flipped = e3.flip(dims=[0])
+    e4_flipped = e4.flip(dims=[0])
+
+    # Combine the flipped parts into a 2x2 grid
+    top_row = torch.cat((e1_flipped, e2_flipped), dim=1)
+    bottom_row = torch.cat((e3_flipped, e4_flipped), dim=1)
+    combined_image = torch.cat((top_row, bottom_row), dim=0)
+
+    cmap = mpl.colormaps['viridis']
+    data_converted = cmap(combined_image)
+    rgb_data = data_converted[:, :, :3]
+    image = np.transpose(rgb_data, (2, 0, 1))
+
+    resize_length_factor = len(frequencies)
+    width_to_rescale_to = min(native_resnet_size, width)
+    
+    resize = transforms.Resize([min(native_resnet_size, length * resize_length_factor), width_to_rescale_to],
+                           interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)
+    image_resized = resize(torch.from_numpy(image))
+
+    # Clamp between 0 and 1 using torch.clamp
+    image_clamped = torch.clamp(image_resized, 0, 1)
+
+    # Normalize with standard ImageNet normalization
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    image_normalized = normalize(image_clamped)
+
+    final_image = image_normalized.numpy().astype(np.float32)
+    
+    return final_image
+
 
 def optimized_makeOneMagnitudeImage(data, length, width, resize_length_factor, native_resnet_size, global_min, global_max):
     # Normalize with global min and max
@@ -464,8 +524,7 @@ def calculate_rms(array_2d):
     # Calculate RMS for 2D array where each row is a window
     return np.sqrt(np.mean(array_2d**2))
 
-def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_cwt=False,
-              turn_on_hht=False, global_min=None, global_max=None):
+def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows=10, turn_on_magnitude=False, turn_on_spectrogram=False, turn_on_phase_spectrogram=False, turn_on_cwt=False, global_min=None, global_max=None, turn_on_hht=False):
 
     if standardScaler is not None:
         emg = standardScaler.transform(np.array(emg.view(len(emg), length*width)))
@@ -507,6 +566,21 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         for i in tqdm(range(len(emg)), desc="Creating Spectrogram Images"):
             images_spectrogram.append(optimized_makeOneSpectrogramImage(*args[i]))
         images = images_spectrogram
+
+    elif turn_on_phase_spectrogram:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_spectrogram = []
+        for i in tqdm(range(len(emg)), desc="Creating Phase Spectrogram Images"):
+            images_spectrogram.append(optimized_makeOnePhaseSpectrogramImage(*args[i]))
+        images = images_spectrogram
+
+    elif turn_on_hht:
+        args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
+        images_spectrogram = []
+        for i in tqdm(range(len(emg)), desc="Creating Phase HHT Images"):
+            images_spectrogram.append(optimized_makeOneHilbertHuangImage(*args[i]))
+        images = images_spectrogram
+    
     
     elif turn_on_cwt:
         args = [(emg[i], length, width, resize_length_factor, native_resnet_size) for i in range(len(emg))]
@@ -515,6 +589,8 @@ def getImages(emg, standardScaler, length, width, turn_on_rms=False, rms_windows
         for i in tqdm(range(len(emg)), desc="Creating CWT Images"):
             images_cwt_list.append(optimized_makeOneCWTImage(*args[i]))
         images = images_cwt_list
+
+
         
     return images
 

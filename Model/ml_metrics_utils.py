@@ -23,7 +23,10 @@ def evaluate_model_tpr_at_fpr(model, loader, device, num_classes, fpr_targets=[0
     with torch.no_grad():
         for X_batch, Y_batch in loader:
             X_batch = X_batch.to(device)
+
             outputs = model(X_batch)
+            if len(outputs) == 2:
+                outputs, features = outputs
             if isinstance(outputs, dict):
                 outputs = outputs['logits']
             probs = softmax(outputs).cpu().numpy()  # Get class probabilities
@@ -67,6 +70,8 @@ def evaluate_model_fpr_at_tpr(model, loader, device, num_classes, tpr_targets=[0
         for X_batch, Y_batch in loader:
             X_batch = X_batch.to(device)
             outputs = model(X_batch)
+            if len(outputs) == 2:
+                outputs, features = outputs
             if isinstance(outputs, dict):
                 outputs = outputs['logits']
             probs = softmax(outputs).cpu().numpy()  # Get class probabilities
@@ -103,6 +108,8 @@ def evaluate_confidence_thresholding(model, loader, device, thresholds=[0.5, 0.9
             X_batch = X_batch.to(device)
             Y_batch = Y_batch.to(device)
             outputs = model(X_batch)
+            if len(outputs) == 2:
+                outputs, features = outputs
             if isinstance(outputs, dict):
                 outputs = outputs['logits']
             probs = softmax(outputs)
@@ -132,11 +139,13 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
     pred = []
     true = []
     outputs_all = []
+    Y_test = []
 
     with torch.no_grad():
         for X_batch, Y_batch in test_loader:
             X_batch = X_batch.to(device).to(torch.float32)
             Y_batch = Y_batch.to(device).to(torch.float32)
+            Y_test.append(Y_batch)
 
             if args.force_regression:
                 Y_batch_long = Y_batch
@@ -144,6 +153,8 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
                 Y_batch_long = torch.argmax(Y_batch, dim=1) 
 
             output = model(X_batch)
+            if len(output) == 2:
+                output, features = output
             if isinstance(output, dict):
                 output = output['logits']
             pred.extend(torch.argmax(output, dim=1).cpu().detach().numpy())
@@ -152,16 +163,20 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
             if not args.force_regression:
                 outputs_all.append(output)
 
-
             test_loss += criterion(output, Y_batch).item()
-            for test_metric in testing_metrics:
-                if test_metric.name != "Macro_AUROC" and test_metric.name != "Macro_AUPRC":
-                    test_metric(output, Y_batch_long)
+
+        outputs_all = torch.cat(outputs_all, dim=0).to(device)
+        Y_test = torch.cat(Y_test, dim=0).to(device)
+        Y_test = torch.argmax(Y_test, dim=1)
+
+
+        for test_metric in testing_metrics:
+            if test_metric.name != "Macro_AUROC" and test_metric.name != "Macro_AUPRC":
+                test_metric(outputs_all, Y_test)
 
             
 
     if not args.force_regression: 
-        outputs_all = torch.cat(outputs_all, dim=0).to(device)
         true_torch = torch.tensor(true).to(device)
 
         test_macro_auroc = next(metric for metric in testing_metrics if metric.name == "Macro_AUROC")
@@ -187,8 +202,6 @@ def evaluate_model_on_test_set(model, test_loader, device, numGestures, criterio
 
     wandb.log({
         "test/Loss": test_loss,
-
-
         **{
             f"test/{name}": value.item() 
             for name, value in testing_metrics_values.items() 

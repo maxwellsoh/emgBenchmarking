@@ -33,7 +33,6 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
 
         if self.args.transition_classifier: 
             super().contract_to_binary_gestures()
- 
 
     def append_to_train_unlabeled_list(self, X_new_data, Y_new_data, label_new_data):
         self.X.append_to_train_unlabeled_list(X_new_data)
@@ -72,6 +71,9 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
    
 
     def train_from_non_left_out_subj(self):
+
+        total_windows = 0
+        cumulative_sizes = []
 
         for i in range(len(self.X.data)):
             if i == self.leaveOut-1:
@@ -153,7 +155,14 @@ class Leave_One_Subject_Out(Data_Split_Strategy):
                             transition_classifier=self.args.transition_classifier
                         )
 
+
+                total_windows += X_train_temp.shape[0]
+
                 self.append_to_train_list(X_train_temp, Y_train_temp, label_train_temp)
+
+            cumulative_sizes.append(total_windows)
+
+        self.X.cumulative_sizes = cumulative_sizes
 
     def validation_from_leave_out_subj(self):
         self.X.validation_from_leave_out_subj()

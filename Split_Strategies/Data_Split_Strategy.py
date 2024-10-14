@@ -19,7 +19,7 @@ class Data_Split_Strategy():
         self.X = X_data
         self.Y = Y_data
         self.label = label_data
-        
+
     def split(self):
         raise NotImplementedError("Subclasses must implement split()")
     
