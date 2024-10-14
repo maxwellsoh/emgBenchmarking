@@ -1,3 +1,7 @@
+'''
+IRM (Invariance Risk Minimization) Trainer based on CNN
+Inspiration: https://github.com/thuml/Transfer-Learning-Library/
+'''
 from .Model_Trainer import Model_Trainer
 import torch.nn as nn
 import timm
@@ -14,10 +18,43 @@ from torch.utils.data import DataLoader
 import multiprocessing
 from sklearn.metrics import confusion_matrix, classification_report
 import wandb
+import torch.autograd as autograd
+import torch.nn.functional as F
 
-class CNN_Trainer(Model_Trainer):
+
+class InvariancePenaltyLoss(nn.Module):
+    r"""Invariance Penalty Loss from `Invariant Risk Minimization <https://arxiv.org/pdf/1907.02893.pdf>`_.
+    We adopt implementation from `DomainBed <https://github.com/facebookresearch/DomainBed>`_. Given classifier
+    output :math:`y` and ground truth :math:`labels`, we split :math:`y` into two parts :math:`y_1, y_2`, corresponding
+    labels are :math:`labels_1, labels_2`. Next we calculate cross entropy loss with respect to a dummy classifier
+    :math:`w`, resulting in :math:`grad_1, grad_2` . Invariance penalty is then :math:`grad_1*grad_2`.
+
+    Inputs:
+        - y: predictions from model
+        - labels: ground truth
+
+    Shape:
+        - y: :math:`(N, C)` where C means the number of classes.
+        - labels: :math:`(N, )` where N mean mini-batch size
     """
-    Training class for CNN based (resnet, convnext_tiny_custom, vit_tiny_patch) NOT (unlabeled_domain or in MLP, SVC, RF).
+
+    def __init__(self):
+        super(InvariancePenaltyLoss, self).__init__()
+        self.scale = torch.tensor(1.).requires_grad_()
+
+    def forward(self, y: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        loss_1 = F.cross_entropy(y[::2] * self.scale, labels[::2])
+        loss_2 = F.cross_entropy(y[1::2] * self.scale, labels[1::2])
+        grad_1 = autograd.grad(loss_1, [self.scale], create_graph=True)[0]
+        grad_2 = autograd.grad(loss_2, [self.scale], create_graph=True)[0]
+        penalty = torch.sum(grad_1 * grad_2)
+        return penalty
+
+
+
+class IRM_CNN_Based_Trainer(Model_Trainer):
+    """
+    Training class for CNN self.models (resnet, convnext_tiny_custom, vit_tiny_patch and not (unlabeled_domain or in MLP, SVC, RF) self.models.
     """
 
     def __init__(self, X_data, Y_data, label_data, env):
@@ -32,14 +69,9 @@ class CNN_Trainer(Model_Trainer):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    def model_loop(self):
-        self.pretrain_model() 
-        if self.args.pretrain_and_finetune:
-            self.finetune_model()
-        
     def setup_model(self):
         """
-        Set up all model parameters for the run. 
+        Main function that sets up the model 
         """
         super().set_pretrain_path()
         self.set_model()
@@ -47,12 +79,31 @@ class CNN_Trainer(Model_Trainer):
         self.set_param_requires_grad()
         super().set_resize_transform()
         super().set_loaders()
-        super().set_criterion()
+        self.set_criterion()
         super().start_pretrain_run()
         super().set_model_to_device()
         super().set_testrun_foldername()
         super().set_gesture_labels()
         super().plot_images()
+
+    def model_loop(self):
+
+        # Get metrics
+        if self.args.pretrain_and_finetune:
+            training_metrics, validation_metrics, testing_metrics = super().get_metrics()
+        else: 
+            training_metrics, validation_metrics = super().get_metrics(testing=False)
+
+        # Train and Validation Loop 
+        self.train_and_validate(training_metrics, validation_metrics)
+
+        # Finetune Loop 
+        if self.args.pretrain_and_finetune:
+            self.pretrain_and_finetune(testing_metrics)
+        
+    def set_criterion(self):
+        self.criterion = InvariancePenaltyLoss()
+        self.cross_entropy = nn.CrossEntropyLoss()
 
     def set_model(self):
 
@@ -85,6 +136,7 @@ class CNN_Trainer(Model_Trainer):
                     return x
                 
             # Referencing: https://medium.com/exemplifyml-ai/image-classification-with-resnet-convnext-using-pytorch-f051d0d7e098
+
 
             n_inputs = 768
             hidden_size = 128 # default is 2048
@@ -210,18 +262,36 @@ class CNN_Trainer(Model_Trainer):
         
         self.utils.plot_confusion_matrix(np.argmax(self.Y.train.cpu().detach().numpy(), axis=1), np.array(train_predictions), self.gesture_labels, self.testrun_foldername, self.args, self.formatted_datetime, 'train')
     
-    def finetune_model(self):
+    def pretrain_and_finetune(self, testing_metrics):
         """
-        Start a new loop for finetuning. 
+        Finish current run and start a new run for finetuning.
         """
 
+        # Evaluate performance on test metrics
+        ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.cross_entropy, self.args, testing_metrics)
+
+        if not self.args.force_regression:
+            self.print_classification_metrics()
+ 
+        self.pretrain_run.finish()
+
+        # Start new run for finetuning
         self.ft_run = wandb.init(name=self.wandb_runname+"_finetune", project=self.project_name) 
         ft_epochs = self.args.finetuning_epochs
-        finetune_dataset = super().CustomDataset(self.X.train_finetuning,self.Y.train_finetuning, transform=self.resize_transform)
-        finetune_loader = DataLoader(finetune_dataset, batch_size=self.batch_size, shuffle=True, num_workers=multiprocessing.cpu_count()//8, worker_init_fn=self.utils.seed_worker, pin_memory=True, drop_last=self.args.force_regression)
 
+        finetune_dataset = super().CustomDataset(self.X.train_finetuning,self.Y.train_finetuning, transform=self.resize_transform)
+
+        finetune_loader = DataLoader(
+            finetune_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=multiprocessing.cpu_count() // 8,
+            worker_init_fn=self.utils.seed_worker,
+            pin_memory=True,
+            drop_last=self.args.force_regression
+        )
         # Initialize metrics for finetuning training and validation
-        ft_training_metrics, ft_validation_metrics, ft_testing_metrics = super().get_metrics()
+        ft_training_metrics, ft_validation_metrics, testing_metrics = super().get_metrics()
 
         # Finetuning Loop 
         for epoch in tqdm(range(ft_epochs), desc="Finetuning Epoch"):
@@ -235,16 +305,27 @@ class CNN_Trainer(Model_Trainer):
                 for X_batch, Y_batch in t:
                     X_batch = X_batch.to(self.device).to(torch.float32)
                     Y_batch =Y_batch.to(self.device).to(torch.float32)
-                    if self.args.force_regression:
-                        Y_batch_long =Y_batch
-                    else: 
-                        Y_batch_long = torch.argmax(Y_batch, dim=1)
+                    Y_batch_long = torch.argmax(Y_batch, dim=1)
 
                     self.optimizer.zero_grad()
                     output = self.model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
-                    loss = self.criterion(output,Y_batch_long)
+
+
+                    # compute cross entropy loss
+                    loss_ce = self.cross_entropy(output, Y_batch)
+
+                    # compute invariance penalty loss
+                    loss_penalty = 0 
+                    output_for_loso = output
+                    labels_for_loso = Y_batch
+
+                    loss_penalty += self.criterion(output_for_loso, labels_for_loso) 
+
+                    # compute final loss
+                    loss = loss_ce + loss_penalty
+                
                     loss.backward()
                     self.optimizer.step()
 
@@ -253,14 +334,13 @@ class CNN_Trainer(Model_Trainer):
                     for ft_train_metric in ft_training_metrics:
                         ft_train_metric(output,Y_batch_long)
 
-                    if not self.args.force_regression: 
-                        if t.n % 10 == 0:
-                            ft_accuracy_metric = next(metric for metric in ft_training_metrics if metric.name =="Micro_Accuracy")
+                    if t.n % 10 == 0:
+                        ft_accuracy_metric = next(metric for metric in ft_training_metrics if metric.name =="Micro_Accuracy")
 
-                            t.set_postfix({
-                                "Batch Loss": loss.item(), 
-                                "Batch Acc": ft_accuracy_metric.compute().item()
-                            })
+                        t.set_postfix({
+                            "Batch Loss": loss.item(), 
+                            "Batch Acc": ft_accuracy_metric.compute().item()
+                        })
 
             # Finetuning Validation
             self.model.eval()
@@ -269,56 +349,52 @@ class CNN_Trainer(Model_Trainer):
             for ft_val_metric in ft_validation_metrics:
                 ft_val_metric.reset()
 
-            if not self.args.force_regression:
-                all_val_outputs = []
-                all_val_labels = []
+           
+            all_val_outputs = []
+            all_val_labels = []
 
             with torch.no_grad():
                 for X_batch, Y_batch in self.val_loader:
                     X_batch = X_batch.to(self.device).to(torch.float32)
-                    Y_batch = Y_batch.to(self.device).to(torch.float32)
-                    if self.args.force_regression:
-                        Y_batch_long =Y_batch
-                    else: 
-                        Y_batch_long = torch.argmax(Y_batch, dim=1)
+                    Y_batch = Y_batch.to(self.device).to(torch.float32) 
+                    Y_batch_long = torch.argmax(Y_batch, dim=1)
 
                     output = self.model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
-                    val_loss += self.criterion(output,Y_batch).item()
+                    val_loss += self.cross_entropy(output,Y_batch).item()
 
                     for ft_val_metric in ft_validation_metrics:
                         if ft_val_metric.name != "Macro_AUROC" and ft_val_metric.name != "Macro_AUPRC":
                             ft_val_metric(output,Y_batch_long)
 
-                    if not self.args.force_regression:
-                        all_val_outputs.append(output)
-                        all_val_labels.append(Y_batch_long)
+                    all_val_outputs.append(output)
+                    all_val_labels.append(Y_batch_long)
 
-            if not self.args.force_regression:
-                all_val_outputs = torch.cat(all_val_outputs, dim=0)
-                all_val_labels = torch.cat(all_val_labels, dim=0)  
-                Y_validation_long = torch.argmax(self.Y.validation, dim=1).to(self.device)
+            
+         
+            all_val_outputs = torch.cat(all_val_outputs, dim=0)
+            all_val_labels = torch.cat(all_val_labels, dim=0)  
+            Y_validation_long = torch.argmax(self.Y.validation, dim=1).to(self.device)
 
-                true_labels =Y_validation_long.cpu().detach().numpy()
-                test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
-                conf_matrix = confusion_matrix(true_labels, test_predictions)
-                print("Confusion Matrix:")
-                print(conf_matrix)
+            true_labels =Y_validation_long.cpu().detach().numpy()
+            test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
+            conf_matrix = confusion_matrix(true_labels, test_predictions)
+            print("Confusion Matrix:")
+            print(conf_matrix)
 
-                finetune_val_macro_auroc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_AUROC")
-                finetune_val_macro_auprc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_AUPRC")
+            finetune_val_macro_auroc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_AUROC")
+            finetune_val_macro_auprc_metric = next(metric for metric in ft_validation_metrics if metric.name == "Macro_AUPRC")
 
-                finetune_val_macro_auroc_metric(all_val_outputs,Y_validation_long)
-                finetune_val_macro_auprc_metric(all_val_outputs,Y_validation_long)
+            finetune_val_macro_auroc_metric(all_val_outputs,Y_validation_long)
+            finetune_val_macro_auprc_metric(all_val_outputs,Y_validation_long)
 
             # Calculate average loss and metrics
             train_loss /= len(finetune_loader)
             val_loss /= len(self.val_loader)
-            if not self.args.force_regression: 
-                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_gestures)
-                fpr_results = ml_utils.evaluate_model_fpr_at_tpr(self.model, self.val_loader, self.device, self.num_gestures)
-                confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
+            tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_gestures)
+            fpr_results = ml_utils.evaluate_model_fpr_at_tpr(self.model, self.val_loader, self.device, self.num_gestures)
+            confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
 
             # Compute the metrics and store them in dictionaries (to prevent multiple calls to compute)
             ft_training_metrics_values = {ft_metric.name: ft_metric.compute() for ft_metric in ft_training_metrics}
@@ -373,18 +449,15 @@ class CNN_Trainer(Model_Trainer):
 
         # Evaluate the self.model on the test set
         ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.
-        device, self.num_gestures, self.criterion, self.args, ft_testing_metrics)
+        device, self.num_gestures, self.cross_entropy, self.args, testing_metrics)
 
-        if not self.args.force_regression:
-            self.print_classification_metrics()
+        self.print_classification_metrics()
         self.ft_run.finish() 
 
-    def pretrain_model(self):
+    def train_and_validate(self, training_metrics, validation_metrics):
         """
-        Train and validation loop for the pretraining phase.
+        Train and validation loop. 
         """
-
-        training_metrics, validation_metrics, testing_metrics = super().get_metrics()
 
         for epoch in tqdm(range(self.num_epochs), desc="Epoch"):
             self.model.train()
@@ -393,58 +466,65 @@ class CNN_Trainer(Model_Trainer):
             # Reset training metrics at the start of each epoch
             for train_metric in training_metrics:
                 train_metric.reset()
-            
-            if not self.args.force_regression:
-                outputs_train_all = []
-                ground_truth_train_all = []
+        
+            outputs_train_all = []
+            ground_truth_train_all = []
 
             with tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{self.num_epochs}", leave=False) as t:
+                
+                prop_per_domain = self.sampler.get_prop_per_domain()
 
-                for X_batch, Y_batch in t:
+                for X_batch, Y_batch in t: 
                     X_batch = X_batch.to(self.device).to(torch.float32)
-                    Y_batch = Y_batch.to(self.device).to(torch.float32) # ground truth
-
-                    if self.args.force_regression:
-                       Y_batch_long = Y_batch
-                    else: 
-                       Y_batch_long = torch.argmax(Y_batch, dim=1)
+                    Y_batch = Y_batch.to(self.device).to(torch.float32) 
+                    Y_batch_long = torch.argmax(Y_batch, dim=1)
 
                     self.optimizer.zero_grad()
                     output = self.model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
-                    loss = self.criterion(output, Y_batch)
+
+                    # compute cross entropy loss
+                    loss_ce = self.cross_entropy(output, Y_batch)
+
+                    # compute invariance penalty loss 
+                    loss_penalty = 0
+                    output_per_domains = output.split(prop_per_domain, dim=0)
+                    labels_per_domains = Y_batch.split(prop_per_domain, dim=0)
+            
+                    n_domains_per_batch = self.utils.num_subjects - 1
+                    for output_per_domain, labels_per_domain in zip(output_per_domains, labels_per_domains):
+                        loss_penalty += self.criterion(output_per_domain, labels_per_domain) / n_domains_per_batch
+
+                    # compute final loss
+                    loss = loss_ce + loss_penalty
                     loss.backward()
                     self.optimizer.step()
 
-                    if not self.args.force_regression:
-                        outputs_train_all.append(output)
-                        ground_truth_train_all.append(torch.argmax(Y_batch, dim=1))
+                    outputs_train_all.append(output)
+                    ground_truth_train_all.append(torch.argmax(Y_batch, dim=1))
 
                     train_loss += loss.item()
 
                     for train_metric in training_metrics:
                         if train_metric.name != "Macro_AUROC" and train_metric.name != "Macro_AUPRC":
-                            train_metric(output,Y_batch_long)
-
-                    if not self.args.force_regression:
-                        micro_accuracy_metric = next(metric for metric in training_metrics if metric.name == "Micro_Accuracy")
-                        if t.n % 10 == 0:
-                            t.set_postfix({
-                                "Batch Loss": loss.item(), 
-                                "Batch Acc": micro_accuracy_metric.compute().item()
-                            })
+                            train_metric(output, Y_batch_long)
+                   
+                    micro_accuracy_metric = next(metric for metric in training_metrics if metric.name == "Micro_Accuracy")
+                    if t.n % 10 == 0:
+                        t.set_postfix({
+                            "Batch Loss": loss.item(), 
+                            "Batch Acc": micro_accuracy_metric.compute().item()
+                        })
                 
-                if not self.args.force_regression:
-                    outputs_train_all = torch.cat(outputs_train_all, dim=0).to(self.device)
-                    ground_truth_train_all = torch.cat(ground_truth_train_all, dim=0).to(self.device)
+                outputs_train_all = torch.cat(outputs_train_all, dim=0).to(self.device)
+                ground_truth_train_all = torch.cat(ground_truth_train_all, dim=0).to(self.device)
 
-            if not self.args.force_regression: 
-                train_macro_auroc_metric = next(metric for metric in training_metrics if metric.name == "Macro_AUROC")
-                train_macro_auprc_metric = next(metric for metric in training_metrics if metric.name == "Macro_AUPRC")
+            train_macro_auroc_metric = next(metric for metric in training_metrics if metric.name == "Macro_AUROC")
+            train_macro_auprc_metric = next(metric for metric in training_metrics if metric.name == "Macro_AUPRC")
 
-                train_macro_auroc_metric(outputs_train_all,   ground_truth_train_all)
-                train_macro_auprc_metric(outputs_train_all, ground_truth_train_all)
+            train_macro_auroc_metric(outputs_train_all,   ground_truth_train_all)
+            train_macro_auprc_metric(outputs_train_all, ground_truth_train_all)
 
             # Validation phase
             self.model.eval()
@@ -459,42 +539,42 @@ class CNN_Trainer(Model_Trainer):
             with torch.no_grad():
             
                 for X_batch, Y_batch in self.val_loader:
+                    
                     X_batch = X_batch.to(self.device).to(torch.float32)
-                    Y_batch =Y_batch.to(self.device).to(torch.float32)
-                    if self.args.force_regression:
-                       Y_batch_long =Y_batch
-                    else: 
-                       Y_batch_long = torch.argmax(Y_batch, dim=1)
+                    Y_batch = Y_batch.to(self.device).to(torch.float32)
+                    Y_batch_long = torch.argmax(Y_batch, dim=1)
 
                     output = self.model(X_batch)
                     if isinstance(output, dict):
                         output = output['logits']
 
-                    if not self.args.force_regression:
-                        all_val_outputs.append(output)
-                        all_val_labels.append(Y_batch_long)
+                    all_val_outputs.append(output)
+                    all_val_labels.append(Y_batch_long)
                  
-                    val_loss += self.criterion(output,Y_batch).item()
+                    # val_loss += self.criterion(output,Y_batch).item()
+                    val_loss += F.cross_entropy(output, Y_batch).item()
 
                     for val_metric in validation_metrics:
                         if val_metric.name != "Macro_AUROC" and val_metric.name != "Macro_AUPRC":
                             val_metric(output,Y_batch_long)
 
-            if not self.args.force_regression:
-                all_val_outputs = torch.cat(all_val_outputs, dim=0)
-                all_val_labels = torch.cat(all_val_labels, dim=0)
-                Y_validation_long = torch.argmax(self.Y.validation, dim=1).to(self.device)
-                true_labels =Y_validation_long.cpu().detach().numpy()
-                test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
-                conf_matrix = confusion_matrix(true_labels, test_predictions)
-                print("Confusion Matrix:")
-                print(conf_matrix)
+            all_val_outputs = torch.cat(all_val_outputs, dim=0)
+            all_val_labels = torch.cat(all_val_labels, dim=0)
+            Y_validation_long = torch.argmax(self.Y.validation, dim=1).to(self.device)
+            true_labels = Y_validation_long.cpu().detach().numpy()
+            test_predictions = np.argmax(all_val_outputs.cpu().detach().numpy(), axis=1)
 
-                val_macro_auroc_metric = next(metric for metric in validation_metrics if metric.name == "Macro_AUROC")
-                val_macro_auprc_metric = next(metric for metric in validation_metrics if metric.name == "Macro_AUPRC")
+           
+            conf_matrix = confusion_matrix(true_labels, test_predictions)
+           
+            print("Confusion Matrix:")
+            print(conf_matrix)
 
-                val_macro_auroc_metric(all_val_outputs,Y_validation_long)
-                val_macro_auprc_metric(all_val_outputs,Y_validation_long)
+            val_macro_auroc_metric = next(metric for metric in validation_metrics if metric.name == "Macro_AUROC")
+            val_macro_auprc_metric = next(metric for metric in validation_metrics if metric.name == "Macro_AUPRC")
+
+            val_macro_auroc_metric(all_val_outputs,Y_validation_long)
+            val_macro_auprc_metric(all_val_outputs,Y_validation_long)
 
             # Calculate average loss and metrics
             train_loss /= len(self.train_loader)
@@ -504,9 +584,8 @@ class CNN_Trainer(Model_Trainer):
             training_metrics_values = {metric.name: metric.compute() for metric in training_metrics}
             validation_metrics_values = {metric.name: metric.compute() for metric in validation_metrics}
 
-            if not self.args.force_regression:
-                tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_classes)
-                confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
+            tpr_results = ml_utils.evaluate_model_tpr_at_fpr(self.model, self.val_loader, self.device, self.num_classes)
+            confidence_levels, proportions_above_confidence_threshold = ml_utils.evaluate_confidence_thresholding(self.model, self.val_loader, self.device)
 
             # Print metric values
             print(f"Epoch {epoch+1}/{self.num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
@@ -517,11 +596,10 @@ class CNN_Trainer(Model_Trainer):
             val_metrics_str = " | ".join(f"{name}: {value.item():.4f}" if name != 'R2Score_RawValues' else f"{name}: ({', '.join(f'{v.item():.4f}' for v in value)})" for name, value in validation_metrics_values.items())
             print(f"Val Metrics: {val_metrics_str}")
 
-            if not self.args.force_regression: 
-                for fpr, tprs in tpr_results.items():
-                    print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
-                for confidence_level, acc in confidence_levels.items():
-                    print(f"Val Accuracy at {confidence_level} confidence level: {acc:.4f}")
+            for fpr, tprs in tpr_results.items():
+                print(f"Val TPR at {fpr}: {', '.join(f'{tpr:.4f}' for tpr in tprs)}")
+            for confidence_level, acc in confidence_levels.items():
+                print(f"Val Accuracy at {confidence_level} confidence level: {acc:.4f}")
 
             wandb.log({
                 "train/Loss": train_loss,
@@ -558,11 +636,21 @@ class CNN_Trainer(Model_Trainer):
         torch.save(self.model.state_dict(), self.model_filename)
         wandb.save(f'model/modelParameters_{self.formatted_datetime}.pth')
 
-        # Evaluate performance on test metrics
-        ml_utils.evaluate_model_on_test_set(self.model, self.test_loader, self.device, self.num_gestures, self.criterion, self.args, testing_metrics)
+        # If pretrain and finetune, continue. Otherwise, here.
+        if not self.args.pretrain_and_finetune:
 
-        if not self.args.force_regression:
-            self.print_classification_metrics()
-        self.pretrain_run.finish()
-        
+            if not self.args.force_regression: 
+                self.print_classification_metrics()
+            self.pretrain_run.finish()
+
+
+
+
+    
+
+
+
+
+
+
 
