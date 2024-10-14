@@ -61,6 +61,8 @@ class Setup():
         # Arguments for run_CNN_EMG/using config files
         parser.add_argument('--config', type=str, help="Path to the config file.")
         parser.add_argument('--table', type=str, help="Specify which table to replicate. (Ex: 1, 2, 3, 3_intersession)")
+
+        
         parser.add_argument("--include_transitions", type=utils.str2bool, help="Whether or not to include transitions windows and label them as the final gesture. Set to False by default.", default=False)
         parser.add_argument("--multiprocessing", type=utils.str2bool, help="Whether or not to use multiprocessing when acquiring data. Set to True by default.", default=True)
         parser.add_argument("--force_regression", type=utils.str2bool, help="Regression between EMG and force data", default=False)
@@ -89,6 +91,8 @@ class Setup():
         parser.add_argument('--partial_dataset_ninapro', type=utils.str2bool, help='whether or not to use the partial dataset for Ninapro DB2 and DB5. Set to False by default.', default=False)
         # Add argument for using spectrogram transform
         parser.add_argument('--turn_on_spectrogram', type=utils.str2bool, help='whether or not to use spectrogram transform. Set to False by default.', default=False)
+        # Add argument for using phase spectrogram transform
+        parser.add_argument('--turn_on_phase_spectrogram', type=utils.str2bool, help='whether or not to use phase spectrogram transform. Set to False by default.', default=False)
         # Add argument for using cwt
         parser.add_argument('--turn_on_cwt', type=utils.str2bool, help='whether or not to use cwt. Set to False by default.', default=False)
         # Add argument for using Hilbert Huang Transform
